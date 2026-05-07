@@ -6,6 +6,13 @@
 parameters:
     app.name: 'Throttle'
     app.login_link_lifetime: 600
+    app.symbol_upload_token: '%env(SYMBOL_UPLOAD_TOKEN)%'
+    app.legacy:
+        accelerator: ''
+        apikey: false
+        maintenance: ''
+        show-version: false
+        symbol-stores: ['public']
 
 services:
     # default configuration for services in *this* file
@@ -21,6 +28,13 @@ services:
             - '../src/DependencyInjection/'
             - '../src/Entity/'
             - '../src/Kernel.php'
+            - '../src/Silex/'
+            - '../src/Throttle/'
+
+    Throttle\Command\:
+        resource: '../src/Throttle/Command/'
+        autowire: true
+        autoconfigure: true
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
@@ -50,3 +64,13 @@ services:
         arguments:
             $successHandler: '@security.authentication.success_handler.main.login_link'
             $failureHandler: '@security.authentication.failure_handler.main.login_link'
+
+    App\Controller\LegacySymbolsController:
+        arguments:
+            $symbolUploadToken: '%app.symbol_upload_token%'
+
+    App\Legacy\LegacyBridgeFactory:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+            $legacyConfig: '%app.legacy%'
+            $redisUrl: '%env(REDIS_URL)%'

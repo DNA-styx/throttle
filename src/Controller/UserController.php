@@ -8,12 +8,12 @@ use App\Form\UserType;
 use App\Repository\UserRepository;
 use App\Security\Voter\UserVoter;
 use Doctrine\ORM\EntityManagerInterface;
-use Sensio\Bundle\FrameworkExtraBundle\Configuration\IsGranted;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\Routing\Annotation\Route;
+use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Core\Authorization\Voter\AuthenticatedVoter;
+use Symfony\Component\Security\Http\Attribute\IsGranted;
 use Symfony\Component\Security\Http\Util\TargetPathTrait;
 
 #[Route('/users')]
@@ -58,9 +58,9 @@ class UserController extends AbstractController
             return $this->redirectToRoute('user_index', [], Response::HTTP_SEE_OTHER);
         }
 
-        return $this->renderForm('user/edit.html.twig', [
+        return $this->render('user/edit.html.twig', [
             'user' => $user,
-            'form' => $form,
+            'form' => $form->createView(),
         ]);
     }
 
@@ -89,7 +89,11 @@ class UserController extends AbstractController
             throw $this->createAccessDeniedException('External account belongs to a different user');
         }
 
-        $route = sprintf('login_%s', $externalAccount->getKind());
+        $route = match ($externalAccount->getKind()) {
+            'email' => 'login',
+            'steam', 'github', 'discord', 'alliedmods' => sprintf('login_%s', $externalAccount->getKind()),
+            default => throw $this->createNotFoundException('Refreshing this external account type is not supported'),
+        };
 
         $response = $this->redirectToRoute($route);
 

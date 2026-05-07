@@ -8,6 +8,10 @@
 /public/bundles/
 /var/
 /vendor/
+/cache/
+/dumps/
+/symbols/
+/legacy-master.zip
 ###< symfony/framework-bundle ###
 
 ###> symfony/webpack-encore-bundle ###

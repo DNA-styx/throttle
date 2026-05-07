@@ -5,6 +5,7 @@ namespace App\Security\Voter;
 use App\Entity\User;
 use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
 use Symfony\Component\Security\Core\Authorization\Voter\CacheableVoterInterface;
+use Symfony\Component\Security\Core\Authorization\Voter\Vote;
 use Symfony\Component\Security\Core\Authorization\Voter\VoterInterface;
 
 /**
@@ -31,7 +32,7 @@ abstract class EntityActionVoter implements VoterInterface, CacheableVoterInterf
      * @param mixed   $subject
      * @param mixed[] $attributes
      */
-    final public function vote(TokenInterface $token, $subject, array $attributes): int
+    final public function vote(TokenInterface $token, mixed $subject, array $attributes, ?Vote $vote = null): int
     {
         $user = $token->getUser();
         if (!$user instanceof User) {

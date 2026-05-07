@@ -1,0 +1,55 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+      target: dev
+    depends_on:
+      - db
+      - redis
+    environment:
+      APP_ENV: dev
+      APP_DEBUG: 1
+      APP_SECRET: 2122fcdf67349443d7c5431d241c5dce
+      CODE_EDITOR: phpstorm
+      DATABASE_URL: mysql://throttle:throttle@db:3306/throttle?serverVersion=mariadb-10.11.2&charset=utf8mb4
+      REDIS_URL: redis://redis:6379
+      MESSENGER_TRANSPORT_DSN: doctrine://default?auto_setup=0
+      MAILER_DSN: null://null
+      MAILER_FROM: throttle@localhost
+      SENTRY_DSN: ""
+      STEAM_API_KEY: ${STEAM_API_KEY:-}
+      SYMBOL_UPLOAD_TOKEN: ${SYMBOL_UPLOAD_TOKEN:-}
+      OAUTH_GITHUB_CLIENT_ID: ""
+      OAUTH_GITHUB_CLIENT_SECRET: ""
+      OAUTH_DISCORD_CLIENT_ID: ""
+      OAUTH_DISCORD_CLIENT_SECRET: ""
+      OAUTH_ALLIEDMODS_CLIENT_ID: ""
+      OAUTH_ALLIEDMODS_CLIENT_SECRET: ""
+    ports:
+      - "8080:80"
+    volumes:
+      - .:/app
+
+  db:
+    image: mariadb:10.11
+    environment:
+      MARIADB_DATABASE: throttle
+      MARIADB_USER: throttle
+      MARIADB_PASSWORD: throttle
+      MARIADB_ROOT_PASSWORD: root
+    ports:
+      - "33067:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+
+  redis:
+    image: redis:7
+    ports:
+      - "63790:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  db_data:
+  redis_data:

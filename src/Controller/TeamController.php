@@ -7,12 +7,12 @@ use App\Entity\User;
 use App\Form\TeamType;
 use App\Security\Voter\TeamVoter;
 use Doctrine\ORM\EntityManagerInterface;
-use Sensio\Bundle\FrameworkExtraBundle\Configuration\IsGranted;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\Routing\Annotation\Route;
-use Symfony\Component\Security\Core\Security;
+use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Bundle\SecurityBundle\Security;
+use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 #[Route('/teams')]
 #[IsGranted('ROLE_USER')]
@@ -49,9 +49,9 @@ class TeamController extends AbstractController
             return $this->redirectToRoute('team_index', [], Response::HTTP_SEE_OTHER);
         }
 
-        return $this->renderForm('team/new.html.twig', [
+        return $this->render('team/new.html.twig', [
             'team' => $team,
-            'form' => $form,
+            'form' => $form->createView(),
         ]);
     }
 
@@ -80,9 +80,9 @@ class TeamController extends AbstractController
             return $this->redirectToRoute('team_index', [], Response::HTTP_SEE_OTHER);
         }
 
-        return $this->renderForm('team/edit.html.twig', [
+        return $this->render('team/edit.html.twig', [
             'team' => $team,
-            'form' => $form,
+            'form' => $form->createView(),
         ]);
     }
 

@@ -25,6 +25,10 @@ class TeamVoter extends EntityActionVoter
 
     protected function canUserPerformAction(User $user, string $action, object $subject): bool
     {
+        if (\in_array(User::ROLE_ADMIN, $user->getRoles(), true)) {
+            return true;
+        }
+
         return match ($action) {
             self::EDIT, self::VIEW => $subject->getOwner() === $user,
             default => false,

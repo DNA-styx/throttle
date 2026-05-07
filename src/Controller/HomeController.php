@@ -2,24 +2,15 @@
 
 namespace App\Controller;
 
-use Sensio\Bundle\FrameworkExtraBundle\Configuration\IsGranted;
 use Sentry\SentrySdk;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\Routing\Annotation\Route;
+use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 class HomeController extends AbstractController
 {
-    #[Route('/', name: 'index')]
-    public function index(): Response
-    {
-        return $this->render('home/index.html.twig', [
-            'controller_name' => 'HomeController',
-        ]);
-    }
-
     #[Route('/sentry', name: 'sentry')]
     public function sentry(Request $request, HttpClientInterface $httpClient): Response
     {
@@ -56,16 +47,6 @@ class HomeController extends AbstractController
 
         return new Response($response->getContent(), Response::HTTP_OK, [
             'Content-Type' => 'application/json',
-        ]);
-    }
-
-    #[Route('/dashboard', name: 'dashboard')]
-    #[IsGranted('ROLE_USER')]
-    public function dashboard(): Response
-    {
-        // TODO
-        return $this->render('home/index.html.twig', [
-            'controller_name' => 'This is the dashboard...',
         ]);
     }
 }

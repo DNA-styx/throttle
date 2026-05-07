@@ -76,7 +76,7 @@ class User extends ServerOwner implements UserInterface
      */
     public function setRoles(array $roles): self
     {
-        $this->roles = array_intersect(self::MANAGED_ROLES, $this->roles);
+        $this->roles = array_values(array_intersect($roles, self::MANAGED_ROLES));
 
         return $this;
     }
@@ -216,14 +216,6 @@ class User extends ServerOwner implements UserInterface
     public function getUserIdentifier(): string
     {
         return (string)$this->getId();
-    }
-
-    /**
-     * @deprecated since Symfony 5.3, use getUserIdentifier instead
-     */
-    public function getUsername(): string
-    {
-        return $this->getUserIdentifier();
     }
 
     /**

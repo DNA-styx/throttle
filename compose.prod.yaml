@@ -1,0 +1,65 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+      target: prod
+    image: throttle-prod
+    depends_on:
+      - db
+      - redis
+    environment:
+      APP_ENV: prod
+      APP_DEBUG: 0
+      APP_SECRET: ${APP_SECRET:-change-me-in-production}
+      CODE_EDITOR: phpstorm
+      DATABASE_URL: mysql://throttle:${MARIADB_PASSWORD:-throttle}@db:3306/throttle?serverVersion=mariadb-10.11.2&charset=utf8mb4
+      REDIS_URL: redis://redis:6379
+      MESSENGER_TRANSPORT_DSN: doctrine://default?auto_setup=0
+      MAILER_DSN: ${MAILER_DSN:-null://null}
+      MAILER_FROM: ${MAILER_FROM:-throttle@localhost}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      STEAM_API_KEY: ${STEAM_API_KEY:-}
+      SYMBOL_UPLOAD_TOKEN: ${SYMBOL_UPLOAD_TOKEN:-}
+      OAUTH_GITHUB_CLIENT_ID: ${OAUTH_GITHUB_CLIENT_ID:-}
+      OAUTH_GITHUB_CLIENT_SECRET: ${OAUTH_GITHUB_CLIENT_SECRET:-}
+      OAUTH_DISCORD_CLIENT_ID: ${OAUTH_DISCORD_CLIENT_ID:-}
+      OAUTH_DISCORD_CLIENT_SECRET: ${OAUTH_DISCORD_CLIENT_SECRET:-}
+      OAUTH_ALLIEDMODS_CLIENT_ID: ${OAUTH_ALLIEDMODS_CLIENT_ID:-}
+      OAUTH_ALLIEDMODS_CLIENT_SECRET: ${OAUTH_ALLIEDMODS_CLIENT_SECRET:-}
+      AUTO_MIGRATE: ${AUTO_MIGRATE:-1}
+    ports:
+      - "${APP_PORT:-18080}:80"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1/ > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    volumes:
+      - dumps_data:/app/dumps
+      - symbols_data:/app/symbols
+
+  db:
+    image: mariadb:10.11
+    environment:
+      MARIADB_DATABASE: throttle
+      MARIADB_USER: throttle
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:-throttle}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-change-root-password}
+    restart: unless-stopped
+    volumes:
+      - db_data:/var/lib/mysql
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+
+volumes:
+  db_data:
+  redis_data:
+  dumps_data:
+  symbols_data:

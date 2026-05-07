@@ -21,7 +21,7 @@ class AuthenticationEntryPoint implements AuthenticationEntryPointInterface
     /**
      * {@inheritDoc}
      */
-    public function start(Request $request, AuthenticationException $authException = null): Response
+    public function start(Request $request, ?AuthenticationException $authException = null): Response
     {
         return new RedirectResponse($this->urlGenerator->generate('login'));
     }

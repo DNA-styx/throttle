@@ -54,7 +54,7 @@
                                         Logout
                                     </a>
                                 {% endif %}
-                            {% elseif not (app.request.get('_route') starts with 'login') %}
+                            {% elseif not (app.request.attributes.get('_route') starts with 'login') %}
                                 <a href="{{ path('login') }}" class="btn btn-outline-primary me-2">
                                     <svg class="bi me-1" width="16" height="16" aria-hidden="true">
                                         <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#box-arrow-in-right"></use>

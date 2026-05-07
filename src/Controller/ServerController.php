@@ -8,12 +8,12 @@ use App\Form\ServerType;
 use App\Repository\ServerRepository;
 use App\Security\Voter\ServerVoter;
 use Doctrine\ORM\EntityManagerInterface;
-use Sensio\Bundle\FrameworkExtraBundle\Configuration\IsGranted;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\Routing\Annotation\Route;
-use Symfony\Component\Security\Core\Security;
+use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Bundle\SecurityBundle\Security;
+use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 #[Route('/servers')]
 #[IsGranted('ROLE_USER')]
@@ -67,9 +67,9 @@ class ServerController extends AbstractController
             return $this->redirectToRoute('server_index', [], Response::HTTP_SEE_OTHER);
         }
 
-        return $this->renderForm('server/new.html.twig', [
+        return $this->render('server/new.html.twig', [
             'server' => $server,
-            'form' => $form,
+            'form' => $form->createView(),
         ]);
     }
 
@@ -103,9 +103,9 @@ class ServerController extends AbstractController
             return $this->redirectToRoute('server_index', [], Response::HTTP_SEE_OTHER);
         }
 
-        return $this->renderForm('server/edit.html.twig', [
+        return $this->render('server/edit.html.twig', [
             'server' => $server,
-            'form' => $form,
+            'form' => $form->createView(),
         ]);
     }
 

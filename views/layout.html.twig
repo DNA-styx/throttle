@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta content="IE=EDGE" http-equiv="X-UA-Compatible">
+{% if supports_mobile|default(false) %}
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+{% endif %}
+        <title>Throttle</title>
+        <link href="{{ legacy_app.request.baseUrl }}/css/bootstrap.no-icons.min.css" rel="stylesheet">
+        <link href="{{ legacy_app.request.baseUrl }}/css/font-awesome.min.css" rel="stylesheet">
+{% block stylesheets %}{% endblock %}
+        <link href="{{ legacy_app.request.baseUrl }}/css/application.css" rel="stylesheet">
+{% if 'Kindle/3.0' in legacy_app.request.headers.get('User-Agent') %}
+        <link href="{{ legacy_app.request.baseUrl }}/css/kindle.css" rel="stylesheet">
+{% endif %}
+    </head>
+    <body>
+        <div class="navbar navbar-default navbar-static-top">
+            <div class="container">
+                <a class="navbar-brand" href="/"><i class="icon-dashboard"></i> Throttle</a>
+                <div class="pull-right">
+{% if legacy_app.user %}
+<ul class="nav navbar-nav">
+    <li class="dropdown {% if legacy_app.user.pending > 0 %}pending-notifications{% endif %}">
+        <a href="#" class="dropdown-toggle" data-toggle="dropdown">
+{% if legacy_app.user.name %}
+            <img src="{{ legacy_app.user.avatar }}" alt="{{ legacy_app.user.name }}'s avatar">
+{% else %}
+            Account
+{% endif %}
+            <!-- {{ legacy_app.user.id }} -->
+            <b class="caret"></b>
+        </a>
+        <ul class="dropdown-menu pull-right">
+            <li><a href="{{ path('dashboard') }}"><i class="icon-fixed-width icon-reorder"></i> Dashboard</a></li>
+            <li><a href="{{ path('share') }}"><i class="icon-fixed-width icon-share-alt"></i> Sharing</a></li>
+{% if logout_to_index|default(false) %}
+            <li><a href="{{ path('logout') }}"><i class="icon-fixed-width icon-signout"></i> Logout</a></li>
+{% else %}
+            <li><a href="{{ path('logout', {'return': legacy_app.request.pathInfo}) }}"><i class="icon-fixed-width icon-signout"></i> Logout</a></li>
+{% endif %}
+        </ul>
+    </li>
+</ul>
+{% else %}
+                    <a href="{{ path('login', {'return': legacy_app.request.pathInfo}) }}" class="btn btn-success navbar-btn"><i class="icon-signin"></i> Login</a>
+{% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="container">
+{% for error in legacy_app.session.flashbag.get('error_auth') %}
+            <div class="alert alert-danger">{{ error }}</div>
+{% endfor %}
+{% block content %}{% endblock %}
+        </div>
+        <div id="footer" class="container text-center">
+            <small class="text-muted"><a href="{{ path('stats') }}">Statistics</a>{% if legacy_app.version is defined and legacy_app.version %}<br>Version <a href="https://github.com/asherkin/throttle" class="text-muted">{{ legacy_app.version }}</a>{% endif %}</small>
+        </div>
+        <script src="{{ legacy_app.request.baseUrl }}/js/jquery.min.js"></script>
+        <script src="{{ legacy_app.request.baseUrl }}/js/bootstrap.min.js"></script>
+        <script type="text/javascript">
+        $(function() {
+            $('[data-toggle="tooltip"]').tooltip();
+        })
+        </script>
+{% block scripts %}{% endblock %}
+    </body>
+</html>
+
