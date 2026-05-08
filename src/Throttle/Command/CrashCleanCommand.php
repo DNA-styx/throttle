@@ -52,7 +52,7 @@ class CrashCleanCommand extends Command
 
             $count = count($crashes);
             if (!$input->getOption('dry-run') && $count > 0) {
-                $count = $app['db']->executeUpdate('DELETE FROM crash WHERE id IN (?) LIMIT 100', array($crashes), array(\Doctrine\DBAL\Connection::PARAM_STR_ARRAY));
+                $count = $app['db']->executeUpdate('DELETE FROM crash WHERE id IN (?) LIMIT 100', array($crashes), array(\Doctrine\DBAL\ArrayParameterType::STRING));
 
                 if ($count > 0) {
                     $app['redis']->hIncrBy('throttle:stats', 'crashes:cleaned:limit', $count);
@@ -134,7 +134,7 @@ class CrashCleanCommand extends Command
         $missing = array_diff_key($crashes, $found);
 
         if (count($missing) > 0) {
-            $query = $app['db']->executeQuery('SELECT id FROM crash WHERE id IN (?) AND failed = 1', array(array_keys($missing)), array(\Doctrine\DBAL\Connection::PARAM_STR_ARRAY));
+            $query = $app['db']->executeQuery('SELECT id FROM crash WHERE id IN (?) AND failed = 1', array(array_keys($missing)), array(\Doctrine\DBAL\ArrayParameterType::STRING));
 
             $missing_errored = array();
             while ($id = $query->fetchColumn(0)) {
@@ -143,7 +143,7 @@ class CrashCleanCommand extends Command
 
             $count = count($missing_errored);
             if (!$input->getOption('dry-run')) {
-                $count = $app['db']->executeUpdate('DELETE FROM crash WHERE id IN (?) AND failed = 1 AND timestamp < DATE_SUB(NOW(), INTERVAL 1 DAY) LIMIT 100', array(array_keys($missing)), array(\Doctrine\DBAL\Connection::PARAM_STR_ARRAY));
+                $count = $app['db']->executeUpdate('DELETE FROM crash WHERE id IN (?) AND failed = 1 AND timestamp < DATE_SUB(NOW(), INTERVAL 1 DAY) LIMIT 100', array(array_keys($missing)), array(\Doctrine\DBAL\ArrayParameterType::STRING));
 
                 if ($count > 0) {
                     $app['redis']->hIncrBy('throttle:stats', 'crashes:cleaned:missing', $count);

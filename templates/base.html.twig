@@ -17,7 +17,7 @@
                     environment: {{ app.environment | default("dev") | json_encode | raw }},
                     sentry_dsn: {{ sentry_dsn | default(null) | json_encode | raw }},
                     sentry_tunnel: {{ path('sentry') | json_encode | raw }},
-                    sentry_user: {{ (app.user ? { username: app.user.userIdentifier } : { ip_address: app.request.clientIp }) | json_encode | raw }}
+                    sentry_user: {{ (app.user ? { username: app.user.userIdentifier } : {}) | json_encode | raw }}
                 };
             </script>
             {{ encore_entry_script_tags('app') }}
@@ -36,7 +36,10 @@
                         </a>
                         <div class="d-flex align-items-center ms-auto">
                             {% if app.user %}
-                                <a href="{{ path('user_show', { id: app.user.id }) }}" class="btn navbar-text-btn me-1">
+                                {% if is_granted('ROLE_ADMIN') %}
+                                    <a href="{{ path('health') }}" class="btn btn-outline-secondary me-2">Health</a>
+                                {% endif %}
+                                <a href="{{ path('profile') }}" class="btn navbar-text-btn me-1">
                                     {{ include('_server_owner.html.twig', {owner: app.user}) }}
                                 </a>
                                 {% if is_granted('IS_IMPERSONATOR') %}

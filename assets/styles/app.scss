@@ -19,3 +19,51 @@
 .navbar-text-btn {
   color: var(--bs-navbar-color);
 }
+
+.profile-shell {
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.profile-panel {
+  border: 1px solid var(--bs-border-color);
+  border-radius: 8px;
+  padding: 1rem;
+  background: var(--bs-body-bg);
+}
+
+.profile-avatar {
+  flex: 0 0 auto;
+  color: var(--bs-primary);
+}
+
+.profile-meta-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.profile-config {
+  min-height: 0;
+  overflow: hidden;
+  resize: vertical;
+}
+
+.profile-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 0.75rem;
+}
+
+.profile-stat-value {
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.2;
+}

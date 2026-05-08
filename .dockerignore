@@ -1,6 +1,9 @@
 .git
 .gitignore
 .idea
+.env
+.env.*
+!.env.prod.docker.example
 node_modules
 vendor
 var
@@ -8,9 +11,9 @@ cache
 dumps
 symbols
 public/build
+build
 npm-debug.log
 yarn-error.log
 legacy-master.zip
-000f58cc-1992-493b-96b401a2-03480f0cC
 .env.local
 .env.*.local

@@ -14,6 +14,11 @@ final class Version20260508003000 extends AbstractMigration
         return 'Add share table for legacy sharing flows on v4 user ids.';
     }
 
+    public function isTransactional(): bool
+    {
+        return false;
+    }
+
     public function up(Schema $schema): void
     {
         $this->addSql('CREATE TABLE share (owner INT NOT NULL, user INT NOT NULL, accepted DATETIME DEFAULT NULL, INDEX IDX_D18B004A7E3C61F9 (owner), INDEX IDX_D18B004A8D93D649 (user), PRIMARY KEY(owner, user)) DEFAULT CHARACTER SET utf8mb4 COLLATE `utf8mb4_unicode_ci` ENGINE = InnoDB');

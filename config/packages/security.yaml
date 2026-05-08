@@ -27,9 +27,6 @@ security:
 
             custom_authenticators:
                 - App\Security\SteamOpenIdAuthenticator
-                - App\Security\GitHubOAuthAuthenticator
-                - App\Security\DiscordOAuthAuthenticator
-                - App\Security\AlliedModdersOAuthAuthenticator
 
             logout:
                 path: logout

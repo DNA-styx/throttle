@@ -33,7 +33,11 @@
             <b class="caret"></b>
         </a>
         <ul class="dropdown-menu pull-right">
+            <li><a href="{{ path('profile') }}"><i class="icon-fixed-width icon-user"></i> Profile</a></li>
             <li><a href="{{ path('dashboard') }}"><i class="icon-fixed-width icon-reorder"></i> Dashboard</a></li>
+{% if legacy_app.user.admin %}
+            <li><a href="{{ path('health') }}"><i class="icon-fixed-width icon-heart"></i> Health</a></li>
+{% endif %}
             <li><a href="{{ path('share') }}"><i class="icon-fixed-width icon-share-alt"></i> Sharing</a></li>
 {% if logout_to_index|default(false) %}
             <li><a href="{{ path('logout') }}"><i class="icon-fixed-width icon-signout"></i> Logout</a></li>

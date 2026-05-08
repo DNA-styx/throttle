@@ -1,0 +1,160 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Token Statistics{% endblock %}
+
+{% block body %}
+    <div class="profile-shell">
+        <div class="d-flex align-items-center justify-content-between mb-3">
+            <div>
+                <h1 class="h3 mb-1">Token statistics</h1>
+                <div class="text-muted">Symbol and binary uploads accepted with your profile token.</div>
+            </div>
+            <a href="{{ path('profile') }}" class="btn btn-outline-secondary">Back to profile</a>
+        </div>
+
+        <section class="profile-panel mb-3">
+            <div class="profile-stat-grid">
+                <div>
+                    <div class="profile-stat-value">{{ tokenStats.uses }}</div>
+                    <div class="text-muted">Total uses</div>
+                </div>
+                <div>
+                    <div class="profile-stat-value">{{ tokenStats.symbols }}</div>
+                    <div class="text-muted">Symbol uploads</div>
+                </div>
+                <div>
+                    <div class="profile-stat-value">{{ tokenStats.crashes }}</div>
+                    <div class="text-muted">Crash uploads</div>
+                </div>
+                <div>
+                    <div class="profile-stat-value">{{ tokenStats.binaries }}</div>
+                    <div class="text-muted">Binary uploads</div>
+                </div>
+                <div>
+                    <div class="profile-stat-value">{{ tokenStats.bytes|number_format }}</div>
+                    <div class="text-muted">Bytes uploaded</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="profile-panel mb-3">
+            <h2 class="h5 mb-3">Servers</h2>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                    <thead>
+                        <tr>
+                            <th>Server</th>
+                            <th>Remote IP</th>
+                            <th>Uses</th>
+                            <th>Bytes</th>
+                            <th>Last used</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for server in servers %}
+                            <tr>
+                                <td>{{ server.account ?: 'Unknown account' }}</td>
+                                <td>{{ server.remote_addr ?: 'Unknown IP' }}</td>
+                                <td>{{ server.uses }}</td>
+                                <td>{{ server.bytes|number_format }}</td>
+                                <td>{{ server.last_used }}</td>
+                            </tr>
+                        {% else %}
+                            <tr>
+                                <td colspan="5" class="text-muted">No token usage recorded yet.</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="profile-panel">
+            <h2 class="h5 mb-3">Recent uploads</h2>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Type</th>
+                            <th>Server</th>
+                            <th>Module</th>
+                            <th>Identifier</th>
+                            <th>Bytes</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for usage in recentUsage %}
+                            <tr>
+                                <td>{{ usage.created_at }}</td>
+                                <td>{{ usage.endpoint }}</td>
+                                <td>{{ usage.remote_addr ?: usage.account ?: 'Unknown' }}</td>
+                                <td>{{ usage.module ?: '-' }}</td>
+                                <td>
+                                    {% if usage.endpoint == 'crash' and usage.identifier %}
+                                        <a href="{{ path('details_crashid', {crashId: usage.identifier}) }}"><code>{{ usage.identifier }}</code></a>
+                                    {% else %}
+                                        <code>{{ usage.identifier ?: '-' }}</code>
+                                    {% endif %}
+                                </td>
+                                <td>{{ usage.bytes|number_format }}</td>
+                                <td>{{ usage.status_code }}</td>
+                            </tr>
+                        {% else %}
+                            <tr>
+                                <td colspan="7" class="text-muted">No uploads recorded yet.</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="profile-panel mt-3">
+            <h2 class="h5 mb-3">Token activity audit</h2>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Result</th>
+                            <th>Type</th>
+                            <th>Remote IP</th>
+                            <th>Token</th>
+                            <th>Module</th>
+                            <th>Identifier</th>
+                            <th>Status</th>
+                            <th>Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for event in recentAudit %}
+                            <tr class="{{ event.result == 'accepted' ? '' : 'table-warning' }}">
+                                <td>{{ event.created_at }}</td>
+                                <td>{{ event.result }}</td>
+                                <td>{{ event.endpoint }}</td>
+                                <td>{{ event.remote_addr ?: 'Unknown' }}</td>
+                                <td>{{ event.token_suffix ? '...' ~ event.token_suffix : '-' }}</td>
+                                <td>{{ event.module ?: '-' }}</td>
+                                <td>
+                                    {% if event.endpoint == 'crash' and event.identifier %}
+                                        <a href="{{ path('details_crashid', {crashId: event.identifier}) }}"><code>{{ event.identifier }}</code></a>
+                                    {% else %}
+                                        <code>{{ event.identifier ?: '-' }}</code>
+                                    {% endif %}
+                                </td>
+                                <td>{{ event.status_code }}</td>
+                                <td>{{ event.reason ?: '-' }}</td>
+                            </tr>
+                        {% else %}
+                            <tr>
+                                <td colspan="9" class="text-muted">No token audit events recorded yet.</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+{% endblock %}

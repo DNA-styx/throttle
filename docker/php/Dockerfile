@@ -67,7 +67,8 @@ COPY . /app
 COPY --from=frontend-build /app/public/build /app/public/build
 COPY docker/php/entrypoint.sh /usr/local/bin/app-entrypoint
 
-RUN chmod +x /usr/local/bin/app-entrypoint \
+RUN sed -i 's/\r$//' /usr/local/bin/app-entrypoint \
+    && chmod +x /usr/local/bin/app-entrypoint \
     && composer dump-autoload --classmap-authoritative --no-dev \
     && mkdir -p /app/var /app/cache /app/dumps /app/symbols/public \
     && chown -R www-data:www-data /app/var /app/cache /app/dumps /app/symbols

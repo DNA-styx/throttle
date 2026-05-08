@@ -11,9 +11,10 @@ services:
     environment:
       APP_ENV: prod
       APP_DEBUG: 0
-      APP_SECRET: ${APP_SECRET:-change-me-in-production}
+      APP_RUNTIME_OPTIONS: '{"disable_dotenv":true}'
+      APP_SECRET: ${APP_SECRET:?set APP_SECRET}
       CODE_EDITOR: phpstorm
-      DATABASE_URL: mysql://throttle:${MARIADB_PASSWORD:-throttle}@db:3306/throttle?serverVersion=mariadb-10.11.2&charset=utf8mb4
+      DATABASE_URL: mysql://throttle:${MARIADB_PASSWORD:?set MARIADB_PASSWORD}@db:3306/throttle?serverVersion=mariadb-10.11.2&charset=utf8mb4
       REDIS_URL: redis://redis:6379
       MESSENGER_TRANSPORT_DSN: doctrine://default?auto_setup=0
       MAILER_DSN: ${MAILER_DSN:-null://null}
@@ -46,8 +47,8 @@ services:
     environment:
       MARIADB_DATABASE: throttle
       MARIADB_USER: throttle
-      MARIADB_PASSWORD: ${MARIADB_PASSWORD:-throttle}
-      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-change-root-password}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:?set MARIADB_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?set MARIADB_ROOT_PASSWORD}
     restart: unless-stopped
     volumes:
       - db_data:/var/lib/mysql

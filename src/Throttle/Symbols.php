@@ -12,14 +12,18 @@ class Symbols
         if ($data === null) {
             $data = $app['request']->getContent();
         }
+        if (!is_string($data)) {
+            $data = '';
+        }
 
         $app['redis']->hIncrBy('throttle:stats', 'symbols:submitted', 1);
         $app['redis']->hIncrBy('throttle:stats', 'symbols:submitted:bytes', strlen($data));
 
         $lines = phutil_split_lines($data, false);
+        $first_line = $lines[0] ?? '';
 
-        if (!preg_match('/^MODULE (?P<operatingsystem>[^ ]++) (?P<architecture>[^ ]++) (?P<id>[a-fA-F0-9]++) (?P<name>[^\\/\\\\\r\n]++)$/m', $lines[0], $info)) {
-            $app['monolog']->warning('Invalid symbol file: ' . $lines[0]);
+        if (!preg_match('/^MODULE (?P<operatingsystem>[^ ]++) (?P<architecture>[^ ]++) (?P<id>[a-fA-F0-9]++) (?P<name>[^\\/\\\\\r\n]++)$/m', $first_line, $info)) {
+            $app['monolog']->warning('Invalid symbol file: ' . $first_line);
             $app['redis']->hIncrBy('throttle:stats', 'symbols:rejected:invalid', 1);
 
             return new \Symfony\Component\HttpFoundation\Response('Invalid symbol file', 400);

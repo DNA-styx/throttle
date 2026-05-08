@@ -41,7 +41,7 @@
                                 </td>
                                 <td>{{ externalAccount.lastLogin ? (externalAccount.lastLogin | date('Y-m-d H:i:s')) : ('form.never_used' | trans | wrap('em')) }}</td>
                                 <td>
-                                    {% if app.user == user and externalAccount.kind != 'email' %}
+                                    {% if app.user == user and externalAccount.kind == 'steam' %}
                                         <a href="{{ path('user_refresh_login', { id: user.id, externalAccount: externalAccount.id }) }}">refresh</a>
                                     {% endif %}
                                 </td>

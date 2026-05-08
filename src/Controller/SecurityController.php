@@ -2,59 +2,20 @@
 
 namespace App\Controller;
 
-use App\Security\UserManager;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
-use Symfony\Component\Form\Extension\Core\Type\EmailType;
-use Symfony\Component\Form\Extension\Core\Type\SubmitType;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\Notifier\NotifierInterface;
-use Symfony\Component\Notifier\Recipient\Recipient;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Core\Authorization\Voter\AuthenticatedVoter;
 use Symfony\Component\Security\Http\Authentication\AuthenticationUtils;
-use Symfony\Component\Security\Http\LoginLink\LoginLinkHandlerInterface;
-use Symfony\Component\Security\Http\LoginLink\LoginLinkNotification;
-use Symfony\Component\Validator\Constraints\Email;
-use Symfony\Component\Validator\Constraints\NotBlank;
 
 class SecurityController extends AbstractController
 {
     #[Route('/login', name: 'login')]
-    public function login(NotifierInterface $notifier, LoginLinkHandlerInterface $loginLinkHandler, UserManager $userManager, Request $request, AuthenticationUtils $authenticationUtils): Response
+    public function login(Request $request, AuthenticationUtils $authenticationUtils): Response
     {
         if ($this->isGranted(AuthenticatedVoter::IS_AUTHENTICATED)) {
             return $this->redirectToRoute('index');
-        }
-
-        $form = $this->createFormBuilder()
-            ->add('email', EmailType::class, [
-                'attr' => ['autocomplete' => 'email'],
-                'constraints' => [new NotBlank(), new Email()],
-            ])
-            ->add('submit', SubmitType::class)
-            ->getForm();
-
-        $form->handleRequest($request);
-
-        if ($form->isSubmitted() && $form->isValid()) {
-            /** @var array{email: string} */
-            $data = $form->getData();
-
-            $user = $userManager->findOrCreateUserForEmailAddress($data['email']);
-
-            $loginLinkDetails = $loginLinkHandler->createLoginLink($user);
-
-            $notification = new LoginLinkNotification(
-                $loginLinkDetails,
-                sprintf('Your %s login link', $this->getParameter('app.name'))
-            );
-
-            $notifier->send($notification, new Recipient($data['email']));
-
-            $request->getSession()->set('login_link_sent', true);
-
-            return $this->redirectToRoute('login');
         }
 
         $loginLinkSent = $request->getSession()->remove('login_link_sent') !== null;
@@ -64,7 +25,6 @@ class SecurityController extends AbstractController
         return $this->render('security/login.html.twig', [
             'login_link_sent' => $loginLinkSent,
             'error' => $error,
-            'form' => $form->createView(),
         ]);
     }
 
@@ -86,21 +46,4 @@ class SecurityController extends AbstractController
         throw new \LogicException('unreachable');
     }
 
-    #[Route('/login/github', name: 'login_github')]
-    public function github(): Response
-    {
-        throw new \LogicException('unreachable');
-    }
-
-    #[Route('/login/discord', name: 'login_discord')]
-    public function discord(): Response
-    {
-        throw new \LogicException('unreachable');
-    }
-
-    #[Route('/login/alliedmods', name: 'login_alliedmods')]
-    public function alliedmods(): Response
-    {
-        throw new \LogicException('unreachable');
-    }
 }

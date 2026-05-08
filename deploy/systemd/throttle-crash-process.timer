@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Throttle crash processor every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Unit=throttle-crash-process.service
+
+[Install]
+WantedBy=timers.target

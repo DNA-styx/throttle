@@ -1,0 +1,61 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Health{% endblock %}
+
+{% block body %}
+    <div class="profile-shell">
+        <div class="d-flex align-items-center justify-content-between mb-3">
+            <div>
+                <h1 class="h3 mb-1">Health</h1>
+                <div class="text-muted">Runtime checks for crash processing and uploads.</div>
+            </div>
+            <a href="{{ path('dashboard') }}" class="btn btn-outline-secondary">Dashboard</a>
+        </div>
+
+        <section class="profile-panel mb-3">
+            <h2 class="h5 mb-3">Queue</h2>
+            <div class="profile-stat-grid">
+                <div>
+                    <div class="profile-stat-value">{{ queue.pending }}</div>
+                    <div class="text-muted">Pending</div>
+                </div>
+                <div>
+                    <div class="profile-stat-value">{{ queue.failed }}</div>
+                    <div class="text-muted">Failed</div>
+                </div>
+                <div>
+                    <div class="profile-stat-value">{{ queue.processed_today }}</div>
+                    <div class="text-muted">Processed today</div>
+                </div>
+                <div>
+                    <div class="profile-stat-value">{{ queue.latest_processed ?: '-' }}</div>
+                    <div class="text-muted">Last processed</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="profile-panel">
+            <h2 class="h5 mb-3">Checks</h2>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            <th>Check</th>
+                            <th>Detail</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for check in checks %}
+                            <tr class="{{ check.ok ? '' : 'table-danger' }}">
+                                <td>{{ check.ok ? 'OK' : 'Fail' }}</td>
+                                <td>{{ check.name }}</td>
+                                <td><code>{{ check.detail }}</code></td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+{% endblock %}

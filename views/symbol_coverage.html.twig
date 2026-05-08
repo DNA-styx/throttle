@@ -1,0 +1,49 @@
+{% extends 'layout.html.twig' %}
+
+{% set logout_to_index = true %}
+{% set supports_mobile = true %}
+
+{% block content %}
+<div class="clearfix" style="margin-bottom: 20px;">
+    <a class="btn btn-default pull-left" href="{{ path('details', {'id': id}) }}"><i class="icon-chevron-left"></i> Back to Details</a>
+</div>
+
+<h1>Symbol Coverage</h1>
+<div class="well">
+    <div class="row">
+        <div class="col-sm-3"><strong>{{ symbol_coverage.percent }}%</strong><br><span class="text-muted">coverage</span></div>
+        <div class="col-sm-3"><strong>{{ symbol_coverage.with_symbols }}</strong><br><span class="text-muted">with symbols</span></div>
+        <div class="col-sm-3"><strong>{{ symbol_coverage.missing }}</strong><br><span class="text-muted">missing</span></div>
+        <div class="col-sm-3"><strong>{{ symbol_coverage.invalid }}</strong><br><span class="text-muted">invalid identifier</span></div>
+    </div>
+</div>
+
+<div class="well well-tight">
+    <table class="table table-condensed table-striped">
+        <thead>
+            <tr>
+                <th>Status</th>
+                <th>Module</th>
+                <th>Identifier</th>
+                <th>Base</th>
+            </tr>
+        </thead>
+        <tbody>
+{% for module in modules %}
+{% set invalid = module.identifier == '000000000000000000000000000000000' %}
+{% set ok = module.present and not invalid %}
+            <tr class="{{ ok ? 'success' : (invalid ? 'warning' : 'danger') }}">
+                <td>{% if ok %}Available{% elseif invalid %}Invalid id{% else %}Missing{% endif %}</td>
+                <td class="monospace">{{ module.name }}</td>
+                <td class="monospace">{{ module.identifier }}</td>
+                <td class="monospace">{{ module.base|address }}</td>
+            </tr>
+{% else %}
+            <tr>
+                <td colspan="4" class="text-muted">No modules were recorded for this crash.</td>
+            </tr>
+{% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

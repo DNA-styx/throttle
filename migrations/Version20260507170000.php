@@ -14,6 +14,11 @@ final class Version20260507170000 extends AbstractMigration
         return 'Add crash processing tables adapted for v4 server owners.';
     }
 
+    public function isTransactional(): bool
+    {
+        return false;
+    }
+
     public function up(Schema $schema): void
     {
         $this->addSql('CREATE TABLE crash (id CHAR(12) NOT NULL, owner_id INT DEFAULT NULL, server_id INT DEFAULT NULL, timestamp DATETIME NOT NULL, ip VARCHAR(45) NOT NULL, metadata LONGTEXT DEFAULT NULL, cmdline LONGTEXT DEFAULT NULL, thread INT DEFAULT NULL, processed TINYINT(1) NOT NULL DEFAULT 0, failed TINYINT(1) NOT NULL DEFAULT 0, stackhash VARCHAR(80) DEFAULT NULL, lastview DATETIME DEFAULT NULL, crashmodule VARCHAR(255) DEFAULT NULL, crashfunction VARCHAR(255) DEFAULT NULL, INDEX IDX_F94745267E3C61F9 (owner_id), INDEX IDX_F9474527183E88CB (server_id), INDEX IDX_F9474526D06A6DFB (processed), INDEX IDX_F9474526D5EF7FA9 (failed), INDEX IDX_F9474526D7087D28 (timestamp), INDEX IDX_F9474526D1F7E2D6 (lastview), INDEX IDX_F9474526B11213DD (stackhash), PRIMARY KEY(id)) DEFAULT CHARACTER SET utf8mb4 COLLATE `utf8mb4_unicode_ci` ENGINE = InnoDB');

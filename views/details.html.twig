@@ -95,12 +95,17 @@
 {% if crash.has_console_log %}
     <a class="btn btn-default" href="{{ path('console', {'id': crash.id}) }}"><i class="icon-terminal"></i> View Console</a>
 {% endif %}
+{% if can_manage %}
+    <a class="btn btn-default" href="{{ path('symbol_coverage', {'id': crash.id}) }}"><i class="icon-puzzle-piece"></i> Symbol Coverage</a>
+{% endif %}
+{% if processing_log %}
+    <a class="btn btn-default" href="{{ path('logs', {'id': crash.id}) }}"><i class="icon-cogs"></i> Processing Log</a>
+{% endif %}
     <div class="pull-right">
 {% if crash.dump_available %}
         <a class="btn btn-default" href="{{ path('carburetor', {'id': crash.id}) }}"><i class="icon-eye-open"></i> View Raw</a>
 {% endif %}
 {% if legacy_app.user.admin and crash.processed == 1 %}
-        {# <a class="btn btn-default" href="{{ path('logs', {id: crash.id}) }}"><i class="icon-cogs"></i> View Processing Logs</a> #}
         <form action="{{ path('reprocess', {id: crash.id, return: legacy_app.request.pathInfo}) }}" method="post" class="button-form">
             <input type="hidden" name="_token" value="{{ csrf_token('reprocess-crash:' ~ crash.id) }}">
             <button type="submit" class="btn btn-default"><i class="icon-refresh"></i> Reprocess</button>
@@ -115,6 +120,72 @@
 {% endif %}
 
 {% if crash.processed == 1 and crash.failed == 0 %}
+{% if culprit_candidates|length > 0 %}
+<h2>Likely Cause</h2>
+<div class="well well-tight">
+    <table class="table table-condensed" style="margin-bottom: 0;">
+        <thead>
+            <tr>
+                <th>Candidate</th>
+                <th style="width: 120px;">Confidence</th>
+                <th>Signals</th>
+            </tr>
+        </thead>
+        <tbody>
+{% for candidate in culprit_candidates %}
+            <tr>
+                <td class="monospace">{{ candidate.label }}</td>
+                <td>
+                    <div class="progress" style="margin-bottom: 0;">
+                        <div class="progress-bar" style="width: {{ candidate.percent }}%;">{{ candidate.percent }}%</div>
+                    </div>
+                </td>
+                <td>
+                    <ul style="margin-bottom: 0;">
+{% for reason in candidate.reasons %}
+                        <li>{{ reason }}</li>
+{% endfor %}
+                    </ul>
+                </td>
+            </tr>
+{% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% if can_manage %}
+<h2>Symbol Coverage</h2>
+<div class="well">
+    <div class="row">
+        <div class="col-sm-3"><strong>{{ symbol_coverage.percent }}%</strong><br><span class="text-muted">coverage</span></div>
+        <div class="col-sm-3"><strong>{{ symbol_coverage.with_symbols }}</strong><br><span class="text-muted">with symbols</span></div>
+        <div class="col-sm-3"><strong>{{ symbol_coverage.missing }}</strong><br><span class="text-muted">missing</span></div>
+        <div class="col-sm-3"><strong>{{ symbol_coverage.invalid }}</strong><br><span class="text-muted">invalid id</span></div>
+    </div>
+    <p style="margin: 10px 0 0;"><a href="{{ path('symbol_coverage', {'id': crash.id}) }}">Open full symbol coverage</a></p>
+</div>
+{% endif %}
+
+{% if can_manage and (sourcemod_snapshots.plugins or sourcemod_snapshots.extensions) %}
+<h2>SourceMod Snapshot</h2>
+<div class="well">
+    <button class="btn btn-default btn-sm" type="button" data-toggle="collapse" data-target="#sourcemod-snapshot">
+        Show SourceMod plugin and extension lists
+    </button>
+    <div id="sourcemod-snapshot" class="collapse" style="margin-top: 10px;">
+{% if sourcemod_snapshots.plugins %}
+        <h4>Plugins</h4>
+        <pre>{{ sourcemod_snapshots.plugins }}</pre>
+{% endif %}
+{% if sourcemod_snapshots.extensions %}
+        <h4>Extensions</h4>
+        <pre>{{ sourcemod_snapshots.extensions }}</pre>
+{% endif %}
+    </div>
+</div>
+{% endif %}
+
 <h2>Stack Trace</h2>
 <div class="well well-tight">
     <table class="table table-stacktrace table-shown">
@@ -178,36 +249,11 @@
 </div>
 {% endif %}
 {% endif %}
-<div class="modal fade" id="copy-warning" tabindex="-1" role="dialog">
-  <div class="modal-dialog" role="document">
-    <div class="modal-content">
-      <div class="modal-body">
-        <p>If you are copying the stack trace to share, please link this page instead.</p>
-        <p>Having the full report makes it a lot easier to help you, and only non-sensitive information is visible publicly.</p>
-        <p>You can verify this yourself by logging out or using an Incognito / Private Browsing window.</p>
-        <button type="button" class="btn btn-block btn-sm btn-info" data-dismiss="modal">OK</button>
-      </div>
-    </div>
-  </div>
-</div>
 {% endblock %}
 
 {% block scripts %}
 <script src="{{ legacy_app.request.baseUrl }}/js/jquery.hoverIntent.min.js"></script>
 <script type="text/javascript">
-    var hasShownWarning = false;
-    $(/*'.table-stacktrace'*/document).on('copy', function() {
-        if (hasShownWarning) {
-            return;
-        }
-
-        hasShownWarning = true;
-
-        setTimeout(function() {
-            $('#copy-warning').modal();
-        }, 100);
-    });
-
     $('.table-stacktrace tbody tr').hoverIntent(function() { $(this).toggleClass('stackframe-expand'); });
 
     $('.table-shown').each(function() {

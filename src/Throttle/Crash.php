@@ -45,6 +45,70 @@ class Crash
         throw new \Exception('MINIDUMP COLLISION');
     }
 
+    private static function findUploadedMinidump($app): ?\Symfony\Component\HttpFoundation\File\UploadedFile
+    {
+        $preferred = $app['request']->files->get('upload_file_minidump');
+        if ($preferred instanceof \Symfony\Component\HttpFoundation\File\UploadedFile && $preferred->isValid() && $preferred->getSize() > 0) {
+            return $preferred;
+        }
+
+        foreach (self::flattenUploadedFiles($app['request']->files->all()) as $field => $file) {
+            if (!$file->isValid() || $file->getSize() <= 0) {
+                continue;
+            }
+
+            $name = strtolower($file->getClientOriginalName());
+            if ($field === 'upload_file_minidump' || str_ends_with($name, '.dmp') || str_contains($field, 'dump')) {
+                return $file;
+            }
+        }
+
+        return null;
+    }
+
+    private static function flattenUploadedFiles(array $files, string $prefix = ''): array
+    {
+        $flattened = [];
+        foreach ($files as $field => $file) {
+            $name = $prefix === '' ? (string) $field : $prefix . '.' . $field;
+
+            if ($file instanceof \Symfony\Component\HttpFoundation\File\UploadedFile) {
+                $flattened[$name] = $file;
+                continue;
+            }
+
+            if (is_array($file)) {
+                $flattened += self::flattenUploadedFiles($file, $name);
+            }
+        }
+
+        return $flattened;
+    }
+
+    private static function shouldRequestSymbolsForModule(string $module): bool
+    {
+        $module = str_replace('\\', '/', $module);
+        $lower = strtolower($module);
+
+        if (str_starts_with($lower, '/usr/lib/')
+            || str_starts_with($lower, '/lib/')
+            || str_starts_with($lower, '/usr/local/lib/')
+            || str_starts_with($lower, '/lib32/')
+            || str_starts_with($lower, '/lib64/')
+            || str_contains($lower, '/i386-linux-gnu/')
+            || str_contains($lower, '/x86_64-linux-gnu/')
+        ) {
+            return false;
+        }
+
+        return str_contains($lower, '/addons/')
+            || str_contains($lower, '/extensions/')
+            || str_contains($lower, '/plugins/')
+            || str_contains($lower, '/tf/bin/')
+            || str_contains($lower, '/bin/')
+            || str_ends_with($lower, 'srcds_linux');
+    }
+
     private static function canUserManage($app, $crash)
     {
         $ownerId = $app['db']->executeQuery('SELECT owner_id FROM crash WHERE crash.id = ?', [$crash])->fetchColumn(0);
@@ -61,6 +125,161 @@ class Crash
         }
 
         return $ownerId !== null && in_array((int) $ownerId, $app['user']['owner_ids'], true);
+    }
+
+    private static function buildSymbolCoverage(array $modules): array
+    {
+        $total = count($modules);
+        $withSymbols = 0;
+        $missing = 0;
+        $invalid = 0;
+
+        foreach ($modules as $module) {
+            if (($module['identifier'] ?? '') === '000000000000000000000000000000000') {
+                $invalid++;
+            } elseif ((int) ($module['present'] ?? 0) === 1) {
+                $withSymbols++;
+            } else {
+                $missing++;
+            }
+        }
+
+        return array(
+            'total' => $total,
+            'with_symbols' => $withSymbols,
+            'missing' => $missing,
+            'invalid' => $invalid,
+            'percent' => $total > 0 ? (int) round(($withSymbols / $total) * 100) : 0,
+        );
+    }
+
+    private static function buildCulpritCandidates(array $stack, array $modules, array $metadata, ?string $cmdline): array
+    {
+        $candidates = array();
+        $presentByModule = array();
+        foreach ($modules as $module) {
+            $presentByModule[$module['name']] = (int) $module['present'] === 1;
+        }
+
+        foreach ($stack as $index => $frame) {
+            $module = (string) ($frame['module'] ?? '');
+            $function = (string) ($frame['function'] ?? '');
+            $rendered = (string) ($frame['rendered'] ?? '');
+            $label = self::candidateLabelFromFrame($module, $function, $rendered);
+
+            if ($label === null) {
+                continue;
+            }
+
+            $score = max(8, 45 - ($index * 5));
+            if ($index === 0) {
+                $score += 20;
+            }
+            if (preg_match('/\.(smx|ext(?:\.[^ ]+)?\.so)$/i', $label) === 1 || str_contains($label, '.ext.')) {
+                $score += 20;
+            }
+            if (preg_match('/sourcepawn|sourcemod|metamod|engine_srv|dedicated_srv|libc\.so|linux-gate/i', $label) === 1) {
+                $score -= 12;
+            }
+            if ($module !== '' && isset($presentByModule[$module]) && !$presentByModule[$module]) {
+                $score -= 5;
+            }
+
+            self::addCulpritCandidate($candidates, $label, $score, 'Frame #' . ($frame['frame'] ?? $index) . ': ' . $rendered);
+
+            if (preg_match('/\[\s*([^\\[\\]]+\\.smx)::([^\\[\\]]+)\s*\]/i', $rendered, $matches) === 1) {
+                self::addCulpritCandidate($candidates, $matches[1], $score + 18, 'SourcePawn function: ' . $matches[2]);
+            }
+        }
+
+        foreach (array('Plugin', 'SourceModPlugin', 'Extension', 'SourceModExtension') as $key) {
+            if (!empty($metadata[$key]) && is_string($metadata[$key])) {
+                self::addCulpritCandidate($candidates, basename($metadata[$key]), 18, 'Crash metadata field: ' . $key);
+            }
+        }
+
+        if (is_string($cmdline) && preg_match('/\+map\s+([^ ]+)/', $cmdline, $matches) === 1) {
+            self::addCulpritCandidate($candidates, 'Map: ' . $matches[1], 8, 'Active map from command line');
+        }
+
+        if (empty($candidates)) {
+            return array();
+        }
+
+        uasort($candidates, fn ($a, $b) => $b['score'] <=> $a['score']);
+        $top = array_slice($candidates, 0, 6, true);
+        $total = array_sum(array_column($top, 'score'));
+
+        return array_map(function ($candidate) use ($total) {
+            $candidate['percent'] = $total > 0 ? (int) round(($candidate['score'] / $total) * 100) : 0;
+            $candidate['reasons'] = array_slice(array_values(array_unique($candidate['reasons'])), 0, 4);
+
+            return $candidate;
+        }, array_values($top));
+    }
+
+    private static function addCulpritCandidate(array &$candidates, string $label, int $score, string $reason): void
+    {
+        $label = trim($label);
+        if ($label === '') {
+            return;
+        }
+
+        if (!isset($candidates[$label])) {
+            $candidates[$label] = array('label' => $label, 'score' => 0, 'percent' => 0, 'reasons' => array());
+        }
+
+        $candidates[$label]['score'] += max(1, $score);
+        $candidates[$label]['reasons'][] = $reason;
+    }
+
+    private static function candidateLabelFromFrame(string $module, string $function, string $rendered): ?string
+    {
+        if (preg_match('/\[\s*([^\\[\\]]+\\.smx)::/i', $rendered, $matches) === 1) {
+            return $matches[1];
+        }
+
+        if ($module !== '') {
+            return basename($module);
+        }
+
+        if ($function !== '') {
+            return $function;
+        }
+
+        return null;
+    }
+
+    private static function extractSourceModSnapshots(array &$metadata): array
+    {
+        $snapshots = array('plugins' => null, 'extensions' => null);
+        $pluginKeys = array('SourceModPlugins', 'SourceModPluginList', 'SMPlugins', 'PluginsSnapshot');
+        $extensionKeys = array('SourceModExtensions', 'SourceModExtensionList', 'SMExtensions', 'ExtensionsSnapshot');
+
+        foreach ($pluginKeys as $key) {
+            if (isset($metadata[$key]) && is_string($metadata[$key]) && trim($metadata[$key]) !== '') {
+                $snapshots['plugins'] = self::normalizeSnapshotText($metadata[$key]);
+                unset($metadata[$key]);
+                break;
+            }
+        }
+
+        foreach ($extensionKeys as $key) {
+            if (isset($metadata[$key]) && is_string($metadata[$key]) && trim($metadata[$key]) !== '') {
+                $snapshots['extensions'] = self::normalizeSnapshotText($metadata[$key]);
+                unset($metadata[$key]);
+                break;
+            }
+        }
+
+        return $snapshots;
+    }
+
+    private static function normalizeSnapshotText(string $text): string
+    {
+        $text = str_replace(array('\\r\\n', '\\n', "\r\n", "\r"), "\n", $text);
+
+        return trim($text);
     }
 
     public static function parsePresubmitSignature($signature)
@@ -142,6 +361,11 @@ class Crash
         // TODO: Determine whether we want the crash dump...
         $return = 'Y|';
         foreach ($signature->modules as $module) {
+            if (!self::shouldRequestSymbolsForModule($module->file)) {
+                $return .= 'N';
+                continue;
+            }
+
             if ($module->identifier === '000000000000000000000000000000000') {
                 $app['monolog']->warning('Ignoring module with invalid identifier: '.$module->file);
                 $return .= 'N';
@@ -172,9 +396,13 @@ class Crash
 
         $app['redis']->hIncrBy('throttle:stats', 'crashes:submitted', 1);
 
-        $minidump = $app['request']->files->get('upload_file_minidump');
+        $minidump = self::findUploadedMinidump($app);
 
         if ($minidump === null || !$minidump->isValid() || $minidump->getSize() <= 0) {
+            $app['monolog']->warning('Crash submit did not include a valid minidump.', [
+                'file_fields' => array_keys(self::flattenUploadedFiles($app['request']->files->all())),
+                'post_fields' => array_keys($app['request']->request->all()),
+            ]);
             $app['redis']->hIncrBy('throttle:stats', 'crashes:rejected:no-minidump', 1);
 
             return $app['twig']->render('submit-empty.txt.twig');
@@ -262,6 +490,19 @@ class Crash
             $has_console = preg_match('/(?<=-------- CONSOLE HISTORY BEGIN --------)[^\\x00]+(?=-------- CONSOLE HISTORY END --------)/i', $raw_metadata, $metadata_console);
             if ($has_console === 1 && strlen(trim($metadata_console[0]))) {
                 $metadata['HasConsoleLog'] = true;
+            }
+
+            foreach (array(
+                'SourceModPlugins' => array('SOURCEMOD PLUGINS', 'SM PLUGINS', 'PLUGIN LIST'),
+                'SourceModExtensions' => array('SOURCEMOD EXTENSIONS', 'SM EXTS', 'EXTENSION LIST'),
+            ) as $metadataKey => $sectionNames) {
+                foreach ($sectionNames as $sectionName) {
+                    $pattern = '/(?<=-------- ' . preg_quote($sectionName, '/') . ' BEGIN --------)[^\\x00]+(?=-------- ' . preg_quote($sectionName, '/') . ' END --------)/i';
+                    if (preg_match($pattern, $raw_metadata, $snapshot) === 1 && strlen(trim($snapshot[0]))) {
+                        $metadata[$metadataKey] = trim($snapshot[0]);
+                        break;
+                    }
+                }
             }
         }
 
@@ -368,6 +609,8 @@ class Crash
 
         $crash['metadata'] = json_decode($crash['metadata'], true);
 
+        $snapshots = self::extractSourceModSnapshots($crash['metadata']);
+
         if (isset($crash['metadata']['HasConsoleLog'])) {
             $crash['has_console_log'] = $crash['metadata']['HasConsoleLog'];
             unset($crash['metadata']['HasConsoleLog']);
@@ -384,9 +627,13 @@ class Crash
         ksort($crash['metadata']);
 
         $notices = $app['db']->executeQuery('SELECT severity, text FROM crashnotice JOIN notice ON notice.id = crashnotice.notice WHERE crash = ?', array($id))->fetchAll();
-        $stack = $app['db']->executeQuery('SELECT frame, rendered, url FROM frame WHERE crash = ? AND thread = ? ORDER BY frame', array($id, $crash['thread']))->fetchAll();
+        $stack = $app['db']->executeQuery('SELECT frame, module, function, rendered, url FROM frame WHERE crash = ? AND thread = ? ORDER BY frame', array($id, $crash['thread']))->fetchAll();
         $modules = $app['db']->executeQuery('SELECT name, identifier, processed, present, HEX(base) AS base FROM module WHERE crash = ? ORDER BY name', array($id))->fetchAll();
         $stats = $app['db']->executeQuery('SELECT COUNT(DISTINCT crash.owner_id) AS owners, COUNT(DISTINCT crash.ip) AS ips, COUNT(*) AS crashes FROM crash, (SELECT owner_id, stackhash FROM crash WHERE id = ?) AS this WHERE this.stackhash = crash.stackhash', [$id])->fetch();
+        $processing_log = $app['db']->executeQuery('SELECT created_at, status, duration_ms, message FROM crash_processing_log WHERE crash = ? ORDER BY created_at DESC LIMIT 1', [$id])->fetch();
+        if ($processing_log === false) {
+            $processing_log = null;
+        }
 
         $outdated = false;
         if ($app['config']['accelerator']) {
@@ -418,6 +665,34 @@ class Crash
             'outdated' => $outdated,
             'has_error_string' => $has_error_string,
             'show_sourcepawn_message' => $show_sourcepawn_message,
+            'symbol_coverage' => self::buildSymbolCoverage($modules),
+            'culprit_candidates' => self::buildCulpritCandidates($stack, $modules, $crash['metadata'], $crash['cmdline']),
+            'processing_log' => $processing_log,
+            'sourcemod_snapshots' => $snapshots,
+        ));
+    }
+
+    public function symbols(Application $app, $id)
+    {
+        if ($app['user'] === null) {
+            $app->abort(401);
+        }
+
+        $can_manage = self::canUserManage($app, $id);
+        if ($can_manage === null) {
+            $app->abort(404);
+        }
+
+        if (!$can_manage) {
+            $app->abort(403);
+        }
+
+        $modules = $app['db']->executeQuery('SELECT name, identifier, processed, present, HEX(base) AS base FROM module WHERE crash = ? ORDER BY present ASC, name ASC', array($id))->fetchAll();
+
+        return $app['twig']->render('symbol_coverage.html.twig', array(
+            'id' => $id,
+            'modules' => $modules,
+            'symbol_coverage' => self::buildSymbolCoverage($modules),
         ));
     }
 
@@ -478,6 +753,8 @@ class Crash
             $app->abort(403);
         }
 
+        $processing_logs = $app['db']->executeQuery('SELECT created_at, status, duration_ms, message, log FROM crash_processing_log WHERE crash = ? ORDER BY created_at DESC LIMIT 10', [$id])->fetchAll();
+
         $path = $app['root'] . '/dumps/' . substr($id, 0, 2) . '/' . $id . '.txt';
 
         $logs = null;
@@ -487,7 +764,7 @@ class Crash
             $logs = \Filesystem::readFile($path);
         }
 
-        return $app['twig']->render('logs.html.twig', array('id' => $id, 'logs' => $logs));
+        return $app['twig']->render('logs.html.twig', array('id' => $id, 'logs' => $logs, 'processing_logs' => $processing_logs));
     }
 
     public function metadata(Application $app, $id)
@@ -821,7 +1098,7 @@ class Crash
                 } else if ($allowed !== null) {
                     $where .= 'crash.owner_id IN (?)';
                     $params[] = $allowed;
-                    $types[] = \Doctrine\DBAL\Connection::PARAM_INT_ARRAY;
+                    $types[] = \Doctrine\DBAL\ArrayParameterType::INTEGER;
                 }
 
                 if ($offset !== null) {

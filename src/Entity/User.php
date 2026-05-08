@@ -29,6 +29,9 @@ class User extends ServerOwner implements UserInterface
     #[ORM\Column(nullable: true)]
     protected ?\DateTimeImmutable $lastLogin = null;
 
+    #[ORM\Column(length: 128, unique: true)]
+    protected string $uploadToken = '';
+
     /** @var Collection<int, ExternalAccount> */
     #[ORM\OneToMany(mappedBy: 'user', targetEntity: ExternalAccount::class, cascade: ['remove'])]
     #[ORM\OrderBy(['kind' => 'ASC', 'displayName' => 'ASC'])]
@@ -47,6 +50,7 @@ class User extends ServerOwner implements UserInterface
     {
         parent::__construct();
 
+        $this->regenerateUploadToken();
         $this->externalAccounts = new ArrayCollection();
         $this->teams = new ArrayCollection();
     }
@@ -89,6 +93,18 @@ class User extends ServerOwner implements UserInterface
     public function setLastLogin(?\DateTimeImmutable $lastLogin): self
     {
         $this->lastLogin = $lastLogin;
+
+        return $this;
+    }
+
+    public function getUploadToken(): string
+    {
+        return $this->uploadToken;
+    }
+
+    public function regenerateUploadToken(): self
+    {
+        $this->uploadToken = bin2hex(random_bytes(32));
 
         return $this;
     }

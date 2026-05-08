@@ -17,6 +17,11 @@ final class Version20230311222057 extends AbstractMigration
         return '';
     }
 
+    public function isTransactional(): bool
+    {
+        return false;
+    }
+
     public function up(Schema $schema): void
     {
         $this->addSql('ALTER TABLE external_account DROP FOREIGN KEY FK_A4948FE7A76ED395');

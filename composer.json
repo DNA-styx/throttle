@@ -1,4 +1,6 @@
 {
+    "name": "mrpanica/throttle",
+    "description": "Crash dump ingestion, symbol handling, and dashboard service for Source engine servers.",
     "type": "project",
     "license": "proprietary",
     "minimum-stability": "stable",

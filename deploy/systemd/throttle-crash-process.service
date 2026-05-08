@@ -1,0 +1,13 @@
+[Unit]
+Description=Throttle crash processor
+After=network.target mariadb.service redis-server.service
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/throttle
+ExecStart=/usr/bin/php8.4 /var/www/throttle/bin/console crash:process --env=prod --no-debug --limit=10
+Nice=5
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6

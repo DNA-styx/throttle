@@ -134,12 +134,19 @@ class CrashProcessCommand extends Command
                 $id = $app['db']->executeQuery('SELECT id FROM crash WHERE processed = 0 ORDER BY timestamp DESC LIMIT 1')->fetchColumn(0);
                 $minidump = $app['root'] . '/dumps/' . substr($id, 0, 2) . '/' . $id . '.dmp';
                 $logs = $app['root'] . '/dumps/' . substr($id, 0, 2) . '/' . $id . '.txt';
+                $processingStartedAt = microtime(true);
+                $processingStatus = 'success';
+                $processingMessage = null;
+                $modulesTotal = 0;
+                $modulesWithSymbols = 0;
+                $modulesMissingSymbols = 0;
+                $framesInserted = 0;
 
                 try {
                     $future = new \ExecFuture($app['root'] . '/bin/minidump_stackwalk -m %s 2> %s', $minidump, $logs);
 
                     foreach (new \LinesOfALargeExecFuture($future) as $line) {
-                        $data = str_getcsv($line, '|');
+                        $data = str_getcsv($line, '|', '"', '\\');
 
                         if ($line == '') {
                             break;
@@ -210,7 +217,7 @@ class CrashProcessCommand extends Command
                     $moduleRepos = array();
 
                     foreach (new \LinesOfALargeExecFuture($future) as $line) {
-                        $data = str_getcsv($line, '|');
+                        $data = str_getcsv($line, '|', '"', '\\');
 
                         if (!$foundStack) {
                             if ($line == '') {
@@ -231,6 +238,12 @@ class CrashProcessCommand extends Command
 
                                 $seenModules[$cacheKey] = true;
                                 $hasSymbols = ($symbolCache[$cacheKey] === true);
+                                $modulesTotal++;
+                                if ($hasSymbols) {
+                                    $modulesWithSymbols++;
+                                } else {
+                                    $modulesMissingSymbols++;
+                                }
 
                                 $base = hexdec(substr($data[5], -8));
                                 $app['db']->executeUpdate('INSERT INTO module (crash, name, identifier, processed, present, base) VALUES (?, ?, ?, ?, ?, ?)', array($id, $data[3], $data[4], (int)$hasSymbols, (int)$hasSymbols, $base));
@@ -241,9 +254,7 @@ class CrashProcessCommand extends Command
                                         $symbols = fopen($sympath, 'r');
 
                                         if (!$symbols) {
-                                            var_dump($symbolCache);
-                                            var_dump(array('cache' => $symbolCache[$cacheKey], 'cache_key' => $cacheKey, 'has_symbols' => $hasSymbols));
-                                            throw new \Exception();
+                                            throw new \RuntimeException(sprintf('Cached symbol file could not be opened for %s.', $cacheKey));
                                         }
 
                                         $repos = array();
@@ -373,16 +384,49 @@ class CrashProcessCommand extends Command
                         }
 
                         $app['db']->executeUpdate('INSERT INTO frame (crash, thread, frame, module, function, file, line, frame_offset, rendered, url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', array($id, $data[0], $data[1], $data[2], $data[3], $data[4], $data[5], $data[6], $rendered, $url));
+                        $framesInserted++;
                     }
-                } catch (\CommandException $e) {
+                } catch (\Throwable $e) {
                     $app['db']->executeUpdate('UPDATE crash SET processed = TRUE, failed = TRUE WHERE id = ?', array($id));
 
                     $app['redis']->hIncrBy('throttle:stats', 'crashes:failed', 1);
 
-                    return;
+                    $processingStatus = 'failed';
+                    $processingMessage = $e->getMessage();
                 } finally {
-                    \Filesystem::writeFile($logs . '.gz', gzencode(str_replace($app['root'], '', \Filesystem::readFile($logs))));
-                    \Filesystem::remove($logs);
+                    $stackwalkLog = \Filesystem::pathExists($logs) ? str_replace($app['root'], '', \Filesystem::readFile($logs)) : '';
+                    if ($stackwalkLog !== '') {
+                        \Filesystem::writeFile($logs . '.gz', gzencode($stackwalkLog));
+                        \Filesystem::remove($logs);
+                    }
+
+                    $summary = sprintf(
+                        "Status: %s\nDuration: %d ms\nModules: %d total, %d with symbols, %d missing symbols\nFrames: %d\n",
+                        $processingStatus,
+                        (int) round((microtime(true) - $processingStartedAt) * 1000),
+                        $modulesTotal,
+                        $modulesWithSymbols,
+                        $modulesMissingSymbols,
+                        $framesInserted
+                    );
+                    if ($processingMessage !== null) {
+                        $summary .= 'Error: ' . $processingMessage . "\n";
+                    }
+
+                    $app['db']->executeUpdate(
+                        'INSERT INTO crash_processing_log (crash, created_at, status, duration_ms, message, log) VALUES (?, NOW(), ?, ?, ?, ?)',
+                        array(
+                            $id,
+                            $processingStatus,
+                            (int) round((microtime(true) - $processingStartedAt) * 1000),
+                            self::truncateSummaryField($processingMessage, 512),
+                            $summary . "\n" . $stackwalkLog,
+                        )
+                    );
+                }
+
+                if ($processingStatus !== 'success') {
+                    return;
                 }
 
                 $app['db']->executeUpdate('UPDATE crash SET thread = ?, processed = TRUE WHERE id = ?', array($crashThread, $id));

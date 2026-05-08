@@ -34,3 +34,70 @@ if (APP_CONFIG.sentry_dsn !== null) {
 
 // start the Stimulus application
 import './bootstrap';
+
+document.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-copy-token]');
+    if (!(button instanceof HTMLButtonElement)) {
+        return;
+    }
+
+    const input = document.querySelector(button.dataset.copyToken);
+    if (!(input instanceof HTMLInputElement) && !(input instanceof HTMLTextAreaElement)) {
+        return;
+    }
+
+    await navigator.clipboard.writeText(input.value);
+
+    const original = button.innerHTML;
+    button.textContent = 'Copied';
+    button.disabled = true;
+
+    window.setTimeout(() => {
+        button.innerHTML = original;
+        button.disabled = false;
+    }, 1200);
+});
+
+function resizeTextarea(textarea) {
+    textarea.style.height = 'auto';
+    textarea.style.height = `${textarea.scrollHeight + 2}px`;
+}
+
+function generateCoreConfig(container) {
+    const field = (name) => container.querySelector(`[data-core-field="${name}"]`)?.value?.trim() ?? '';
+    const token = container.dataset.token ?? '';
+    const baseUrl = field('baseUrl').replace(/\/+$/, '');
+    const output = container.querySelector('#core-cfg');
+
+    if (!(output instanceof HTMLTextAreaElement)) {
+        return;
+    }
+
+    output.value = [
+        `"MinidumpAccount" "${field('account') || 'YOUR_STEAMID64'}"`,
+        '',
+        `"MinidumpSymbolUpload" "${field('symbolUpload') || '3'}"`,
+        `"MinidumpBinaryUpload" "${field('binaryUpload') || 'yes'}"`,
+        `"MinidumpPresubmit" "${field('presubmit') || 'yes'}"`,
+        '',
+        `"MinidumpUrl" "${baseUrl}/submit?token=${token}"`,
+        `"MinidumpSymbolUrl" "${baseUrl}/symbols/submit?token=${token}"`,
+        `"MinidumpBinaryUrl" "${baseUrl}/binary/submit?token=${token}"`,
+    ].join('\n');
+
+    resizeTextarea(output);
+}
+
+document.querySelectorAll('[data-autosize-textarea]').forEach((textarea) => {
+    if (textarea instanceof HTMLTextAreaElement) {
+        resizeTextarea(textarea);
+    }
+});
+
+document.querySelectorAll('[data-core-config-generator]').forEach((container) => {
+    generateCoreConfig(container);
+
+    container.querySelector('[data-core-generate]')?.addEventListener('click', () => {
+        generateCoreConfig(container);
+    });
+});

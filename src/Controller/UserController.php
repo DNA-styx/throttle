@@ -90,8 +90,7 @@ class UserController extends AbstractController
         }
 
         $route = match ($externalAccount->getKind()) {
-            'email' => 'login',
-            'steam', 'github', 'discord', 'alliedmods' => sprintf('login_%s', $externalAccount->getKind()),
+            'steam' => 'login_steam',
             default => throw $this->createNotFoundException('Refreshing this external account type is not supported'),
         };
 

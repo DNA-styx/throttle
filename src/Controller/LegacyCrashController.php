@@ -3,7 +3,10 @@
 namespace App\Controller;
 
 use App\Legacy\LegacyBridgeFactory;
+use App\Repository\UserRepository;
+use Doctrine\DBAL\Connection;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
@@ -13,16 +16,23 @@ class LegacyCrashController extends AbstractController
     use LegacyResponseTrait;
 
     private LegacyBridgeFactory $legacyBridgeFactory;
+    private UserRepository $userRepository;
+    private Connection $connection;
 
-    public function __construct(LegacyBridgeFactory $legacyBridgeFactory)
+    public function __construct(LegacyBridgeFactory $legacyBridgeFactory, UserRepository $userRepository, Connection $connection)
     {
         $this->legacyBridgeFactory = $legacyBridgeFactory;
+        $this->userRepository = $userRepository;
+        $this->connection = $connection;
     }
 
     #[Route('/submit', name: 'submit', methods: ['POST'])]
     public function submit(Request $request): Response
     {
-        return $this->legacyResponse((new \Throttle\Crash())->submit($this->legacyBridgeFactory->createHttp($request)));
+        $response = $this->legacyResponse((new \Throttle\Crash())->submit($this->legacyBridgeFactory->createHttp($request)));
+        $this->recordTokenUsage($request, $response);
+
+        return $response;
     }
 
     #[Route('/submit', name: 'submit_get', methods: ['GET'])]
@@ -53,6 +63,12 @@ class LegacyCrashController extends AbstractController
     public function logs(Request $request, string $id): Response
     {
         return $this->legacyResponse((new \Throttle\Crash())->logs($this->legacyBridgeFactory->createHttp($request), $id));
+    }
+
+    #[Route('/{id}/symbols', name: 'symbol_coverage', methods: ['GET'], requirements: ['id' => '[0-9a-zA-Z]{12}'], priority: -10)]
+    public function symbols(Request $request, string $id): Response
+    {
+        return $this->legacyResponse((new \Throttle\Crash())->symbols($this->legacyBridgeFactory->createHttp($request), $id));
     }
 
     #[Route('/{id}/metadata', name: 'metadata', methods: ['GET'], requirements: ['id' => '[0-9a-zA-Z]{12}'], priority: -10)]
@@ -135,5 +151,188 @@ class LegacyCrashController extends AbstractController
     public function details(Request $request, string $id): Response
     {
         return $this->legacyResponse((new \Throttle\Crash())->details($this->legacyBridgeFactory->createHttp($request), $id));
+    }
+
+    private function recordTokenUsage(Request $request, Response $response): void
+    {
+        $provided = $this->getProvidedToken($request);
+        if (!is_string($provided) || $provided === '') {
+            return;
+        }
+
+        $tokenUser = $this->userRepository->findOneBy(['uploadToken' => $provided]);
+        $bytes = 0;
+        foreach ($request->files->all() as $file) {
+            if ($file instanceof UploadedFile && $file->isValid()) {
+                $bytes += (int) $file->getSize();
+            }
+        }
+
+        $identifier = null;
+        if (preg_match('/Crash ID:\s*([A-Z0-9-]+)/i', (string) $response->getContent(), $matches) === 1) {
+            $identifier = strtoupper($matches[1]);
+        }
+
+        $remoteAddr = $this->detectServerAddress($request) ?? $request->getClientIp();
+        $account = $this->stringRequestValue($request, 'UserID') ?? $this->stringRequestValue($request, 'MinidumpAccount');
+        $result = $tokenUser === null || $response->getStatusCode() >= 400 ? 'rejected' : 'accepted';
+        $reason = $tokenUser === null ? 'invalid token' : ($response->getStatusCode() >= 400 ? trim(strip_tags((string) $response->getContent())) : null);
+
+        $this->recordAudit($tokenUser?->getId(), $request, 'crash', $remoteAddr, $account, null, $identifier, $bytes, $response->getStatusCode(), $result, $reason, $provided);
+
+        if ($tokenUser === null) {
+            return;
+        }
+
+        $this->connection->insert('upload_token_usage', [
+            'owner_id' => $tokenUser->getId(),
+            'created_at' => (new \DateTimeImmutable())->format('Y-m-d H:i:s'),
+            'endpoint' => 'crash',
+            'remote_addr' => $remoteAddr,
+            'account' => $account,
+            'module' => null,
+            'identifier' => $identifier,
+            'bytes' => $bytes,
+            'status_code' => $response->getStatusCode(),
+            'user_agent' => mb_substr((string) $request->headers->get('User-Agent'), 0, 255),
+        ]);
+    }
+
+    private function recordAudit(?int $ownerId, Request $request, string $endpoint, ?string $remoteAddr, ?string $account, ?string $module, ?string $identifier, int $bytes, int $statusCode, string $result, ?string $reason, ?string $token): void
+    {
+        $this->connection->insert('upload_token_audit', [
+            'owner_id' => $ownerId,
+            'created_at' => (new \DateTimeImmutable())->format('Y-m-d H:i:s'),
+            'endpoint' => $endpoint,
+            'remote_addr' => $remoteAddr,
+            'account' => $account,
+            'module' => $module,
+            'identifier' => $identifier,
+            'bytes' => $bytes,
+            'status_code' => $statusCode,
+            'result' => $result,
+            'reason' => $reason !== null ? mb_substr($reason, 0, 255) : null,
+            'token_suffix' => is_string($token) && $token !== '' ? substr($token, -8) : null,
+            'user_agent' => mb_substr((string) $request->headers->get('User-Agent'), 0, 255),
+        ]);
+    }
+
+    private function getProvidedToken(Request $request): ?string
+    {
+        $provided = $request->headers->get('X-Symbol-Upload-Token');
+        if (!is_string($provided) || $provided === '') {
+            $provided = $request->headers->get('Authorization');
+            if (is_string($provided) && preg_match('/^Bearer\s+(.+)$/', $provided, $matches) === 1) {
+                $provided = $matches[1];
+            }
+        }
+
+        if (!is_string($provided) || $provided === '') {
+            $provided = $request->request->get('token');
+        }
+
+        if (!is_string($provided) || $provided === '') {
+            $provided = $request->query->get('token');
+        }
+
+        return is_string($provided) ? $provided : null;
+    }
+
+    private function stringRequestValue(Request $request, string $key): ?string
+    {
+        $value = $request->request->get($key);
+
+        return is_string($value) && $value !== '' ? $value : null;
+    }
+
+    private function detectServerAddress(Request $request): ?string
+    {
+        foreach ([
+            'PublicIP',
+            'PublicIp',
+            'public_ip',
+            'ServerIP',
+            'ServerIp',
+            'ServerAddress',
+            'ServerAddr',
+            'HostIP',
+            'HostIp',
+        ] as $key) {
+            $address = $this->normalizeServerAddress($this->stringRequestValue($request, $key), $this->detectServerPort($request));
+            if ($address !== null) {
+                return $address;
+            }
+        }
+
+        $metadata = $request->files->get('upload_file_metadata');
+        if ($metadata instanceof UploadedFile && $metadata->isValid() && $metadata->getSize() > 0) {
+            $contents = file_get_contents($metadata->getRealPath());
+            if (is_string($contents)) {
+                $address = $this->detectServerAddressFromText($contents);
+                if ($address !== null) {
+                    return $address;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function detectServerAddressFromText(string $text): ?string
+    {
+        if (preg_match('/public\s+IP\s+from\s+Steam:\s*([0-9]{1,3}(?:\.[0-9]{1,3}){3})(?::(\d{1,5}))?/i', $text, $matches) === 1) {
+            return $this->normalizeServerAddress($matches[1], $matches[2] ?? null);
+        }
+
+        $address = null;
+        if (preg_match('/\b(?:PublicIP|PublicIp|public_ip|ServerIP|ServerIp|ServerAddress|ServerAddr|HostIP|HostIp)\s*[:=]\s*([0-9]{1,3}(?:\.[0-9]{1,3}){3})(?::(\d{1,5}))?/i', $text, $matches) === 1) {
+            $address = $matches[1] . (isset($matches[2]) && $matches[2] !== '' ? ':' . $matches[2] : '');
+        }
+
+        $port = null;
+        if (preg_match('/\b(?:hostport|port|ServerPort|GamePort)\s*[:=]\s*(\d{1,5})\b/i', $text, $matches) === 1) {
+            $port = $matches[1];
+        }
+
+        return $this->normalizeServerAddress($address, $port);
+    }
+
+    private function detectServerPort(Request $request): ?string
+    {
+        foreach (['ServerPort', 'GamePort', 'hostport', 'port', 'Port'] as $key) {
+            $port = $this->stringRequestValue($request, $key);
+            if (is_string($port) && preg_match('/^\d{1,5}$/', $port) === 1) {
+                return $port;
+            }
+        }
+
+        return null;
+    }
+
+    private function normalizeServerAddress(?string $address, ?string $port = null): ?string
+    {
+        if (!is_string($address) || $address === '') {
+            return null;
+        }
+
+        $address = trim($address);
+        if (preg_match('/^([0-9]{1,3}(?:\.[0-9]{1,3}){3})(?::(\d{1,5}))?$/', $address, $matches) !== 1) {
+            return null;
+        }
+
+        $ip = $matches[1];
+        $detectedPort = $matches[2] ?? $port;
+        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            return null;
+        }
+
+        if (is_string($detectedPort) && preg_match('/^\d{1,5}$/', $detectedPort) === 1) {
+            $portNumber = (int) $detectedPort;
+            if ($portNumber > 0 && $portNumber <= 65535) {
+                return $ip . ':' . $portNumber;
+            }
+        }
+
+        return $ip;
     }
 }
