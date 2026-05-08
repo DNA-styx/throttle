@@ -48,27 +48,20 @@ class Sharing
             $app->abort(401);
         }
 
-        $user = $app['request']->get('user', null);
+        $target = $app['request']->get('user', null);
+        if ($target === null) {
+            $app['session']->getFlashBag()->add('error_share_invite', 'Missing user ID or SteamID64');
+            return $app->redirect($app['url_generator']->generate('share_invite'));
+        }
+
+        $user = $this->resolveInviteTargetUserId($app, trim((string) $target));
         if ($user === null) {
-            $app['session']->getFlashBag()->add('error_share_invite', 'Missing user ID');
+            $app['session']->getFlashBag()->add('error_share_invite', 'Invalid or unknown user ID or SteamID64');
             return $app->redirect($app['url_generator']->generate('share_invite'));
         }
-
-        if (!ctype_digit($user) || (int) $user <= 0) {
-            $app['session']->getFlashBag()->add('error_share_invite', 'Invalid user ID');
-            return $app->redirect($app['url_generator']->generate('share_invite'));
-        }
-
-        $user = (int) $user;
 
         if ($user === $app['user']['id']) {
             $app['session']->getFlashBag()->add('error_share_invite', 'You already have full access to your own reports');
-            return $app->redirect($app['url_generator']->generate('share_invite'));
-        }
-
-        $exists = $app['db']->executeQuery('SELECT 1 FROM user WHERE id = ?', array($user))->fetchColumn(0);
-        if ($exists === false) {
-            $app['session']->getFlashBag()->add('error_share_invite', 'Unknown user ID');
             return $app->redirect($app['url_generator']->generate('share_invite'));
         }
 
@@ -87,6 +80,44 @@ class Sharing
         $return = self::getSafeReturnPath($app, $app['request']->get('return', null));
 
         return $app->redirect($return);
+    }
+
+    private function resolveInviteTargetUserId(Application $app, string $target): ?int
+    {
+        if ($target === '') {
+            return null;
+        }
+
+        if (preg_match('/^steam:(\d{15,20})$/', $target, $matches) === 1) {
+            return $this->findUserIdBySteamId($app, $matches[1]);
+        }
+
+        if (!ctype_digit($target)) {
+            return null;
+        }
+
+        if (strlen($target) >= 15) {
+            return $this->findUserIdBySteamId($app, $target);
+        }
+
+        $user = (int) $target;
+        if ($user <= 0) {
+            return null;
+        }
+
+        $exists = $app['db']->executeQuery('SELECT 1 FROM user WHERE id = ?', array($user))->fetchColumn(0);
+
+        return $exists === false ? null : $user;
+    }
+
+    private function findUserIdBySteamId(Application $app, string $steamId): ?int
+    {
+        $user = $app['db']->executeQuery(
+            'SELECT user_id FROM external_account WHERE kind = ? AND identifier = ? LIMIT 1',
+            array('steam', $steamId)
+        )->fetchColumn(0);
+
+        return $user === false ? null : (int) $user;
     }
 
     public function accept(Application $app)

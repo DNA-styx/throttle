@@ -36,27 +36,67 @@
                         </a>
                         <div class="d-flex align-items-center ms-auto">
                             {% if app.user %}
-                                {% if is_granted('ROLE_ADMIN') %}
-                                    <a href="{{ path('health') }}" class="btn btn-outline-secondary me-2">Health</a>
-                                {% endif %}
-                                <a href="{{ path('profile') }}" class="btn navbar-text-btn me-1">
-                                    {{ include('_server_owner.html.twig', {owner: app.user}) }}
-                                </a>
-                                {% if is_granted('IS_IMPERSONATOR') %}
-                                    <a href="{{ impersonation_exit_path() }}" class="btn btn-outline-danger me-2">
-                                        <svg class="bi me-1" width="16" height="16" aria-hidden="true">
-                                            <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#box-arrow-right"></use>
-                                        </svg>
-                                        Exit Impersonation
-                                    </a>
-                                {% else %}
-                                    <a href="{{ logout_path() }}" class="btn btn-outline-dark me-2">
-                                        <svg class="bi me-1" width="16" height="16" aria-hidden="true">
-                                            <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#box-arrow-right"></use>
-                                        </svg>
-                                        Logout
-                                    </a>
-                                {% endif %}
+                                <div class="dropdown">
+                                    <button class="btn navbar-text-btn dropdown-toggle d-flex align-items-center gap-2" type="button" id="account-menu" data-bs-toggle="dropdown" aria-expanded="false">
+                                        {{ include('_server_owner.html.twig', {owner: app.user}) }}
+                                    </button>
+                                    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="account-menu">
+                                        <li>
+                                            <a class="dropdown-item" href="{{ path('profile') }}">
+                                                <svg class="bi me-2" width="16" height="16" aria-hidden="true">
+                                                    <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#person-fill"></use>
+                                                </svg>
+                                                Profile
+                                            </a>
+                                        </li>
+                                        <li>
+                                            <a class="dropdown-item" href="{{ path('dashboard') }}">
+                                                <svg class="bi me-2" width="16" height="16" aria-hidden="true">
+                                                    <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#list"></use>
+                                                </svg>
+                                                Dashboard
+                                            </a>
+                                        </li>
+                                        {% if is_granted('ROLE_ADMIN') %}
+                                            <li>
+                                                <a class="dropdown-item" href="{{ path('health') }}">
+                                                    <svg class="bi me-2" width="16" height="16" aria-hidden="true">
+                                                        <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#heart-fill"></use>
+                                                    </svg>
+                                                    Health
+                                                </a>
+                                            </li>
+                                        {% endif %}
+                                        <li>
+                                            <a class="dropdown-item" href="{{ path('share') }}">
+                                                <svg class="bi me-2" width="16" height="16" aria-hidden="true">
+                                                    <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#share-fill"></use>
+                                                </svg>
+                                                Sharing
+                                            </a>
+                                        </li>
+                                        <li><hr class="dropdown-divider"></li>
+                                        {% if is_granted('IS_IMPERSONATOR') %}
+                                            <li>
+                                                <a class="dropdown-item text-danger" href="{{ impersonation_exit_path() }}">
+                                                    <svg class="bi me-2" width="16" height="16" aria-hidden="true">
+                                                        <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#box-arrow-right"></use>
+                                                    </svg>
+                                                    Exit Impersonation
+                                                </a>
+                                            </li>
+                                        {% else %}
+                                            <li>
+                                                <a class="dropdown-item" href="{{ logout_path() }}">
+                                                    <svg class="bi me-2" width="16" height="16" aria-hidden="true">
+                                                        <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#box-arrow-right"></use>
+                                                    </svg>
+                                                    Logout
+                                                </a>
+                                            </li>
+                                        {% endif %}
+                                    </ul>
+                                </div>
                             {% elseif not (app.request.attributes.get('_route') starts with 'login') %}
                                 <a href="{{ path('login_steam', {'return': app.request.requestUri}) }}" class="btn btn-outline-primary me-2">
                                     <svg class="bi me-1" width="16" height="16" aria-hidden="true">

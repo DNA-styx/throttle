@@ -20,12 +20,13 @@
 {% endfor %}
             <form action="{{ path('share_invite_post') }}" method="POST" class="form-inline text-center">
                 <div class="input-group">
-                    <span class="input-group-addon">User ID</span>
-                    <input type="text" name="user" class="form-control span4" required pattern="\d*" placeholder="{{ legacy_app.user.id }}">
+                    <span class="input-group-addon">User ID or SteamID64</span>
+                    <input type="text" name="user" class="form-control span4" required pattern="(?:steam:)?\d{1,20}" placeholder="{{ legacy_app.user.id }} or 76561198000000000">
                     <span class="input-group-btn">
                         <button type="submit" class="btn btn-success"><i class="icon-inbox"></i> Invite</button>
                     </span>
                 </div>
+                <p class="help-block">Use a local Throttle user ID or a SteamID64 from a Steam profile.</p>
             </form>
         </div>
     </div>
