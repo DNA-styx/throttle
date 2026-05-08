@@ -63,7 +63,7 @@ class SymbolsUpdateCommand extends Command
                 continue;
             }
 
-            $app['db']->executeUpdate('UPDATE module SET present = ? WHERE name = ? AND identifier = ?', array($found, $module['name'], $module['identifier']));
+            $app['db']->executeUpdate('UPDATE module SET present = ? WHERE name = ? AND identifier = ?', array((int) $found, $module['name'], $module['identifier']));
         }
 
         $progress->finish();
