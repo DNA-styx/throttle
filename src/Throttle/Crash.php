@@ -103,13 +103,27 @@ class Crash
 
         $basename = basename($lower);
 
-        return str_contains($lower, '/addons/')
+        if (str_contains($lower, '/.steam/')
+            || $basename === 'steamclient.so'
+            || str_starts_with($basename, 'lib')
+            || str_ends_with($basename, '_srv.so')
+            || in_array($basename, array('linux-gate.so', 'ld-linux.so.2'), true)
+        ) {
+            return false;
+        }
+
+        if (str_contains($lower, '/addons/sourcemod/')
+            || str_contains($lower, '/addons/metamod/')
+            || str_contains($lower, '/addons/')
             || str_contains($lower, '/extensions/')
             || str_contains($lower, '/plugins/')
-            || str_contains($lower, '/tf/bin/')
-            || str_contains($lower, '/bin/')
-            || str_ends_with($lower, 'srcds_linux')
-            || str_ends_with($basename, '.so');
+        ) {
+            return true;
+        }
+
+        return str_ends_with($lower, 'srcds_linux')
+            || preg_match('/\.ext(?:\.[^.]+)*\.so$/', $basename) === 1
+            || preg_match('/^(sourcemod|sourcepawn|metamod|crashhandler)\b.*\.so$/', $basename) === 1;
     }
 
     private static function getSymbolModuleName(string $module): string
