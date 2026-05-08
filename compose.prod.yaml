@@ -21,6 +21,7 @@ services:
       MAILER_FROM: ${MAILER_FROM:-throttle@localhost}
       SENTRY_DSN: ${SENTRY_DSN:-}
       STEAM_API_KEY: ${STEAM_API_KEY:-}
+      APP_ADMINS: ${APP_ADMINS:-}
       SYMBOL_UPLOAD_TOKEN: ${SYMBOL_UPLOAD_TOKEN:-}
       OAUTH_GITHUB_CLIENT_ID: ${OAUTH_GITHUB_CLIENT_ID:-}
       OAUTH_GITHUB_CLIENT_SECRET: ${OAUTH_GITHUB_CLIENT_SECRET:-}
@@ -39,6 +40,46 @@ services:
       retries: 5
       start_period: 20s
     volumes:
+      - var_data:/app/var
+      - dumps_data:/app/dumps
+      - symbols_data:/app/symbols
+
+  processor:
+    image: throttle-prod
+    depends_on:
+      - app
+      - db
+      - redis
+    environment:
+      APP_ENV: prod
+      APP_DEBUG: 0
+      APP_RUNTIME_OPTIONS: '{"disable_dotenv":true}'
+      APP_SECRET: ${APP_SECRET:?set APP_SECRET}
+      CODE_EDITOR: phpstorm
+      DATABASE_URL: mysql://throttle:${MARIADB_PASSWORD:?set MARIADB_PASSWORD}@db:3306/throttle?serverVersion=mariadb-10.11.2&charset=utf8mb4
+      REDIS_URL: redis://redis:6379
+      MESSENGER_TRANSPORT_DSN: doctrine://default?auto_setup=0
+      MAILER_DSN: ${MAILER_DSN:-null://null}
+      MAILER_FROM: ${MAILER_FROM:-throttle@localhost}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      STEAM_API_KEY: ${STEAM_API_KEY:-}
+      APP_ADMINS: ${APP_ADMINS:-}
+      SYMBOL_UPLOAD_TOKEN: ${SYMBOL_UPLOAD_TOKEN:-}
+      OAUTH_GITHUB_CLIENT_ID: ${OAUTH_GITHUB_CLIENT_ID:-}
+      OAUTH_GITHUB_CLIENT_SECRET: ${OAUTH_GITHUB_CLIENT_SECRET:-}
+      OAUTH_DISCORD_CLIENT_ID: ${OAUTH_DISCORD_CLIENT_ID:-}
+      OAUTH_DISCORD_CLIENT_SECRET: ${OAUTH_DISCORD_CLIENT_SECRET:-}
+      OAUTH_ALLIEDMODS_CLIENT_ID: ${OAUTH_ALLIEDMODS_CLIENT_ID:-}
+      OAUTH_ALLIEDMODS_CLIENT_SECRET: ${OAUTH_ALLIEDMODS_CLIENT_SECRET:-}
+      AUTO_MIGRATE: 0
+    restart: unless-stopped
+    command: >
+      sh -c 'while true; do
+        php /app/bin/console crash:process --env=prod --no-debug --update --limit=10;
+        sleep 60;
+      done'
+    volumes:
+      - var_data:/app/var
       - dumps_data:/app/dumps
       - symbols_data:/app/symbols
 
@@ -62,5 +103,6 @@ services:
 volumes:
   db_data:
   redis_data:
+  var_data:
   dumps_data:
   symbols_data:

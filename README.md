@@ -30,7 +30,7 @@ This 2026 branch includes:
 - Nginx and PHP-FPM for manual VPS installs.
 - Docker Compose for Docker installs.
 
-Required PHP extensions include `ctype`, `iconv`, `intl`, `pdo_mysql`, and common Symfony runtime extensions. Do not enable duplicate PHP extensions in `php.ini`; install them through packages and let PHP load the matching `conf.d` files.
+Required PHP extensions include `ctype`, `iconv`, `intl`, `pdo_mysql`, `bcmath`, `xsl`, `zip`, and common Symfony runtime extensions. Do not enable duplicate PHP extensions in `php.ini`; install them through packages and let PHP load the matching `conf.d` files.
 
 ### Docker Compose Install
 
@@ -49,6 +49,7 @@ APP_SECRET=change-this-to-a-long-random-value
 MARIADB_PASSWORD=change-this
 MARIADB_ROOT_PASSWORD=change-this-too
 STEAM_API_KEY=optional-steam-web-api-key
+APP_ADMINS=steam:YOUR_STEAMID64
 SYMBOL_UPLOAD_TOKEN=optional-global-symbol-token
 APP_PORT=18080
 AUTO_MIGRATE=1
@@ -62,7 +63,9 @@ docker compose --env-file .env.prod.docker -f compose.prod.yaml ps
 docker compose --env-file .env.prod.docker -f compose.prod.yaml exec app php bin/console doctrine:migrations:status --env=prod
 ```
 
-Open `http://SERVER_IP:18080/` or put Nginx/Traefik/Caddy in front of the container.
+The production compose file starts the web app plus a `processor` service that runs `crash:process --update --limit=10` every minute. Persistent Docker volumes keep the database, Redis data, crash dumps, symbol files, and runtime `var/` data, including `/health` symbol request policy changes.
+
+Open `http://SERVER_IP:18080/` or put Nginx/Traefik/Caddy in front of the container. After first Steam login, use `APP_ADMINS` to grant access to `/health`.
 
 ### Manual Ubuntu/Nginx/PHP-FPM Install
 
@@ -88,6 +91,7 @@ MAILER_DSN=null://null
 MAILER_FROM=throttle@example.com
 SENTRY_DSN=
 STEAM_API_KEY=
+APP_ADMINS=steam:YOUR_STEAMID64
 SYMBOL_UPLOAD_TOKEN=optional-global-symbol-token
 ```
 
@@ -168,7 +172,7 @@ If the server's libcurl does not support HTTPS, use HTTP behind your own trusted
 
 ### Crash Processing
 
-Install the provided systemd files on manual VPS deployments:
+Docker Compose deployments already run the `processor` service. For manual VPS deployments, install the provided systemd files:
 
 ```bash
 cp deploy/systemd/throttle-crash-process.service /etc/systemd/system/
@@ -186,11 +190,11 @@ sudo -u www-data php8.4 /var/www/throttle/bin/console crash:process --env=prod -
 
 ### Health and Troubleshooting
 
-- `/health` is admin-only and shows queue, storage, binary, and runtime health.
+- `/health` is admin-only and shows queue, storage, binary, and runtime health. It also edits the binary upload request policy used by Accelerator presubmit; saved changes are stored in `var/symbol-request-policy.json`.
 - Grant admin access without editing the database by setting `APP_ADMINS` in `.env.local` or the service environment. Accepted values are comma-separated user ids, `user:<id>`, SteamID64 values, or `steam:<SteamID64>`, for example `APP_ADMINS="steam:STEAMID64,user:1"`.
 - Pending crashes usually mean `crash:process` is not running or failed.
 - `bin/carburetor`, `bin/minidump_stackwalk`, `bin/dump_syms`, `bin/breakpad_moduleid`, and `bin/nm` must be executable.
-- `var/`, `cache/`, `dumps/`, and `symbols/` must be writable by the PHP-FPM user.
+- `var/`, `cache/`, `dumps/`, and `symbols/` must be writable by the PHP-FPM user. Back up `var/symbol-request-policy.json` if you use custom `/health` policy rules.
 - If templates fail with missing Encore entrypoints, run `npm ci && npm run build` and verify `public/build/entrypoints.json` exists.
 - If Composer uses PHP 8.1 on a PHP 8.4 project, run Composer through PHP 8.4: `php8.4 $(which composer) install --no-dev --optimize-autoloader`.
 - If PHP-FPM logs duplicate or missing extensions, fix `/etc/php/8.4/fpm/php.ini` and use package-managed `conf.d` extension files.
