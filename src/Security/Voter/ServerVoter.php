@@ -4,6 +4,7 @@ namespace App\Security\Voter;
 
 use App\Entity\Server;
 use App\Entity\User;
+use App\Security\ConfigAdminChecker;
 
 /**
  * @extends EntityActionVoter<Server>
@@ -12,6 +13,10 @@ class ServerVoter extends EntityActionVoter
 {
     public const EDIT = 'SERVER_EDIT';
     public const VIEW = 'SERVER_VIEW';
+
+    public function __construct(private readonly ConfigAdminChecker $configAdminChecker)
+    {
+    }
 
     protected function supportedEntityType(): string
     {
@@ -25,7 +30,7 @@ class ServerVoter extends EntityActionVoter
 
     protected function canUserPerformAction(User $user, string $action, object $subject): bool
     {
-        if (\in_array(User::ROLE_ADMIN, $user->getRoles(), true)) {
+        if (\in_array(User::ROLE_ADMIN, $user->getRoles(), true) || $this->configAdminChecker->isAdmin($user)) {
             return true;
         }
 

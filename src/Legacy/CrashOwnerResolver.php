@@ -4,20 +4,24 @@ namespace App\Legacy;
 
 use App\Entity\ServerOwner;
 use App\Entity\User;
+use App\Security\ConfigAdminChecker;
 use Doctrine\DBAL\Connection;
 
 class CrashOwnerResolver
 {
     private Connection $connection;
+    private ConfigAdminChecker $configAdminChecker;
 
-    public function __construct(Connection $connection)
+    public function __construct(Connection $connection, ConfigAdminChecker $configAdminChecker)
     {
         $this->connection = $connection;
+        $this->configAdminChecker = $configAdminChecker;
     }
 
     public function isAdmin(?User $user): bool
     {
-        return $user?->getRoles() !== null && in_array(User::ROLE_ADMIN, $user->getRoles(), true);
+        return ($user?->getRoles() !== null && in_array(User::ROLE_ADMIN, $user->getRoles(), true))
+            || $this->configAdminChecker->isAdmin($user);
     }
 
     /**

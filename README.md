@@ -187,6 +187,7 @@ sudo -u www-data php8.4 /var/www/throttle/bin/console crash:process --env=prod -
 ### Health and Troubleshooting
 
 - `/health` is admin-only and shows queue, storage, binary, and runtime health.
+- Grant admin access without editing the database by setting `APP_ADMINS` in `.env.local` or the service environment. Accepted values are comma-separated user ids, `user:<id>`, SteamID64 values, or `steam:<SteamID64>`, for example `APP_ADMINS="steam:STEAMID64,user:1"`.
 - Pending crashes usually mean `crash:process` is not running or failed.
 - `bin/carburetor`, `bin/minidump_stackwalk`, `bin/dump_syms`, `bin/breakpad_moduleid`, and `bin/nm` must be executable.
 - `var/`, `cache/`, `dumps/`, and `symbols/` must be writable by the PHP-FPM user.

@@ -6,6 +6,8 @@
 parameters:
     app.name: 'Throttle'
     app.login_link_lifetime: 600
+    app.admins_default: ''
+    app.admins: '%env(default:app.admins_default:APP_ADMINS)%'
     app.symbol_upload_token: '%env(SYMBOL_UPLOAD_TOKEN)%'
     app.legacy:
         accelerator: ''
@@ -42,6 +44,10 @@ services:
     App\Security\UserManager:
         arguments:
             $loginLinkLifetime: '%app.login_link_lifetime%'
+
+    App\Security\ConfigAdminChecker:
+        arguments:
+            $adminUsers: '%app.admins%'
 
     # this isn't quite correct, but it works for now
     App\Security\SteamOpenIdAuthenticator:
