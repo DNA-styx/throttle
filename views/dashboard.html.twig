@@ -69,12 +69,12 @@
 {% if crash.processed == 1 %}
                         <form action="{{ path('reprocess', {id: crash.id, return: legacy_app.request.pathInfo}) }}" method="post" class="button-form">
                             <input type="hidden" name="_token" value="{{ csrf_token('reprocess-crash:' ~ crash.id) }}">
-                            <button type="submit" class="btn btn-xs btn-default"><i class="icon-refresh"></i></button>
+                            <button type="submit" class="btn btn-xs btn-default" data-toggle="tooltip" data-container="body" data-placement="top" title="Reprocess this crash with the current symbols"><i class="icon-refresh"></i></button>
                     </form>
 {% endif %}
                     <form action="{{ path('delete', {id: crash.id, return: legacy_app.request.pathInfo}) }}" method="post" class="button-form">
                         <input type="hidden" name="_token" value="{{ csrf_token('delete-crash:' ~ crash.id) }}">
-                        <button type="submit" class="btn btn-xs btn-danger"><i class="icon-trash"></i></button>
+                        <button type="submit" class="btn btn-xs btn-danger" data-toggle="tooltip" data-container="body" data-placement="top" title="Delete this crash report"><i class="icon-trash"></i></button>
                     </form>
 {% endif %}
                     </td>
