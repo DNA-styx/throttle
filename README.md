@@ -181,7 +181,7 @@ systemctl list-timers throttle-crash-process.timer
 Run one processor pass manually:
 
 ```bash
-sudo -u www-data php8.4 /var/www/throttle/bin/console crash:process --env=prod --no-debug --limit=10
+sudo -u www-data php8.4 /var/www/throttle/bin/console crash:process --env=prod --no-debug --update --limit=10
 ```
 
 ### Health and Troubleshooting
@@ -383,7 +383,7 @@ systemctl list-timers throttle-crash-process.timer
 Один ручной запуск processor'а:
 
 ```bash
-sudo -u www-data php8.4 /var/www/throttle/bin/console crash:process --env=prod --no-debug --limit=10
+sudo -u www-data php8.4 /var/www/throttle/bin/console crash:process --env=prod --no-debug --update --limit=10
 ```
 
 ### Health И Диагностика

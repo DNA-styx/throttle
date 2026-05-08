@@ -66,12 +66,29 @@ class Symbols
         }
 
         \Filesystem::writeFile($path . '/' . $file . '.sym.gz', gzencode($data));
+        $this->markModuleSymbolsPresent($app, $info['name'], $info['id']);
 
         $app['redis']->hIncrBy('throttle:stats', 'symbols:accepted', 1);
 
         return $app['twig']->render('submit-symbols.txt.twig', array(
             'module' => $info,
         ));
+    }
+
+    private function markModuleSymbolsPresent(Application $app, string $module, string $identifier): void
+    {
+        if (!isset($app['db'])) {
+            return;
+        }
+
+        $updated = $app['db']->executeUpdate(
+            'UPDATE module SET present = 1 WHERE name = ? AND identifier = ? AND present = 0',
+            array($module, $identifier)
+        );
+
+        if ($updated > 0) {
+            $app['redis']->hIncrBy('throttle:stats', 'symbols:module-present-updates', $updated);
+        }
     }
 
     private function findUploadedSymbolFile(Application $app): ?UploadedFile

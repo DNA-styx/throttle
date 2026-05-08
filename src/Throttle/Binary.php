@@ -144,6 +144,23 @@ class Binary
         $path = $app['root'] . '/symbols/public/' . $module . '/' . $identifier;
         \Filesystem::createDirectory($path, 0777, true);
         \Filesystem::writeFile($path . '/' . $symbolName . '.sym.gz', gzencode($contents));
+        $this->markModuleSymbolsPresent($app, $module, $identifier);
+    }
+
+    private function markModuleSymbolsPresent(Application $app, string $module, string $identifier): void
+    {
+        if (!isset($app['db'])) {
+            return;
+        }
+
+        $updated = $app['db']->executeUpdate(
+            'UPDATE module SET present = 1 WHERE name = ? AND identifier = ? AND present = 0',
+            array($module, $identifier)
+        );
+
+        if ($updated > 0) {
+            $app['redis']->hIncrBy('throttle:stats', 'symbols:module-present-updates', $updated);
+        }
     }
 
     private function stringField(Application $app, string $field): ?string
