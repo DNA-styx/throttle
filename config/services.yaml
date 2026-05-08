@@ -15,6 +15,15 @@ parameters:
         maintenance: ''
         show-version: false
         symbol-stores: ['public']
+        symbol-request:
+            deny-path-prefixes: ['/usr/lib/', '/lib/', '/usr/local/lib/', '/lib32/', '/lib64/']
+            deny-path-contains: ['/.steam/', '/i386-linux-gnu/', '/x86_64-linux-gnu/']
+            deny-exact: ['steamclient.so', 'linux-gate.so', 'ld-linux.so.2']
+            deny-prefixes: ['lib']
+            deny-suffixes: ['_srv.so']
+            allow-path-contains: ['/addons/sourcemod/', '/addons/metamod/', '/addons/', '/extensions/', '/plugins/']
+            allow-exact: ['srcds_linux']
+            allow-regex: ['/^.*\.ext(?:\.[^.]+)*\.so$/', '/^(sourcemod|sourcepawn|metamod|crashhandler)\b.*\.so$/']
 
 services:
     # default configuration for services in *this* file

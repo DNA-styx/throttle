@@ -57,5 +57,67 @@
                 </table>
             </div>
         </section>
+
+        <section class="profile-panel mt-3">
+            <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
+                <div>
+                    <h2 class="h5 mb-1">Binary upload request policy</h2>
+                    <div class="text-muted">These effective rules control which Linux modules Accelerator is asked to upload so Throttle can generate symbols during presubmit.</div>
+                </div>
+                <span class="badge text-bg-secondary">{{ symbolRequestPolicySource }}</span>
+            </div>
+
+            {% if symbolRequestPolicySaved %}
+                <div class="alert alert-success">Binary upload request policy saved.</div>
+            {% endif %}
+            {% if symbolRequestPolicyReset %}
+                <div class="alert alert-success">Binary upload request policy reset to defaults.</div>
+            {% endif %}
+            {% for error in symbolRequestPolicyErrors %}
+                <div class="alert alert-danger">{{ error }}</div>
+            {% endfor %}
+
+            <form method="post" class="mb-3">
+                <input type="hidden" name="_token" value="{{ csrf_token('symbol-request-policy') }}">
+                <div class="row g-3">
+                    {% for rule, value in symbolRequestPolicyFields %}
+                        <div class="col-md-6">
+                            <label class="form-label" for="symbol-request-{{ rule }}"><code>{{ rule }}</code></label>
+                            <textarea id="symbol-request-{{ rule }}" name="symbol_request_policy[{{ rule }}]" class="form-control font-monospace" rows="{{ rule == 'allow-regex' ? 4 : 3 }}">{{ value }}</textarea>
+                            <div class="form-text">One value per line.</div>
+                        </div>
+                    {% endfor %}
+                </div>
+                <div class="d-flex gap-2 mt-3">
+                    <button type="submit" class="btn btn-primary">Save policy</button>
+                    <button type="submit" name="reset_policy" value="1" class="btn btn-outline-secondary">Reset to defaults</button>
+                </div>
+            </form>
+
+            <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                    <thead>
+                        <tr>
+                            <th>Rule</th>
+                            <th>Values</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for rule, values in symbolRequestPolicy %}
+                            <tr>
+                                <td><code>{{ rule }}</code></td>
+                                <td>
+                                    {% for value in values %}
+                                        <code class="me-2">{{ value }}</code>
+                                    {% else %}
+                                        <span class="text-muted">None</span>
+                                    {% endfor %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
     </div>
 {% endblock %}

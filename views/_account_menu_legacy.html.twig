@@ -1,0 +1,30 @@
+<ul class="nav navbar-nav">
+    <li class="dropdown {% if legacy_app.user.pending > 0 %}pending-notifications{% endif %}">
+        <a href="#" class="dropdown-toggle" data-toggle="dropdown">
+            {% if legacy_app.user.name %}
+                <img src="{{ legacy_app.user.avatar }}" alt="{{ legacy_app.user.name }}'s avatar">
+                {{ legacy_app.user.name }}
+            {% else %}
+                Account
+            {% endif %}
+            <!-- {{ legacy_app.user.id }} -->
+            <b class="caret"></b>
+        </a>
+        <ul class="dropdown-menu pull-right">
+            <li><a href="{{ path('profile') }}"><i class="icon-fixed-width icon-user"></i> Profile</a></li>
+            <li><a href="{{ path('dashboard') }}"><i class="icon-fixed-width icon-reorder"></i> Dashboard</a></li>
+            {% if legacy_app.user.admin %}
+                <li><a href="{{ path('health') }}"><i class="icon-fixed-width icon-heart"></i> Health</a></li>
+            {% endif %}
+            <li><a href="{{ path('share') }}"><i class="icon-fixed-width icon-share-alt"></i> Sharing</a></li>
+            <li class="divider"></li>
+            {% if is_granted('IS_IMPERSONATOR') %}
+                <li><a href="{{ impersonation_exit_path() }}"><i class="icon-fixed-width icon-signout"></i> Exit Impersonation</a></li>
+            {% elseif logout_to_index|default(false) %}
+                <li><a href="{{ path('logout') }}"><i class="icon-fixed-width icon-signout"></i> Logout</a></li>
+            {% else %}
+                <li><a href="{{ path('logout', {'return': legacy_app.request.pathInfo}) }}"><i class="icon-fixed-width icon-signout"></i> Logout</a></li>
+            {% endif %}
+        </ul>
+    </li>
+</ul>

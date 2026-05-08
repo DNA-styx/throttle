@@ -15,6 +15,8 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 #[IsGranted(User::ROLE_USER)]
 class ProfileController extends AbstractController
 {
+    private const TOKEN_ACTIVITY_PAGE_SIZE = 50;
+
     #[Route('/profile', name: 'profile', methods: ['GET'])]
     public function show(Request $request, EntityManagerInterface $entityManager, Connection $connection): Response
     {
@@ -49,23 +51,22 @@ class ProfileController extends AbstractController
     }
 
     #[Route('/profile/token/statistics', name: 'profile_token_statistics', methods: ['GET'])]
-    public function tokenStatistics(Connection $connection): Response
+    public function tokenStatistics(Request $request, Connection $connection): Response
     {
         $user = $this->currentUser();
+        $usageTotal = $this->countRecentUsage($connection, $user);
+        $auditTotal = $this->countRecentAudit($connection, $user);
+        $usagePagination = $this->buildPagination($this->getPositivePage($request, 'usage_page'), $usageTotal);
+        $auditPagination = $this->buildPagination($this->getPositivePage($request, 'audit_page'), $auditTotal);
 
         return $this->render('profile/token_statistics.html.twig', [
             'user' => $user,
             'tokenStats' => $this->loadTokenStats($connection, $user),
             'servers' => $this->loadRecentServers($connection, $user, 100),
-            'recentUsage' => $connection->fetchAllAssociative(
-                'SELECT created_at, endpoint, remote_addr, account, module, identifier, bytes, status_code, user_agent
-                 FROM upload_token_usage
-                 WHERE owner_id = ?
-                 ORDER BY created_at DESC
-                 LIMIT 100',
-                [$user->getId()],
-            ),
-            'recentAudit' => $this->loadRecentAudit($connection, $user),
+            'recentUsage' => $this->loadRecentUsage($connection, $user, $usagePagination['page_size'], $usagePagination['offset']),
+            'usagePagination' => $usagePagination,
+            'recentAudit' => $this->loadRecentAudit($connection, $user, $auditPagination['page_size'], $auditPagination['offset']),
+            'auditPagination' => $auditPagination,
         ]);
     }
 
@@ -157,14 +158,39 @@ class ProfileController extends AbstractController
     /**
      * @return array<int, array<string, mixed>>
      */
-    private function loadRecentAudit(Connection $connection, User $user): array
+    private function loadRecentUsage(Connection $connection, User $user, int $limit, int $offset): array
+    {
+        return $connection->fetchAllAssociative(
+            'SELECT created_at, endpoint, remote_addr, account, module, identifier, bytes, status_code, user_agent
+             FROM upload_token_usage
+             WHERE owner_id = ?
+             ORDER BY created_at DESC, id DESC
+             LIMIT ' . $limit . ' OFFSET ' . $offset,
+            [$user->getId()],
+        );
+    }
+
+    private function countRecentUsage(Connection $connection, User $user): int
+    {
+        return (int) $connection->fetchOne(
+            'SELECT COUNT(*)
+             FROM upload_token_usage
+             WHERE owner_id = ?',
+            [$user->getId()],
+        );
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function loadRecentAudit(Connection $connection, User $user, int $limit, int $offset): array
     {
         if ($this->isGranted(User::ROLE_ADMIN)) {
             return $connection->fetchAllAssociative(
                 'SELECT created_at, endpoint, remote_addr, account, module, identifier, bytes, status_code, result, reason, token_suffix
                  FROM upload_token_audit
-                 ORDER BY created_at DESC
-                 LIMIT 100',
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT ' . $limit . ' OFFSET ' . $offset,
             );
         }
 
@@ -172,9 +198,55 @@ class ProfileController extends AbstractController
             'SELECT created_at, endpoint, remote_addr, account, module, identifier, bytes, status_code, result, reason, token_suffix
              FROM upload_token_audit
              WHERE owner_id = ?
-             ORDER BY created_at DESC
-             LIMIT 100',
+             ORDER BY created_at DESC, id DESC
+             LIMIT ' . $limit . ' OFFSET ' . $offset,
             [$user->getId()],
         );
+    }
+
+    private function countRecentAudit(Connection $connection, User $user): int
+    {
+        if ($this->isGranted(User::ROLE_ADMIN)) {
+            return (int) $connection->fetchOne(
+                'SELECT COUNT(*)
+                 FROM upload_token_audit',
+            );
+        }
+
+        return (int) $connection->fetchOne(
+            'SELECT COUNT(*)
+             FROM upload_token_audit
+             WHERE owner_id = ?',
+            [$user->getId()],
+        );
+    }
+
+    private function getPositivePage(Request $request, string $parameter): int
+    {
+        $value = $request->query->get($parameter, '1');
+        if (!is_scalar($value) || !ctype_digit((string) $value)) {
+            return 1;
+        }
+
+        return max(1, (int) $value);
+    }
+
+    /**
+     * @return array{page: int, page_size: int, total: int, total_pages: int, offset: int, previous_page: ?int, next_page: ?int}
+     */
+    private function buildPagination(int $requestedPage, int $total): array
+    {
+        $totalPages = max(1, (int) ceil($total / self::TOKEN_ACTIVITY_PAGE_SIZE));
+        $page = min($requestedPage, $totalPages);
+
+        return [
+            'page' => $page,
+            'page_size' => self::TOKEN_ACTIVITY_PAGE_SIZE,
+            'total' => $total,
+            'total_pages' => $totalPages,
+            'offset' => ($page - 1) * self::TOKEN_ACTIVITY_PAGE_SIZE,
+            'previous_page' => $page > 1 ? $page - 1 : null,
+            'next_page' => $page < $totalPages ? $page + 1 : null,
+        ];
     }
 }

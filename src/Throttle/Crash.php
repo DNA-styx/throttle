@@ -85,45 +85,91 @@ class Crash
         return $flattened;
     }
 
-    private static function shouldRequestSymbolsForModule(string $module): bool
+    public static function getSymbolRequestPolicy(array $config = []): array
     {
+        $defaults = [
+            'deny-path-prefixes' => ['/usr/lib/', '/lib/', '/usr/local/lib/', '/lib32/', '/lib64/'],
+            'deny-path-contains' => ['/.steam/', '/i386-linux-gnu/', '/x86_64-linux-gnu/'],
+            'deny-exact' => ['steamclient.so', 'linux-gate.so', 'ld-linux.so.2'],
+            'deny-prefixes' => ['lib'],
+            'deny-suffixes' => ['_srv.so'],
+            'allow-path-contains' => ['/addons/sourcemod/', '/addons/metamod/', '/addons/', '/extensions/', '/plugins/'],
+            'allow-exact' => ['srcds_linux'],
+            'allow-regex' => ['/^.*\.ext(?:\.[^.]+)*\.so$/', '/^(sourcemod|sourcepawn|metamod|crashhandler)\b.*\.so$/'],
+        ];
+
+        $configured = $config['symbol-request'] ?? [];
+        if (!is_array($configured)) {
+            return $defaults;
+        }
+
+        foreach ($defaults as $key => $value) {
+            if (!isset($configured[$key]) || !is_array($configured[$key])) {
+                $configured[$key] = $value;
+            }
+        }
+
+        return $configured;
+    }
+
+    private static function shouldRequestSymbolsForModule(string $module, array $config = []): bool
+    {
+        $policy = self::getSymbolRequestPolicy($config);
         $module = str_replace('\\', '/', $module);
         $lower = strtolower($module);
 
-        if (str_starts_with($lower, '/usr/lib/')
-            || str_starts_with($lower, '/lib/')
-            || str_starts_with($lower, '/usr/local/lib/')
-            || str_starts_with($lower, '/lib32/')
-            || str_starts_with($lower, '/lib64/')
-            || str_contains($lower, '/i386-linux-gnu/')
-            || str_contains($lower, '/x86_64-linux-gnu/')
-        ) {
-            return false;
+        foreach ($policy['deny-path-prefixes'] as $prefix) {
+            if ($prefix !== '' && str_starts_with($lower, strtolower((string) $prefix))) {
+                return false;
+            }
+        }
+
+        foreach ($policy['deny-path-contains'] as $needle) {
+            if ($needle !== '' && str_contains($lower, strtolower((string) $needle))) {
+                return false;
+            }
         }
 
         $basename = basename($lower);
 
-        if (str_contains($lower, '/.steam/')
-            || $basename === 'steamclient.so'
-            || str_starts_with($basename, 'lib')
-            || str_ends_with($basename, '_srv.so')
-            || in_array($basename, array('linux-gate.so', 'ld-linux.so.2'), true)
-        ) {
-            return false;
+        foreach ($policy['deny-exact'] as $exact) {
+            if ($basename === strtolower((string) $exact)) {
+                return false;
+            }
         }
 
-        if (str_contains($lower, '/addons/sourcemod/')
-            || str_contains($lower, '/addons/metamod/')
-            || str_contains($lower, '/addons/')
-            || str_contains($lower, '/extensions/')
-            || str_contains($lower, '/plugins/')
-        ) {
-            return true;
+        foreach ($policy['deny-prefixes'] as $prefix) {
+            if ($prefix !== '' && str_starts_with($basename, strtolower((string) $prefix))) {
+                return false;
+            }
         }
 
-        return str_ends_with($lower, 'srcds_linux')
-            || preg_match('/\.ext(?:\.[^.]+)*\.so$/', $basename) === 1
-            || preg_match('/^(sourcemod|sourcepawn|metamod|crashhandler)\b.*\.so$/', $basename) === 1;
+        foreach ($policy['deny-suffixes'] as $suffix) {
+            if ($suffix !== '' && str_ends_with($basename, strtolower((string) $suffix))) {
+                return false;
+            }
+        }
+
+        foreach ($policy['allow-path-contains'] as $needle) {
+            if ($needle !== '' && str_contains($lower, strtolower((string) $needle))) {
+                return true;
+            }
+        }
+
+        foreach ($policy['allow-exact'] as $exact) {
+            if ($basename === strtolower((string) $exact)) {
+                return true;
+            }
+        }
+
+        foreach ($policy['allow-regex'] as $pattern) {
+            $pattern = (string) $pattern;
+            if ($pattern !== '' && @preg_match($pattern, $basename) === 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static function getSymbolModuleName(string $module): string
@@ -400,7 +446,7 @@ class Crash
         // TODO: Determine whether we want the crash dump...
         $return = 'Y|';
         foreach ($signature->modules as $module) {
-            if (!self::shouldRequestSymbolsForModule($module->file)) {
+            if (!self::shouldRequestSymbolsForModule($module->file, $app['config'])) {
                 $return .= 'N';
                 continue;
             }
@@ -737,7 +783,47 @@ class Crash
             'id' => $id,
             'modules' => $modules,
             'symbol_coverage' => self::buildSymbolCoverage($modules),
+            'symbol_upload_log' => self::loadSymbolUploadLog($app, $modules),
         ));
+    }
+
+    private static function loadSymbolUploadLog(Application $app, array $modules): array
+    {
+        $moduleNames = array();
+        $identifiers = array();
+        $pairs = array();
+
+        foreach ($modules as $module) {
+            $name = (string) ($module['name'] ?? '');
+            $identifier = (string) ($module['identifier'] ?? '');
+            if ($name === '' || $identifier === '') {
+                continue;
+            }
+
+            $moduleNames[$name] = $name;
+            $identifiers[$identifier] = $identifier;
+            $pairs[$name . "\0" . $identifier] = true;
+        }
+
+        if ($moduleNames === array() || $identifiers === array()) {
+            return array();
+        }
+
+        $rows = $app['db']->executeQuery(
+            'SELECT created_at, endpoint, remote_addr, account, module, identifier, bytes, status_code, result, reason, token_suffix, user_agent
+             FROM upload_token_audit
+             WHERE endpoint IN (\'symbols\', \'binary\')
+               AND module IN (?)
+               AND identifier IN (?)
+             ORDER BY created_at DESC
+             LIMIT 100',
+            array(array_values($moduleNames), array_values($identifiers)),
+            array(102, 102)
+        )->fetchAll();
+
+        return array_values(array_filter($rows, static function (array $row) use ($pairs): bool {
+            return isset($pairs[(string) ($row['module'] ?? '') . "\0" . (string) ($row['identifier'] ?? '')]);
+        }));
     }
 
     public function download(Application $app, $id)

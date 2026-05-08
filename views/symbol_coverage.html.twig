@@ -46,4 +46,42 @@
         </tbody>
     </table>
 </div>
+
+<h2>Symbol Upload Log</h2>
+<div class="well well-tight">
+    <table class="table table-condensed table-striped">
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Result</th>
+                <th>Type</th>
+                <th>Module</th>
+                <th>Identifier</th>
+                <th>Bytes</th>
+                <th>Status</th>
+                <th>Reason</th>
+                <th>Remote</th>
+            </tr>
+        </thead>
+        <tbody>
+{% for event in symbol_upload_log %}
+            <tr class="{{ event.result == 'accepted' ? 'success' : 'warning' }}">
+                <td>{{ event.created_at }}</td>
+                <td>{{ event.result }}</td>
+                <td>{{ event.endpoint }}</td>
+                <td class="monospace">{{ event.module }}</td>
+                <td class="monospace">{{ event.identifier }}</td>
+                <td>{{ event.bytes|number_format }}</td>
+                <td>{{ event.status_code }}</td>
+                <td>{{ event.reason ?: '-' }}</td>
+                <td>{{ event.remote_addr ?: event.account ?: '-' }}</td>
+            </tr>
+{% else %}
+            <tr>
+                <td colspan="9" class="text-muted">No symbol or binary upload events match this crash's modules yet.</td>
+            </tr>
+{% endfor %}
+        </tbody>
+    </table>
+</div>
 {% endblock %}

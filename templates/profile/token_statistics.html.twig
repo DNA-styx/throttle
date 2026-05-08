@@ -70,7 +70,12 @@
         </section>
 
         <section class="profile-panel">
-            <h2 class="h5 mb-3">Recent uploads</h2>
+            <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
+                <h2 class="h5 mb-0">Recent uploads</h2>
+                <div class="text-muted small">
+                    Page {{ usagePagination.page }} of {{ usagePagination.total_pages }} &middot; {{ usagePagination.total }} total
+                </div>
+            </div>
             <div class="table-responsive">
                 <table class="table table-sm align-middle">
                     <thead>
@@ -109,10 +114,31 @@
                     </tbody>
                 </table>
             </div>
+            {% if usagePagination.total_pages > 1 %}
+                {% set usageQueryBase = {'audit_page': auditPagination.page} %}
+                <nav aria-label="Recent uploads pages">
+                    <ul class="pagination pagination-sm mb-0">
+                        <li class="page-item {{ usagePagination.previous_page ? '' : 'disabled' }}">
+                            <a class="page-link" href="{{ usagePagination.previous_page ? path('profile_token_statistics', usageQueryBase|merge({'usage_page': usagePagination.previous_page})) : '#' }}">Previous</a>
+                        </li>
+                        <li class="page-item disabled">
+                            <span class="page-link">{{ usagePagination.page }}</span>
+                        </li>
+                        <li class="page-item {{ usagePagination.next_page ? '' : 'disabled' }}">
+                            <a class="page-link" href="{{ usagePagination.next_page ? path('profile_token_statistics', usageQueryBase|merge({'usage_page': usagePagination.next_page})) : '#' }}">Next</a>
+                        </li>
+                    </ul>
+                </nav>
+            {% endif %}
         </section>
 
         <section class="profile-panel mt-3">
-            <h2 class="h5 mb-3">Token activity audit</h2>
+            <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
+                <h2 class="h5 mb-0">Token activity audit</h2>
+                <div class="text-muted small">
+                    Page {{ auditPagination.page }} of {{ auditPagination.total_pages }} &middot; {{ auditPagination.total }} total
+                </div>
+            </div>
             <div class="table-responsive">
                 <table class="table table-sm align-middle">
                     <thead>
@@ -155,6 +181,22 @@
                     </tbody>
                 </table>
             </div>
+            {% if auditPagination.total_pages > 1 %}
+                {% set auditQueryBase = {'usage_page': usagePagination.page} %}
+                <nav aria-label="Token activity audit pages">
+                    <ul class="pagination pagination-sm mb-0">
+                        <li class="page-item {{ auditPagination.previous_page ? '' : 'disabled' }}">
+                            <a class="page-link" href="{{ auditPagination.previous_page ? path('profile_token_statistics', auditQueryBase|merge({'audit_page': auditPagination.previous_page})) : '#' }}">Previous</a>
+                        </li>
+                        <li class="page-item disabled">
+                            <span class="page-link">{{ auditPagination.page }}</span>
+                        </li>
+                        <li class="page-item {{ auditPagination.next_page ? '' : 'disabled' }}">
+                            <a class="page-link" href="{{ auditPagination.next_page ? path('profile_token_statistics', auditQueryBase|merge({'audit_page': auditPagination.next_page})) : '#' }}">Next</a>
+                        </li>
+                    </ul>
+                </nav>
+            {% endif %}
         </section>
     </div>
 {% endblock %}

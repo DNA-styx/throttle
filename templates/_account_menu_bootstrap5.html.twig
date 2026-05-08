@@ -1,0 +1,62 @@
+<div class="dropdown">
+    <button class="btn navbar-text-btn dropdown-toggle d-flex align-items-center gap-2 py-1" type="button" id="account-menu" data-bs-toggle="dropdown" aria-expanded="false">
+        <img src="{{ (app.user.contactEmail ?: 'user-' ~ app.user.id)|identicon(15) }}" alt="{{ app.user.name }}'s avatar" width="30" height="30" class="rounded border">
+        <span>{{ app.user.name ?: 'Account' }}</span>
+    </button>
+    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="account-menu">
+        <li>
+            <a class="dropdown-item" href="{{ path('profile') }}">
+                <svg class="bi me-2" width="16" height="16" aria-hidden="true">
+                    <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#person-fill"></use>
+                </svg>
+                Profile
+            </a>
+        </li>
+        <li>
+            <a class="dropdown-item" href="{{ path('dashboard') }}">
+                <svg class="bi me-2" width="16" height="16" aria-hidden="true">
+                    <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#list"></use>
+                </svg>
+                Dashboard
+            </a>
+        </li>
+        {% if is_granted('ROLE_ADMIN') %}
+            <li>
+                <a class="dropdown-item" href="{{ path('health') }}">
+                    <svg class="bi me-2" width="16" height="16" aria-hidden="true">
+                        <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#heart-fill"></use>
+                    </svg>
+                    Health
+                </a>
+            </li>
+        {% endif %}
+        <li>
+            <a class="dropdown-item" href="{{ path('share') }}">
+                <svg class="bi me-2" width="16" height="16" aria-hidden="true">
+                    <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#share-fill"></use>
+                </svg>
+                Sharing
+            </a>
+        </li>
+        <li><hr class="dropdown-divider"></li>
+        {% if is_granted('IS_IMPERSONATOR') %}
+            <li>
+                <a class="dropdown-item text-danger" href="{{ impersonation_exit_path() }}">
+                    <svg class="bi me-2" width="16" height="16" aria-hidden="true">
+                        <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#box-arrow-right"></use>
+                    </svg>
+                    Exit Impersonation
+                </a>
+            </li>
+        {% else %}
+            <li>
+                <a class="dropdown-item" href="{{ logout_path() }}">
+                    <svg class="bi me-2" width="16" height="16" aria-hidden="true">
+                        <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#box-arrow-right"></use>
+                    </svg>
+                    Logout
+                </a>
+            </li>
+        {% endif %}
+    </ul>
+</div>

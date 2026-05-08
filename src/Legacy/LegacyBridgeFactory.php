@@ -56,6 +56,7 @@ class LegacyBridgeFactory
         $app = new Application();
         $user = $this->getUser();
         $legacyRequest = LegacyRequest::fromBaseRequest($request);
+        $legacyConfig = $this->getEffectiveLegacyConfig();
 
         $app['db'] = new LegacyDbalConnection($this->connection);
         $app['request'] = $legacyRequest;
@@ -63,12 +64,12 @@ class LegacyBridgeFactory
         $app['url_generator'] = $this->urlGenerator;
         $app['monolog'] = $this->logger;
         $app['root'] = $this->projectDir;
-        $app['config'] = $this->legacyConfig;
+        $app['config'] = $legacyConfig;
         $app['feature'] = ['subscriptions' => false];
         $app['user'] = $this->buildLegacyUser($user);
         $app['redis'] = new LegacyRedis($this->connectRedis(), $this->redisUrl);
         $app['owner_resolver'] = $this->crashOwnerResolver;
-        $app['twig'] = new LegacyTwigRenderer($this->twig, $this->buildTemplateAppContext($legacyRequest, $user));
+        $app['twig'] = new LegacyTwigRenderer($this->twig, $this->buildTemplateAppContext($legacyRequest, $user, $legacyConfig));
 
         return $app;
     }
@@ -76,10 +77,12 @@ class LegacyBridgeFactory
     public function createConsole(): Application
     {
         $app = new Application();
+        $legacyConfig = $this->getEffectiveLegacyConfig();
+
         $app['db'] = new LegacyDbalConnection($this->connection);
         $app['monolog'] = $this->logger;
         $app['root'] = $this->projectDir;
-        $app['config'] = $this->legacyConfig;
+        $app['config'] = $legacyConfig;
         $app['feature'] = ['subscriptions' => false];
         $app['user'] = null;
         $app['redis'] = new LegacyRedis($this->connectRedis(), $this->redisUrl);
@@ -118,16 +121,62 @@ class LegacyBridgeFactory
     /**
      * @return array<string, mixed>
      */
-    private function buildTemplateAppContext(Request $request, ?User $user): array
+    private function buildTemplateAppContext(Request $request, ?User $user, array $legacyConfig): array
     {
         return [
             'request' => $request,
             'session' => $request->getSession(),
             'user' => $this->buildLegacyUser($user),
-            'config' => $this->legacyConfig,
+            'config' => $legacyConfig,
             'feature' => ['subscriptions' => false],
             'version' => null,
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function getEffectiveLegacyConfig(): array
+    {
+        $config = $this->legacyConfig;
+        $policy = $this->loadRuntimeSymbolRequestPolicy();
+        if ($policy !== null) {
+            $config['symbol-request'] = $policy;
+        }
+
+        return $config;
+    }
+
+    /**
+     * @return array<string, array<int, string>>|null
+     */
+    private function loadRuntimeSymbolRequestPolicy(): ?array
+    {
+        $path = $this->projectDir . '/var/symbol-request-policy.json';
+        if (!is_file($path)) {
+            return null;
+        }
+
+        $contents = file_get_contents($path);
+        if (!is_string($contents) || $contents === '') {
+            return null;
+        }
+
+        $decoded = json_decode($contents, true);
+        if (!is_array($decoded)) {
+            return null;
+        }
+
+        $policy = [];
+        foreach ($decoded as $key => $values) {
+            if (!is_string($key) || !is_array($values)) {
+                return null;
+            }
+
+            $policy[$key] = array_values(array_filter($values, static fn ($value): bool => is_string($value) && $value !== ''));
+        }
+
+        return $policy;
     }
 
     private function connectRedis(): ?\Redis
