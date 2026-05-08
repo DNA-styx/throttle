@@ -101,12 +101,15 @@ class Crash
             return false;
         }
 
+        $basename = basename($lower);
+
         return str_contains($lower, '/addons/')
             || str_contains($lower, '/extensions/')
             || str_contains($lower, '/plugins/')
             || str_contains($lower, '/tf/bin/')
             || str_contains($lower, '/bin/')
-            || str_ends_with($lower, 'srcds_linux');
+            || str_ends_with($lower, 'srcds_linux')
+            || str_ends_with($basename, '.so');
     }
 
     private static function getSymbolModuleName(string $module): string
