@@ -109,6 +109,28 @@ class Crash
             || str_ends_with($lower, 'srcds_linux');
     }
 
+    private static function getSymbolModuleName(string $module): string
+    {
+        return basename(str_replace('\\', '/', $module));
+    }
+
+    private static function hasLocalSymbolFile(Application $app, string $module, string $identifier): bool
+    {
+        $module = self::getSymbolModuleName($module);
+        $symname = $module;
+        if (stripos($symname, '.pdb') === strlen($symname) - 4) {
+            $symname = substr($symname, 0, -4);
+        }
+
+        foreach ($app['config']['symbol-stores'] as $store) {
+            if (file_exists($app['root'] . '/symbols/' . $store . '/' . $module . '/' . $identifier . '/' . $symname . '.sym.gz')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static function canUserManage($app, $crash)
     {
         $ownerId = $app['db']->executeQuery('SELECT owner_id FROM crash WHERE crash.id = ?', [$crash])->fetchColumn(0);
@@ -372,9 +394,14 @@ class Crash
                 continue;
             }
 
-            // TODO: N query problem...
-            $exists = $app['db']->executeQuery('SELECT TRUE FROM module WHERE name = ? AND identifier = ? AND present = 1 LIMIT 1', [$module->file, $module->identifier])->fetchColumn(0);
-            $return .= ($exists === false) ? 'Y' : 'N';
+            if (self::hasLocalSymbolFile($app, $module->file, $module->identifier)) {
+                $return .= 'N';
+                continue;
+            }
+
+            $moduleName = self::getSymbolModuleName($module->file);
+            $app['db']->executeUpdate('UPDATE module SET present = 0 WHERE name = ? AND identifier = ? AND present = 1', [$moduleName, $module->identifier]);
+            $return .= 'Y';
         }
 
         // Stick a random presubmit token on the end for testing.
