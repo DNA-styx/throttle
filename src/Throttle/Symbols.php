@@ -3,13 +3,19 @@
 namespace Throttle;
 
 use Silex\Application;
+use Symfony\Component\HttpFoundation\File\UploadedFile;
 
 class Symbols
 {
     public function submit(Application $app)
     {
-        $data = $app['request']->get('symbol_file');
-        if ($data === null) {
+        $file = $this->findUploadedSymbolFile($app);
+        if ($file instanceof UploadedFile) {
+            $data = (string) file_get_contents($file->getPathname());
+        } else {
+            $data = $app['request']->get('symbol_file');
+        }
+        if ($data === null || $data === '') {
             $data = $app['request']->getContent();
         }
         if (!is_string($data)) {
@@ -66,6 +72,18 @@ class Symbols
         return $app['twig']->render('submit-symbols.txt.twig', array(
             'module' => $info,
         ));
+    }
+
+    private function findUploadedSymbolFile(Application $app): ?UploadedFile
+    {
+        foreach (array('symbol_file', 'upload_file_symbols', 'upload_file_symbol', 'symbols') as $field) {
+            $file = $app['request']->files->get($field);
+            if ($file instanceof UploadedFile && $file->isValid() && $file->getSize() > 0) {
+                return $file;
+            }
+        }
+
+        return null;
     }
 }
 

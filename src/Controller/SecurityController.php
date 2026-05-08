@@ -18,9 +18,17 @@ class SecurityController extends AbstractController
             return $this->redirectToRoute('index');
         }
 
-        $loginLinkSent = $request->getSession()->remove('login_link_sent') !== null;
-
         $error = $authenticationUtils->getLastAuthenticationError();
+        if ($error === null) {
+            $return = $request->query->get('return', '/');
+            if (!is_string($return) || $return === '' || $return[0] !== '/' || str_starts_with($return, '//')) {
+                $return = '/';
+            }
+
+            return $this->redirectToRoute('login_steam', ['return' => $return]);
+        }
+
+        $loginLinkSent = $request->getSession()->remove('login_link_sent') !== null;
 
         return $this->render('security/login.html.twig', [
             'login_link_sent' => $loginLinkSent,

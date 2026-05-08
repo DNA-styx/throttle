@@ -76,6 +76,11 @@ class SteamOpenIdAuthenticator extends AbstractAuthenticator
      */
     public function onAuthenticationSuccess(Request $request, TokenInterface $token, string $firewallName): ?Response
     {
+        $return = $request->query->get('return');
+        if (is_string($return) && $return !== '' && $return[0] === '/' && !str_starts_with($return, '//')) {
+            return new RedirectResponse($return);
+        }
+
         return $this->successHandler->onAuthenticationSuccess($request, $token);
     }
 

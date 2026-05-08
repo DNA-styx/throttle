@@ -2,7 +2,7 @@
 
 {% set logout_to_index = true %}
 {% set supports_mobile = true %}
- 
+
 {% block content %}
 <div class="clearfix" style="margin-bottom: 20px;">
     <a class="btn btn-default pull-left" href="{{ path('details', {'id': id}) }}"><i class="icon-chevron-left"></i> Back to Details</a>
@@ -13,7 +13,7 @@
 <div class="panel panel-{{ processing_log.status == 'success' ? 'success' : 'danger' }}">
     <div class="panel-heading">
         <strong>{{ processing_log.status|capitalize }}</strong>
-        <span class="text-muted">{{ processing_log.created_at }}{% if processing_log.duration_ms is not null %} · {{ processing_log.duration_ms }} ms{% endif %}</span>
+        <span class="text-muted">{{ processing_log.created_at }}{% if processing_log.duration_ms is not null %} - {{ processing_log.duration_ms }} ms{% endif %}</span>
         {% if processing_log.message %}<div>{{ processing_log.message }}</div>{% endif %}
     </div>
     <div class="panel-body">
@@ -24,9 +24,12 @@
 {% endif %}
 {% if logs is not empty %}
 <h2>Stackwalk stderr</h2>
-<div><pre>{{ logs }}</pre></div>
+<div class="panel panel-default">
+    <div class="panel-body">
+        <pre style="max-height: 560px; overflow: auto; white-space: pre-wrap;">{{ logs }}</pre>
+    </div>
+</div>
 {% elseif processing_logs is not defined or processing_logs is empty %}
 <div class="alert alert-block alert-danger">Logs are unavailable for this crash.</div>
 {% endif %}
 {% endblock %}
-

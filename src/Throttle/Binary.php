@@ -10,7 +10,7 @@ class Binary
 {
     public function submit(Application $app): Response
     {
-        $file = $app['request']->files->get('code_file');
+        $file = $this->findUploadedBinaryFile($app);
         if (!$file instanceof UploadedFile || !$file->isValid() || $file->getSize() <= 0) {
             $app['redis']->hIncrBy('throttle:stats', 'binaries:rejected:no-file', 1);
 
@@ -67,6 +67,18 @@ class Binary
         }
 
         return new Response($symbolMessage . "\n");
+    }
+
+    private function findUploadedBinaryFile(Application $app): ?UploadedFile
+    {
+        foreach (array('code_file', 'upload_file_binary', 'upload_file_code', 'binary_file', 'binary') as $field) {
+            $file = $app['request']->files->get($field);
+            if ($file instanceof UploadedFile && $file->isValid() && $file->getSize() > 0) {
+                return $file;
+            }
+        }
+
+        return null;
     }
 
     private function dumpSymbols(Application $app, string $binaryPath, string $module, string $identifier): string

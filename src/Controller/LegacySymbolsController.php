@@ -116,8 +116,13 @@ class LegacySymbolsController extends AbstractController
         $bytes = 0;
 
         if ($endpoint === 'symbols') {
-            $data = $request->request->get('symbol_file');
-            if ($data === null) {
+            $uploaded = $this->findUploadedSymbolFile($request);
+            if ($uploaded instanceof UploadedFile) {
+                $data = (string) file_get_contents($uploaded->getPathname());
+            } else {
+                $data = $request->request->get('symbol_file');
+            }
+            if ($data === null || $data === '') {
                 $data = $request->getContent();
             }
             if (is_string($data)) {
@@ -129,7 +134,7 @@ class LegacySymbolsController extends AbstractController
                 }
             }
         } else {
-            $file = $request->files->get('code_file');
+            $file = $this->findUploadedBinaryFile($request);
             if ($file instanceof UploadedFile) {
                 $bytes = (int) $file->getSize();
                 $module = basename(str_replace('\\', '/', (string) (
@@ -183,6 +188,30 @@ class LegacySymbolsController extends AbstractController
             'token_suffix' => is_string($provided) && $provided !== '' ? substr($provided, -8) : null,
             'user_agent' => mb_substr((string) $request->headers->get('User-Agent'), 0, 255),
         ]);
+    }
+
+    private function findUploadedSymbolFile(Request $request): ?UploadedFile
+    {
+        foreach (['symbol_file', 'upload_file_symbols', 'upload_file_symbol', 'symbols'] as $field) {
+            $file = $request->files->get($field);
+            if ($file instanceof UploadedFile && $file->isValid() && $file->getSize() > 0) {
+                return $file;
+            }
+        }
+
+        return null;
+    }
+
+    private function findUploadedBinaryFile(Request $request): ?UploadedFile
+    {
+        foreach (['code_file', 'upload_file_binary', 'upload_file_code', 'binary_file', 'binary'] as $field) {
+            $file = $request->files->get($field);
+            if ($file instanceof UploadedFile && $file->isValid() && $file->getSize() > 0) {
+                return $file;
+            }
+        }
+
+        return null;
     }
 
     private function stringRequestValue(Request $request, string $key): ?string
