@@ -245,13 +245,14 @@ class HealthController extends AbstractController
     }
 
     /**
-     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string}
+     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool}
      */
     private function readUploadSettingsFromRequest(Request $request): array
     {
         return [
             'streaming_symbols_enabled' => $request->request->getBoolean('streaming_symbols_enabled'),
             'upload_memory_limit' => strtoupper(trim((string) $request->request->get('upload_memory_limit', '256M'))),
+            'allow_anonymous_minidump_uploads' => $request->request->getBoolean('allow_anonymous_minidump_uploads'),
         ];
     }
 

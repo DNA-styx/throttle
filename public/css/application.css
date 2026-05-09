@@ -76,6 +76,21 @@ body {
     box-shadow: 0 0 0 1px #ccc;
 }
 
+.throttle-brand-link,
+.navbar-brand-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.throttle-brand-icon {
+    width: 20px;
+    height: 20px;
+    display: inline-block;
+    flex: 0 0 auto;
+    vertical-align: -3px;
+}
+
 .container > div:first-child {
     margin-top: 20px;
 }
@@ -898,6 +913,50 @@ body.theme-system .btn-default {
 body.theme-dark .btn-default:hover,
 body.theme-system .btn-default:hover {
     background-color: #334052;
+}
+
+body.theme-dark .btn-success,
+body.theme-system .btn-success {
+    background-color: #238044;
+    border-color: #2fa85a;
+    color: #f0fff4;
+}
+
+body.theme-dark .btn-success:hover,
+body.theme-dark .btn-success:focus,
+body.theme-system .btn-success:hover,
+body.theme-system .btn-success:focus {
+    background-color: #2f9e55;
+    border-color: #42bf6d;
+    color: #fff;
+}
+
+body.theme-dark .btn-primary,
+body.theme-system .btn-primary {
+    background-color: #2f7ec7;
+    border-color: #4c95d8;
+    color: #f5faff;
+}
+
+body.theme-dark .btn-primary:hover,
+body.theme-dark .btn-primary:focus,
+body.theme-system .btn-primary:hover,
+body.theme-system .btn-primary:focus {
+    background-color: #3d8fdb;
+    border-color: #68ace6;
+    color: #fff;
+}
+
+body.theme-dark .btn-primary.disabled,
+body.theme-dark .btn-primary[disabled],
+body.theme-dark fieldset[disabled] .btn-primary,
+body.theme-system .btn-primary.disabled,
+body.theme-system .btn-primary[disabled],
+body.theme-system fieldset[disabled] .btn-primary {
+    background-color: #244766;
+    border-color: #355f83;
+    color: #b7c8da;
+    opacity: .85;
 }
 
 body.theme-dark .form-control,

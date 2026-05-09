@@ -9,6 +9,7 @@ Throttle is a Symfony/Silex crash-reporting service for Source engine servers us
 This 2026 branch includes:
 
 - Steam-only user login.
+- Public Light/Dark/System theme switcher.
 - Profile upload tokens and token usage/audit statistics.
 - SourceMod Accelerator `core.cfg` generator.
 - `/submit` crash uploads.
@@ -163,7 +164,8 @@ If the server's libcurl does not support HTTPS, use HTTP behind your own trusted
 
 ### Upload Token Behavior
 
-- `/submit` accepts crash dumps without a token so legacy Accelerator crash uploads still work.
+- `/submit` accepts crash dumps without a token by default so legacy Accelerator crash uploads still work.
+- Admins can disable anonymous minidump uploads in `/health`; when disabled, `/submit` requires either a profile upload token or the global `SYMBOL_UPLOAD_TOKEN`.
 - `/submit?token=PROFILE_TOKEN` records profile token usage for crash uploads.
 - `/symbols/submit` requires a profile token, an admin session, or the global `SYMBOL_UPLOAD_TOKEN`.
 - `/binary/submit` requires a profile token, an admin session, or the global `SYMBOL_UPLOAD_TOKEN`.
@@ -188,10 +190,14 @@ Run one processor pass manually:
 sudo -u www-data php8.4 /var/www/throttle/bin/console crash:process --env=prod --no-debug --update --limit=10
 ```
 
+In a crash report, **Processing Runs** are Throttle processor records: status, duration, summary, and processing steps. **Stackwalk stderr** is the raw `minidump_stackwalk` stderr stream with symbol lookup, module parsing, warnings, and stackwalker errors. They can look similar because the processor stores stackwalker output inside the run log for debugging.
+
 ### Health and Troubleshooting
 
-- `/health` is admin-only and shows queue, storage, binary, and runtime health. It edits the binary upload request policy used by Accelerator presubmit and upload processing settings for streaming `.sym` handling and upload endpoint memory limits. Saved changes are stored in `var/symbol-request-policy.json` and `var/upload-settings.json`.
-- Grant admin access without editing the database by setting `APP_ADMINS` in `.env.local` or the service environment. Accepted values are comma-separated user ids, `user:<id>`, SteamID64 values, or `steam:<SteamID64>`, for example `APP_ADMINS="steam:STEAMID64,user:1"`.
+- The top-left theme switcher is available before login and stores `light`, `dark`, or `system` in browser local storage. The default is `system`.
+- `/health` is admin-only and shows queue, storage, binary, and runtime health. It edits the binary upload request policy used by Accelerator presubmit and upload processing settings for streaming `.sym` handling, upload endpoint memory limits, and whether anonymous minidump uploads are allowed. Saved changes are stored in `var/symbol-request-policy.json` and `var/upload-settings.json`.
+- Grant admin access without editing the database by setting `APP_ADMINS` in `.env.local` or the service environment. Accepted values are separated by comma, space, or semicolon: numeric local user ids, `user:<id>`, SteamID64 values, or `steam:<SteamID64>`, for example `APP_ADMINS="steam:STEAMID64,user:1"`.
+- Admins can access `/health`, see global dashboards/audit data, view and manage crash reports they do not own, reprocess/delete crashes, and delete any crash signature note.
 - Pending crashes usually mean `crash:process` is not running or failed.
 - `bin/carburetor`, `bin/minidump_stackwalk`, `bin/dump_syms`, `bin/breakpad_moduleid`, and `bin/nm` must be executable.
 - `var/`, `cache/`, `dumps/`, and `symbols/` must be writable by the PHP-FPM user. Back up `var/symbol-request-policy.json` and `var/upload-settings.json` if you use custom `/health` rules.

@@ -9,6 +9,9 @@
 </div>
 {% if processing_logs is defined and processing_logs is not empty %}
 <h2>Processing Runs</h2>
+<p class="text-muted">
+    Throttle processor runs with status, duration, summary, and the steps it performed. They can include stackwalker output for context.
+</p>
 {% for processing_log in processing_logs %}
 <div class="panel panel-{{ processing_log.status == 'success' ? 'success' : 'danger' }}">
     <div class="panel-heading">
@@ -24,6 +27,9 @@
 {% endif %}
 {% if logs is not empty %}
 <h2>Stackwalk stderr</h2>
+<p class="text-muted">
+    Raw stderr from <code>minidump_stackwalk</code>: symbol lookup, module parsing, warnings, and stackwalker errors. It may overlap with Processing Runs because the processor stores this output during analysis.
+</p>
 <div class="panel panel-default">
     <div class="panel-body">
         <pre style="max-height: 560px; overflow: auto; white-space: pre-wrap;">{{ logs }}</pre>

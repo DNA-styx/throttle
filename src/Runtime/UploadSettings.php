@@ -7,18 +7,19 @@ final class UploadSettings
     public const PATH = '/var/upload-settings.json';
 
     /**
-     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string}
+     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool}
      */
     public static function defaults(): array
     {
         return [
             'streaming_symbols_enabled' => true,
             'upload_memory_limit' => '256M',
+            'allow_anonymous_minidump_uploads' => true,
         ];
     }
 
     /**
-     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string}
+     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool}
      */
     public static function load(string $root): array
     {
@@ -65,7 +66,7 @@ final class UploadSettings
     }
 
     /**
-     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string}
+     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool}
      */
     public static function normalize(array $settings): array
     {
@@ -83,6 +84,9 @@ final class UploadSettings
                 ? filter_var($settings['streaming_symbols_enabled'], FILTER_VALIDATE_BOOL)
                 : $defaults['streaming_symbols_enabled'],
             'upload_memory_limit' => $memoryLimit,
+            'allow_anonymous_minidump_uploads' => array_key_exists('allow_anonymous_minidump_uploads', $settings)
+                ? filter_var($settings['allow_anonymous_minidump_uploads'], FILTER_VALIDATE_BOOL)
+                : $defaults['allow_anonymous_minidump_uploads'],
         ];
     }
 

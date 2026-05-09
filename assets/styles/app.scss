@@ -33,8 +33,17 @@
 }
 
 .navbar-brand-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   font-weight: 600;
   white-space: nowrap;
+}
+
+.throttle-brand-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: 0 0 auto;
 }
 
 .theme-switcher {
@@ -80,8 +89,12 @@
   box-shadow: 0 0 0 1px #cfd7e2;
 }
 
+.app-content-container {
+  max-width: 1170px;
+}
+
 .profile-shell {
-  max-width: 960px;
+  max-width: 1170px;
   margin: 0 auto;
 }
 
@@ -242,6 +255,41 @@
   color: #fff;
   background: #2b3849;
   border-color: #6b7b91;
+}
+
+[data-bs-theme="dark"] .btn-success {
+  color: #f0fff4;
+  background-color: #238044;
+  border-color: #2fa85a;
+}
+
+[data-bs-theme="dark"] .btn-success:hover,
+[data-bs-theme="dark"] .btn-success:focus {
+  color: #fff;
+  background-color: #2f9e55;
+  border-color: #42bf6d;
+}
+
+[data-bs-theme="dark"] .btn-primary {
+  color: #f5faff;
+  background-color: #2f7ec7;
+  border-color: #4c95d8;
+}
+
+[data-bs-theme="dark"] .btn-primary:hover,
+[data-bs-theme="dark"] .btn-primary:focus {
+  color: #fff;
+  background-color: #3d8fdb;
+  border-color: #68ace6;
+}
+
+[data-bs-theme="dark"] .btn-primary:disabled,
+[data-bs-theme="dark"] .btn-primary.disabled,
+[data-bs-theme="dark"] fieldset:disabled .btn-primary {
+  color: #b7c8da;
+  background-color: #244766;
+  border-color: #355f83;
+  opacity: 0.85;
 }
 
 [data-bs-theme="dark"] .pagination .page-link {

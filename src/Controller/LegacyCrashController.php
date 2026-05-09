@@ -3,12 +3,14 @@
 namespace App\Controller;
 
 use App\Legacy\LegacyBridgeFactory;
+use App\Runtime\UploadSettings;
 use App\Repository\UserRepository;
 use Doctrine\DBAL\Connection;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\Routing\Attribute\Route;
 
 class LegacyCrashController extends AbstractController
@@ -18,17 +20,27 @@ class LegacyCrashController extends AbstractController
     private LegacyBridgeFactory $legacyBridgeFactory;
     private UserRepository $userRepository;
     private Connection $connection;
+    private string $projectDir;
+    private string $symbolUploadToken;
 
-    public function __construct(LegacyBridgeFactory $legacyBridgeFactory, UserRepository $userRepository, Connection $connection)
+    public function __construct(LegacyBridgeFactory $legacyBridgeFactory, UserRepository $userRepository, Connection $connection, KernelInterface $kernel, string $symbolUploadToken)
     {
         $this->legacyBridgeFactory = $legacyBridgeFactory;
         $this->userRepository = $userRepository;
         $this->connection = $connection;
+        $this->projectDir = $kernel->getProjectDir();
+        $this->symbolUploadToken = $symbolUploadToken;
     }
 
     #[Route('/submit', name: 'submit', methods: ['POST'])]
     public function submit(Request $request): Response
     {
+        if (!$this->canSubmitMinidump($request)) {
+            $this->recordRejectedMinidumpUpload($request, Response::HTTP_FORBIDDEN, 'invalid token');
+
+            return new Response('Forbidden', Response::HTTP_FORBIDDEN);
+        }
+
         $response = $this->legacyResponse((new \Throttle\Crash())->submit($this->legacyBridgeFactory->createHttp($request)));
         $this->recordTokenUsage($request, $response);
 
@@ -191,6 +203,7 @@ class LegacyCrashController extends AbstractController
         }
 
         $tokenUser = $this->userRepository->findOneBy(['uploadToken' => $provided]);
+        $globalTokenValid = $this->isGlobalUploadToken($provided);
         $bytes = 0;
         foreach ($request->files->all() as $file) {
             if ($file instanceof UploadedFile && $file->isValid()) {
@@ -205,8 +218,9 @@ class LegacyCrashController extends AbstractController
 
         $remoteAddr = $this->detectServerAddress($request) ?? $request->getClientIp();
         $account = $this->stringRequestValue($request, 'UserID') ?? $this->stringRequestValue($request, 'MinidumpAccount');
-        $result = $tokenUser === null || $response->getStatusCode() >= 400 ? 'rejected' : 'accepted';
-        $reason = $tokenUser === null ? 'invalid token' : ($response->getStatusCode() >= 400 ? trim(strip_tags((string) $response->getContent())) : null);
+        $validToken = $tokenUser !== null || $globalTokenValid;
+        $result = !$validToken || $response->getStatusCode() >= 400 ? 'rejected' : 'accepted';
+        $reason = !$validToken ? 'invalid token' : ($response->getStatusCode() >= 400 ? trim(strip_tags((string) $response->getContent())) : null);
 
         $this->recordAudit($tokenUser?->getId(), $request, 'crash', $remoteAddr, $account, null, $identifier, $bytes, $response->getStatusCode(), $result, $reason, $provided);
 
@@ -226,6 +240,58 @@ class LegacyCrashController extends AbstractController
             'status_code' => $response->getStatusCode(),
             'user_agent' => mb_substr((string) $request->headers->get('User-Agent'), 0, 255),
         ]);
+    }
+
+    private function canSubmitMinidump(Request $request): bool
+    {
+        $settings = UploadSettings::load($this->projectDir);
+        if (($settings['allow_anonymous_minidump_uploads'] ?? true) === true) {
+            return true;
+        }
+
+        $provided = $this->getProvidedToken($request);
+        if (!is_string($provided) || $provided === '') {
+            return false;
+        }
+
+        if ($this->isGlobalUploadToken($provided)) {
+            return true;
+        }
+
+        return $this->userRepository->findOneBy(['uploadToken' => $provided]) !== null;
+    }
+
+    private function isGlobalUploadToken(?string $provided): bool
+    {
+        return is_string($provided)
+            && $provided !== ''
+            && $this->symbolUploadToken !== ''
+            && hash_equals($this->symbolUploadToken, $provided);
+    }
+
+    private function recordRejectedMinidumpUpload(Request $request, int $statusCode, string $reason): void
+    {
+        $bytes = 0;
+        foreach ($request->files->all() as $file) {
+            if ($file instanceof UploadedFile && $file->isValid()) {
+                $bytes += (int) $file->getSize();
+            }
+        }
+
+        $this->recordAudit(
+            null,
+            $request,
+            'crash',
+            $this->detectServerAddress($request) ?? $request->getClientIp(),
+            $this->stringRequestValue($request, 'UserID') ?? $this->stringRequestValue($request, 'MinidumpAccount'),
+            null,
+            null,
+            $bytes,
+            $statusCode,
+            'rejected',
+            $reason,
+            $this->getProvidedToken($request)
+        );
     }
 
     private function recordAudit(?int $ownerId, Request $request, string $endpoint, ?string $remoteAddr, ?string $account, ?string $module, ?string $identifier, int $bytes, int $statusCode, string $result, ?string $reason, ?string $token): void

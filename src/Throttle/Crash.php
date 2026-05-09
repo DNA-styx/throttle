@@ -85,6 +85,56 @@ class Crash
         return $flattened;
     }
 
+    private static function getProvidedUploadToken(Application $app): ?string
+    {
+        $provided = $app['request']->headers->get('X-Symbol-Upload-Token');
+        if (!is_string($provided) || $provided === '') {
+            $provided = $app['request']->headers->get('Authorization');
+            if (is_string($provided) && preg_match('/^Bearer\s+(.+)$/', $provided, $matches) === 1) {
+                $provided = $matches[1];
+            }
+        }
+
+        if (!is_string($provided) || $provided === '') {
+            $provided = $app['request']->request->get('token');
+        }
+
+        if (!is_string($provided) || $provided === '') {
+            $provided = $app['request']->query->get('token');
+        }
+
+        return is_string($provided) ? $provided : null;
+    }
+
+    private static function hasValidCrashUploadToken(Application $app): bool
+    {
+        $provided = self::getProvidedUploadToken($app);
+        if (!is_string($provided) || $provided === '') {
+            return false;
+        }
+
+        $globalToken = $app['config']['symbol-upload-token'] ?? '';
+        if (is_string($globalToken) && $globalToken !== '' && hash_equals($globalToken, $provided)) {
+            return true;
+        }
+
+        $userId = $app['db']->executeQuery('SELECT id FROM user WHERE upload_token = ? LIMIT 1', [$provided])->fetchColumn(0);
+
+        return $userId !== false && $userId !== null;
+    }
+
+    private static function allowAnonymousMinidumpUploads(Application $app): bool
+    {
+        $settings = $app['config']['upload-settings'] ?? [];
+        if (!is_array($settings)) {
+            return true;
+        }
+
+        return array_key_exists('allow_anonymous_minidump_uploads', $settings)
+            ? filter_var($settings['allow_anonymous_minidump_uploads'], FILTER_VALIDATE_BOOL)
+            : true;
+    }
+
     public static function getSymbolRequestPolicy(array $config = []): array
     {
         $defaults = [
@@ -1221,6 +1271,12 @@ class Crash
         $presubmit = $app['request']->get('CrashSignature');
         if ($presubmit !== null) {
             return $this->presubmit($app, $presubmit);
+        }
+
+        if (!self::allowAnonymousMinidumpUploads($app) && !self::hasValidCrashUploadToken($app)) {
+            $app['redis']->hIncrBy('throttle:stats', 'crashes:rejected:invalid-token', 1);
+
+            return new \Symfony\Component\HttpFoundation\Response('Forbidden', 403);
         }
 
         $app['redis']->hIncrBy('throttle:stats', 'crashes:submitted', 1);

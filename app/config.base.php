@@ -36,6 +36,8 @@ return array_merge($base, array(
 
     'show-version' => true,
 
+    'symbol-upload-token' => '',
+    'upload-settings' => array(),
     'symbol-stores' => array(),
 ));
 

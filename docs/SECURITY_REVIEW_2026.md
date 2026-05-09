@@ -55,11 +55,11 @@ The generated Accelerator URLs were based on `http://` plus the request host. Th
 
 Fix: the generator now uses the current request scheme and host through `getSchemeAndHttpHost()`.
 
-### Informational: `/submit` Accepts Untokened Crash Uploads
+### Informational: `/submit` Can Accept Untokened Crash Uploads
 
 Affected route: `/submit`
 
-This is intentional for Accelerator compatibility. Untokened crashes are accepted but do not create profile token usage rows. Private metadata is gated to owners/admins.
+This is enabled by default for Accelerator compatibility and can be disabled in `/health`. When disabled, `/submit` requires a profile upload token or the global `SYMBOL_UPLOAD_TOKEN`. Untokened accepted crashes do not create profile token usage rows. Private metadata is gated to owners/admins.
 
 ### Informational: Admin-Controlled Rich Notices
 
@@ -70,6 +70,7 @@ Crash notices and the maintenance message are rendered as HTML. This is acceptab
 ## Validated Controls
 
 - `/symbols/submit` and `/binary/submit` require a profile token, admin session, or global `SYMBOL_UPLOAD_TOKEN`.
+- `/submit` can be configured to require a profile token or global `SYMBOL_UPLOAD_TOKEN` for minidump uploads.
 - Symbol names and binary module names reject slash/backslash path traversal.
 - Binary identifiers are restricted to alphanumeric strings.
 - Crash dump file paths are generated from server-side crash IDs.

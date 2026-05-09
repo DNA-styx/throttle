@@ -28,6 +28,23 @@ try {
     return $app;
 }
 
+if (is_array($app['config'])) {
+    $app['config']['upload-settings'] = App\Runtime\UploadSettings::load($app['root']);
+
+    if (!isset($app['config']['symbol-upload-token'])) {
+        $symbolUploadToken = getenv('SYMBOL_UPLOAD_TOKEN');
+        $app['config']['symbol-upload-token'] = is_string($symbolUploadToken) ? $symbolUploadToken : '';
+    }
+
+    $symbolRequestPolicyPath = $app['root'] . '/var/symbol-request-policy.json';
+    if (is_file($symbolRequestPolicyPath)) {
+        $symbolRequestPolicy = json_decode((string) file_get_contents($symbolRequestPolicyPath), true);
+        if (is_array($symbolRequestPolicy)) {
+            $app['config']['symbol-request'] = $symbolRequestPolicy;
+        }
+    }
+}
+
 $app['debug'] = $app['config']['debug'];
 
 $app['monolog'] = $app->share($app->extend('monolog', function($monolog, $app) {

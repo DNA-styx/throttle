@@ -137,3 +137,9 @@ APP_ADMINS="steam:STEAMID64,user:1"
 ```
 
 На `/health` видны checks, очередь, бинарники, Binary upload request policy и настройки обработки upload endpoints. Через UI можно включать потоковую обработку `.sym` и задавать `memory_limit` только для `/symbols/submit` и `/binary/submit`. Policy сохраняется в `var/symbol-request-policy.json`, upload-настройки сохраняются в `var/upload-settings.json`; оба файла надо сохранять при бэкапах.
+
+Additional runtime notes:
+
+- The Light/Dark/System theme switcher is available before login and defaults to system theme.
+- `/health` upload settings can disable anonymous `/submit` minidump uploads; when disabled, `/submit` requires a profile upload token or `SYMBOL_UPLOAD_TOKEN`.
+- `APP_ADMINS` accepts values separated by comma, space, or semicolon: `user:<id>`, SteamID64, or `steam:<SteamID64>`. Admins can access `/health`, global dashboard/audit data, crash management, reprocess/delete actions, and delete any signature note.
