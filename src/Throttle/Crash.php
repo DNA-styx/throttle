@@ -228,6 +228,154 @@ class Crash
         return $ownerId !== null && in_array((int) $ownerId, $app['user']['owner_ids'], true);
     }
 
+    private static function loadCrashStackhash(Application $app, string $id): ?string
+    {
+        $stackhash = $app['db']->executeQuery('SELECT stackhash FROM crash WHERE id = ?', array($id))->fetchColumn(0);
+
+        return is_string($stackhash) && $stackhash !== '' ? $stackhash : null;
+    }
+
+    private static function loadSignatureNotes(Application $app, ?string $stackhash): array
+    {
+        if ($stackhash === null || $stackhash === '') {
+            return array();
+        }
+
+        $notes = $app['db']->executeQuery(
+            'SELECT crash_signature_note.id, crash_signature_note.stackhash, crash_signature_note.author_id, crash_signature_note.title, crash_signature_note.body, crash_signature_note.created_at, crash_signature_note.updated_at, server_owner.name AS author_name
+             FROM crash_signature_note
+             LEFT JOIN server_owner ON server_owner.id = crash_signature_note.author_id
+             WHERE crash_signature_note.stackhash = ?
+             ORDER BY crash_signature_note.created_at DESC, crash_signature_note.id DESC',
+            array($stackhash)
+        )->fetchAll();
+
+        foreach ($notes as &$note) {
+            $note['body_html'] = self::renderMarkdown((string) $note['body']);
+            $note['can_edit'] = $app['user'] !== null && (int) $note['author_id'] === (int) $app['user']['id'];
+            $note['can_delete'] = $app['user'] !== null && ($app['user']['admin'] || (int) $note['author_id'] === (int) $app['user']['id']);
+        }
+        unset($note);
+
+        return $notes;
+    }
+
+    private static function validateSignatureNoteInput(Application $app): array
+    {
+        $title = trim((string) $app['request']->request->get('title', ''));
+        $body = trim((string) $app['request']->request->get('body', ''));
+
+        if (mb_strlen($title) > 100) {
+            $title = mb_substr($title, 0, 100);
+        }
+
+        if (mb_strlen($body) > 500) {
+            $body = mb_substr($body, 0, 500);
+        }
+
+        return array($title, $body);
+    }
+
+    private static function renderMarkdown(string $markdown): string
+    {
+        $lines = preg_split('/\R/', trim(str_replace("\r\n", "\n", $markdown))) ?: array();
+        $html = array();
+        $list = null;
+        $paragraph = array();
+
+        $flushParagraph = static function () use (&$html, &$paragraph): void {
+            if (empty($paragraph)) {
+                return;
+            }
+
+            $html[] = '<p>' . implode('<br>', array_map([self::class, 'renderMarkdownInline'], $paragraph)) . '</p>';
+            $paragraph = array();
+        };
+        $closeList = static function () use (&$html, &$list): void {
+            if ($list !== null) {
+                $html[] = '</' . $list . '>';
+                $list = null;
+            }
+        };
+
+        foreach ($lines as $line) {
+            $line = rtrim($line);
+            if ($line === '') {
+                $flushParagraph();
+                $closeList();
+                continue;
+            }
+
+            if (preg_match('/^#{1,3}\s+(.+)$/', $line, $matches) === 1) {
+                $flushParagraph();
+                $closeList();
+                $html[] = '<strong>' . self::renderMarkdownInline($matches[1]) . '</strong>';
+                continue;
+            }
+
+            if (preg_match('/^>\s*(.+)$/', $line, $matches) === 1) {
+                $flushParagraph();
+                $closeList();
+                $html[] = '<blockquote>' . self::renderMarkdownInline($matches[1]) . '</blockquote>';
+                continue;
+            }
+
+            if (preg_match('/^- \[( |x)\]\s+(.+)$/i', $line, $matches) === 1) {
+                $flushParagraph();
+                if ($list !== 'ul') {
+                    $closeList();
+                    $html[] = '<ul>';
+                    $list = 'ul';
+                }
+                $html[] = '<li>' . ($matches[1] === 'x' || $matches[1] === 'X' ? '&#9745; ' : '&#9744; ') . self::renderMarkdownInline($matches[2]) . '</li>';
+                continue;
+            }
+
+            if (preg_match('/^[-*]\s+(.+)$/', $line, $matches) === 1) {
+                $flushParagraph();
+                if ($list !== 'ul') {
+                    $closeList();
+                    $html[] = '<ul>';
+                    $list = 'ul';
+                }
+                $html[] = '<li>' . self::renderMarkdownInline($matches[1]) . '</li>';
+                continue;
+            }
+
+            if (preg_match('/^\d+\.\s+(.+)$/', $line, $matches) === 1) {
+                $flushParagraph();
+                if ($list !== 'ol') {
+                    $closeList();
+                    $html[] = '<ol>';
+                    $list = 'ol';
+                }
+                $html[] = '<li>' . self::renderMarkdownInline($matches[1]) . '</li>';
+                continue;
+            }
+
+            $closeList();
+            $paragraph[] = $line;
+        }
+
+        $flushParagraph();
+        $closeList();
+
+        return implode("\n", $html);
+    }
+
+    private static function renderMarkdownInline(string $text): string
+    {
+        $text = htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $text = preg_replace_callback('/`([^`\n]+)`/', static fn ($matches) => '<code>' . $matches[1] . '</code>', $text) ?? $text;
+        $text = preg_replace('/\*\*([^*\n]+)\*\*/', '<strong>$1</strong>', $text) ?? $text;
+        $text = preg_replace('/\*([^*\n]+)\*/', '<em>$1</em>', $text) ?? $text;
+        $text = preg_replace_callback('/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/', static function (array $matches): string {
+            return '<a href="' . $matches[2] . '" rel="nofollow noopener noreferrer" target="_blank">' . $matches[1] . '</a>';
+        }, $text) ?? $text;
+
+        return $text;
+    }
+
     private static function buildSymbolCoverage(array $modules): array
     {
         $total = count($modules);
@@ -297,7 +445,7 @@ class Crash
         return $modules;
     }
 
-    private static function buildCulpritCandidates(array $stack, array $modules, array $metadata, ?string $cmdline): array
+    private static function buildCulpritCandidates(array $stack, array $modules, array $metadata, ?string $cmdline, ?string $consoleBlaming = null, ?array $terminalConsoleCause = null, ?array $rawSourcePawnChain = null): array
     {
         $candidates = array();
         $presentByModule = array();
@@ -305,6 +453,53 @@ class Crash
             $moduleName = (string) ($module['name'] ?? '');
             $presentByModule[$moduleName] = (int) $module['present'] === 1;
             $presentByModule[basename(str_replace('\\', '/', $moduleName))] = (int) $module['present'] === 1;
+        }
+
+        $sourcePawnChain = $rawSourcePawnChain ?? self::detectSourcePawnCauseChain($stack, $metadata, 'Stack');
+        $hasSourcePawnChain = $sourcePawnChain !== null;
+        $hasSourcePawnBridge = $hasSourcePawnChain || self::stackHasSourcePawnBridge($stack);
+        $hasConsoleBackedBridgeCause = !$hasSourcePawnChain && $consoleBlaming !== null && $hasSourcePawnBridge;
+        $hasTerminalConsoleBridgeCause = !$hasSourcePawnChain && $terminalConsoleCause !== null && !empty($terminalConsoleCause['plugin']) && $hasSourcePawnBridge;
+        $sourcePawnPlugin = $sourcePawnChain !== null ? basename((string) $sourcePawnChain['plugin']) : null;
+        if ($sourcePawnChain !== null) {
+            self::addCulpritCandidate(
+                $candidates,
+                $sourcePawnChain['plugin'],
+                $sourcePawnChain['score'],
+                $sourcePawnChain['reasons'],
+                'Likely plugin cause'
+            );
+        }
+
+        if ($consoleBlaming !== null && ($sourcePawnPlugin === null || strcasecmp(basename($consoleBlaming), $sourcePawnPlugin) === 0)) {
+            self::addCulpritCandidate(
+                $candidates,
+                basename($consoleBlaming),
+                $hasSourcePawnChain ? 34 : ($hasSourcePawnBridge ? 180 : 110),
+                array_filter(array(
+                    'Console log Blaming entry: ' . basename($consoleBlaming),
+                    $hasConsoleBackedBridgeCause ? 'SourceMod bridge frames present; plugin debug frames are missing from stackwalk' : null,
+                )),
+                $hasSourcePawnChain ? 'Supporting signal' : 'Likely plugin cause'
+            );
+        }
+
+        if ($terminalConsoleCause !== null && !empty($terminalConsoleCause['plugin']) && ($sourcePawnPlugin === null || strcasecmp(basename((string) $terminalConsoleCause['plugin']), $sourcePawnPlugin) === 0)) {
+            $reasons = array('Terminal SourceMod exception block: ' . $terminalConsoleCause['plugin']);
+            if (!empty($terminalConsoleCause['function'])) {
+                $reasons[] = 'Console callsite: ' . $terminalConsoleCause['function'];
+            }
+            if (!empty($terminalConsoleCause['exception'])) {
+                $reasons[] = 'Console exception: ' . $terminalConsoleCause['exception'];
+            }
+
+            self::addCulpritCandidate(
+                $candidates,
+                basename((string) $terminalConsoleCause['plugin']),
+                $hasSourcePawnChain ? 42 : ($hasSourcePawnBridge ? 210 : 130),
+                $reasons,
+                $hasSourcePawnChain ? 'Supporting signal' : 'Likely plugin cause'
+            );
         }
 
         foreach ($stack as $index => $frame) {
@@ -317,62 +512,89 @@ class Crash
                 continue;
             }
 
-            $score = max(8, 45 - ($index * 5));
+            $score = max(8, 42 - ($index * 4));
+            $kind = 'Candidate';
             $reasons = array('Frame #' . ($frame['frame'] ?? $index) . ': ' . $rendered);
+            $isSmxLabel = str_ends_with(strtolower($label), '.smx');
+            $isBridgeFrame = self::isBridgeFrame($module, $function, $rendered, $label);
+
             if ($index === 0) {
-                $score += 20;
+                if (($hasSourcePawnChain || $hasConsoleBackedBridgeCause || $hasTerminalConsoleBridgeCause) && self::isServerEngineModule($label)) {
+                    $score += 8;
+                    $kind = 'Native failure site';
+                    $reasons[] = $hasSourcePawnChain ? 'Native crash site reached from SourcePawn/JIT chain' : 'Native crash site reached from SourceMod evidence';
+                } else {
+                    $score += 28;
+                }
             }
 
             if (self::isPluginLikeLabel($label)) {
-                $score += 35;
-                $reasons[] = 'SourceMod plugin or extension module';
+                if ($isBridgeFrame && !$isSmxLabel) {
+                    $score -= 18;
+                    $kind = 'Bridge';
+                    $reasons[] = 'SourceMod bridge frame';
+                } else {
+                    $score += $isSmxLabel ? 44 : 22;
+                    $kind = $isSmxLabel ? 'Likely plugin cause' : 'Bridge';
+                    $reasons[] = $isSmxLabel ? 'SourceMod plugin frame' : 'SourceMod extension module';
+                }
+            } elseif ($isBridgeFrame) {
+                $score -= 24;
+                $kind = 'Bridge';
+                $reasons[] = 'SourcePawn/JIT bridge frame';
             }
 
             if (self::isServerEngineModule($label)) {
-                $score += 12;
+                $score += ($hasSourcePawnChain || $hasConsoleBackedBridgeCause || $hasTerminalConsoleBridgeCause) ? 4 : 14;
+                if ($kind === 'Candidate') {
+                    $kind = $index === 0 ? 'Native failure site' : 'Native module';
+                }
                 $reasons[] = 'Game or Source engine module';
             }
 
             if (preg_match('/__SourceHook_/i', $rendered) === 1) {
-                $score -= 35;
+                $score -= 55;
+                $kind = 'Bridge';
                 $reasons[] = 'Hook frame';
             }
 
-            if (self::isSystemRuntimeModule($label)) {
-                $score -= 35;
+            if (self::isSystemRuntimeModule($label) || self::isBootstrapRuntimeModule($label)) {
+                $score -= 60;
+                $kind = 'Runtime';
                 $reasons[] = 'System/runtime module';
             }
 
             $moduleKey = $module !== '' && isset($presentByModule[$module]) ? $module : basename(str_replace('\\', '/', $module));
             if ($moduleKey !== '' && isset($presentByModule[$moduleKey]) && !$presentByModule[$moduleKey]) {
-                $score -= 18;
+                $score -= ($hasSourcePawnChain || $hasConsoleBackedBridgeCause || $hasTerminalConsoleBridgeCause) && self::isServerEngineModule($label) ? 10 : 18;
                 $reasons[] = 'Module has no symbols';
             }
 
-            self::addCulpritCandidate($candidates, $label, $score, $reasons);
+            self::addCulpritCandidate($candidates, $label, $score, $reasons, $kind);
 
-            if (preg_match('/\[\s*([^\\[\\]]+\\.smx)::([^\\[\\]]+)\s*\]/i', $rendered, $matches) === 1) {
-                self::addCulpritCandidate($candidates, $matches[1], $score + 28, array(
-                    'SourcePawn function: ' . $matches[2],
-                    'Custom plugin frame',
-                ));
+            $sourcePawnFrame = self::parseSourcePawnFrame($rendered);
+            if ($sourcePawnFrame !== null) {
+                self::addCulpritCandidate($candidates, $sourcePawnFrame['plugin'], $score + 28, array(
+                    'SourcePawn function: ' . $sourcePawnFrame['function'],
+                    self::isSourcePawnEntryPoint($sourcePawnFrame['function']) ? 'Plugin entry point' : 'Plugin callsite',
+                ), self::isSourcePawnEntryPoint($sourcePawnFrame['function']) ? 'Entry point' : 'Likely plugin cause');
             }
         }
 
         foreach (array('Plugin', 'SourceModPlugin') as $key) {
             if (!empty($metadata[$key]) && is_string($metadata[$key])) {
-                self::addCulpritCandidate($candidates, basename($metadata[$key]), 28, 'Crash metadata field: ' . $key);
+                self::addCulpritCandidate($candidates, basename($metadata[$key]), 28, 'Crash metadata field: ' . $key, 'Supporting signal');
             }
         }
 
         foreach (array('Extension', 'SourceModExtension') as $key) {
             if (!empty($metadata[$key]) && is_string($metadata[$key])) {
-                self::addCulpritCandidate($candidates, basename($metadata[$key]), 24, 'Crash metadata field: ' . $key);
+                self::addCulpritCandidate($candidates, basename($metadata[$key]), 24, 'Crash metadata field: ' . $key, 'Bridge');
             }
         }
 
         if (is_string($cmdline) && preg_match('/\+map\s+([^ ]+)/', $cmdline, $matches) === 1) {
-            self::addCulpritCandidate($candidates, 'Map: ' . $matches[1], 8, 'Active map from command line');
+            self::addCulpritCandidate($candidates, 'Map: ' . $matches[1], 8, 'Active map from command line', 'Context');
         }
 
         if (empty($candidates)) {
@@ -386,28 +608,400 @@ class Crash
         return array_map(function ($candidate) use ($total) {
             $candidate['percent'] = $total > 0 ? (int) round(($candidate['score'] / $total) * 100) : 0;
             $candidate['reasons'] = array_slice(array_values(array_unique($candidate['reasons'])), 0, 4);
+            $candidate['kind_class'] = self::culpritKindClass($candidate['kind']);
+            $candidate['kind_title'] = self::culpritKindTitle($candidate['kind']);
+            $candidate['category'] = self::culpritCategory($candidate['kind']);
+            $candidate['category_label'] = self::culpritCategoryLabel($candidate['category']);
 
             return $candidate;
         }, array_values($top));
     }
 
-    private static function addCulpritCandidate(array &$candidates, string $label, int $score, string|array $reasons): void
+    private static function addCulpritCandidate(array &$candidates, string $label, int $score, string|array $reasons, string $kind = 'Candidate'): void
     {
         $label = trim($label);
-        if ($label === '') {
+        if ($label === '' || $score <= 0) {
             return;
         }
 
         if (!isset($candidates[$label])) {
-            $candidates[$label] = array('label' => $label, 'score' => 0, 'percent' => 0, 'reasons' => array());
+            $candidates[$label] = array('label' => $label, 'score' => 0, 'percent' => 0, 'kind' => $kind, 'reasons' => array());
         }
 
         $candidates[$label]['score'] += max(1, $score);
+        if (self::culpritKindPriority($kind) > self::culpritKindPriority((string) $candidates[$label]['kind'])) {
+            $candidates[$label]['kind'] = $kind;
+        }
+
         foreach ((array) $reasons as $reason) {
             if (is_string($reason) && trim($reason) !== '') {
                 $candidates[$label]['reasons'][] = $reason;
             }
         }
+    }
+
+    private static function stackHasSourcePawnBridge(array $stack): bool
+    {
+        foreach ($stack as $frame) {
+            $module = (string) ($frame['module'] ?? '');
+            $function = (string) ($frame['function'] ?? '');
+            $rendered = (string) ($frame['rendered'] ?? '');
+            $label = self::candidateLabelFromFrame($module, $function, $rendered) ?? '';
+
+            if (self::isBridgeFrame($module, $function, $rendered, $label)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static function detectSourcePawnCauseChain(array $stack, array $metadata, string $sourceLabel): ?array
+    {
+        $sourcePawnFrames = array();
+        $sdkCallFrames = array();
+        $bridgeFrames = array();
+
+        foreach ($stack as $index => $frame) {
+            $module = (string) ($frame['module'] ?? '');
+            $function = (string) ($frame['function'] ?? '');
+            $rendered = (string) ($frame['rendered'] ?? '');
+            $sourcePawnFrame = self::parseSourcePawnFrame($rendered);
+
+            if ($sourcePawnFrame !== null) {
+                $sourcePawnFrame['index'] = $index;
+                $sourcePawnFrame['frame'] = $frame['frame'] ?? $index;
+                $sourcePawnFrame['rendered'] = $rendered;
+                $sourcePawnFrames[] = $sourcePawnFrame;
+            }
+
+            if (preg_match('/\bSDKCall\b/i', $rendered . ' ' . $function) === 1) {
+                $sdkCallFrames[] = array('index' => $index, 'frame' => $frame['frame'] ?? $index, 'rendered' => $rendered);
+            }
+
+            if (self::isBridgeFrame($module, $function, $rendered, self::candidateLabelFromFrame($module, $function, $rendered) ?? '')) {
+                $bridgeFrames[] = array('index' => $index, 'frame' => $frame['frame'] ?? $index, 'rendered' => $rendered);
+            }
+        }
+
+        if (empty($sourcePawnFrames)) {
+            return null;
+        }
+
+        $anchorIndex = !empty($sdkCallFrames) ? (int) $sdkCallFrames[0]['index'] : (!empty($bridgeFrames) ? (int) $bridgeFrames[0]['index'] : 0);
+        $callsite = null;
+        foreach ($sourcePawnFrames as $sourcePawnFrame) {
+            if ($sourcePawnFrame['index'] >= $anchorIndex) {
+                $callsite = $sourcePawnFrame;
+                break;
+            }
+        }
+        $callsite ??= $sourcePawnFrames[0];
+
+        $entryPoint = null;
+        foreach ($sourcePawnFrames as $sourcePawnFrame) {
+            if ($sourcePawnFrame['plugin'] !== $callsite['plugin'] || $sourcePawnFrame['index'] < $callsite['index']) {
+                continue;
+            }
+
+            if (self::isSourcePawnEntryPoint($sourcePawnFrame['function'])) {
+                $entryPoint = $sourcePawnFrame;
+            }
+        }
+
+        $nativeSite = self::topNativeFailureSite($stack);
+        $score = 150;
+        $reasons = array(
+            $sourceLabel . ' callsite frame #' . $callsite['frame'] . ': ' . $callsite['plugin'] . '::' . $callsite['function'],
+        );
+
+        if (!empty($sdkCallFrames)) {
+            $score += 44;
+            $reasons[] = $sourceLabel . ' bridge frame #' . $sdkCallFrames[0]['frame'] . ': SDKCall';
+        } elseif (!empty($bridgeFrames)) {
+            $score += 24;
+            $reasons[] = $sourceLabel . ' bridge frame #' . $bridgeFrames[0]['frame'] . ': SourcePawn/JIT bridge';
+        }
+
+        if ($entryPoint !== null) {
+            $score += 28;
+            $reasons[] = $sourceLabel . ' entry frame #' . $entryPoint['frame'] . ': ' . $entryPoint['function'];
+        }
+
+        if ($nativeSite !== null) {
+            $score += 18;
+            $reasons[] = 'Native failure site: ' . $nativeSite;
+        }
+
+        if (self::metadataIndicatesInvalidPointer($metadata)) {
+            $score += 12;
+            $reasons[] = 'Invalid low-address pointer access';
+        }
+
+        return array(
+            'plugin' => $callsite['plugin'],
+            'score' => $score,
+            'reasons' => $reasons,
+        );
+    }
+
+    private static function loadRawSourcePawnCauseChain(Application $app, string $id, array $stack, array $metadata): ?array
+    {
+        if (self::detectSourcePawnCauseChain($stack, $metadata, 'Stack') !== null || !self::stackHasSourcePawnBridge($stack)) {
+            return null;
+        }
+
+        $cachePath = $app['root'] . '/cache/carburetor-likely/' . substr($id, 0, 2) . '/' . $id . '.json.gz';
+        if (\Filesystem::pathExists($cachePath)) {
+            $cached = json_decode((string) gzdecode(\Filesystem::readFile($cachePath)), true);
+            if (is_array($cached) && isset($cached['plugin'], $cached['score'], $cached['reasons'])) {
+                return $cached;
+            }
+        }
+
+        $dumpPath = $app['root'] . '/dumps/' . substr($id, 0, 2) . '/' . $id . '.dmp';
+        $carburetorPath = $app['root'] . '/bin/carburetor';
+        if (!\Filesystem::pathExists($dumpPath) || !\Filesystem::pathExists($carburetorPath)) {
+            return null;
+        }
+
+        $symbolStores = array();
+        foreach ((array) ($app['config']['symbol-stores'] ?? array()) as $store) {
+            $symbolStores[] = $app['root'] . '/symbols/' . $store;
+        }
+        array_unshift($symbolStores, $app['root'] . '/cache/symbols');
+
+        try {
+            $future = new \ExecFuture('%s %s %Ls', $carburetorPath, $dumpPath, $symbolStores);
+            $future->setTimeout(20);
+            [$stdout,] = $future->resolvex();
+            $data = json_decode($stdout, true);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        if (!is_array($data)) {
+            return null;
+        }
+
+        $rawStack = self::stackRowsFromCarburetorData($data);
+        if (empty($rawStack)) {
+            return null;
+        }
+
+        $chain = self::detectSourcePawnCauseChain($rawStack, $metadata, 'Raw stack');
+        if ($chain !== null) {
+            \Filesystem::writeFile($cachePath, gzencode(json_encode($chain, JSON_UNESCAPED_SLASHES)));
+        }
+
+        return $chain;
+    }
+
+    private static function stackRowsFromCarburetorData(array $data): array
+    {
+        $threadIndex = isset($data['requesting_thread']) ? (int) $data['requesting_thread'] : 0;
+        $threads = $data['threads'] ?? null;
+        if (!is_array($threads) || !isset($threads[$threadIndex]) || !is_array($threads[$threadIndex])) {
+            return array();
+        }
+
+        $rows = array();
+        foreach ($threads[$threadIndex] as $index => $frame) {
+            if (!is_array($frame)) {
+                continue;
+            }
+
+            $rendered = (string) ($frame['rendered'] ?? '');
+            if ($rendered === '') {
+                continue;
+            }
+
+            $module = '';
+            $function = '';
+            if (preg_match('/^([^!+ ]+)!([^+]+?)(?:\s+\+|$)/', $rendered, $matches) === 1) {
+                $module = trim($matches[1]);
+                $function = trim($matches[2]);
+            } elseif (preg_match('/^([^ +]+)\s+\+/', $rendered, $matches) === 1) {
+                $module = trim($matches[1]);
+            }
+
+            $rows[] = array(
+                'frame' => $index,
+                'module' => $module,
+                'function' => $function,
+                'rendered' => $rendered,
+            );
+        }
+
+        return $rows;
+    }
+
+    private static function parseSourcePawnFrame(string $rendered): ?array
+    {
+        if (preg_match('/\[\s*([^\\[\\]]+\\.smx)::([^\\[\\]]+)\s*\]/i', $rendered, $matches) !== 1) {
+            return null;
+        }
+
+        return array(
+            'plugin' => basename(trim($matches[1])),
+            'function' => self::normalizeSourcePawnFunction($matches[2]),
+        );
+    }
+
+    private static function normalizeSourcePawnFunction(string $function): string
+    {
+        $function = trim($function);
+        $function = preg_replace('/^\.\d+\./', '', $function) ?? $function;
+
+        return $function;
+    }
+
+    private static function isSourcePawnEntryPoint(string $function): bool
+    {
+        return preg_match('/^(?:Command_|On[A-Z0-9_]|Event_|Timer_|Hook_|Native_)/', $function) === 1;
+    }
+
+    private static function isBridgeFrame(string $module, string $function, string $rendered, string $label): bool
+    {
+        $haystack = strtolower($module . ' ' . $function . ' ' . $rendered . ' ' . $label);
+
+        return str_contains($haystack, 'sdkcall')
+            || str_contains($haystack, 'callwrapper::execute')
+            || str_contains($haystack, 'sourcepawn.jit')
+            || str_contains($haystack, 'jit_code_')
+            || str_contains($haystack, 'bintools.ext')
+            || str_contains($haystack, 'sdktools.ext')
+            || str_contains($haystack, 'sourcemod.');
+    }
+
+    private static function topNativeFailureSite(array $stack): ?string
+    {
+        if (!isset($stack[0])) {
+            return null;
+        }
+
+        $module = (string) ($stack[0]['module'] ?? '');
+        $function = (string) ($stack[0]['function'] ?? '');
+        $rendered = (string) ($stack[0]['rendered'] ?? '');
+        $label = self::candidateLabelFromFrame($module, $function, $rendered);
+
+        if ($label === null || (!self::isServerEngineModule($label) && !self::isSystemRuntimeModule($label))) {
+            return null;
+        }
+
+        return $rendered !== '' ? $rendered : $label;
+    }
+
+    private static function metadataIndicatesInvalidPointer(array $metadata): bool
+    {
+        $reason = '';
+        foreach (array('CrashReason', 'Crash Reason', 'crash_reason', 'Exception', 'Signal') as $key) {
+            if (isset($metadata[$key]) && is_string($metadata[$key])) {
+                $reason .= ' ' . $metadata[$key];
+            }
+        }
+
+        $address = null;
+        foreach (array('CrashAddress', 'Crash Address', 'crash_address', 'Address') as $key) {
+            if (!isset($metadata[$key])) {
+                continue;
+            }
+
+            $value = (string) $metadata[$key];
+            if (preg_match('/0x([0-9a-f]+)/i', $value, $matches) === 1) {
+                $address = hexdec($matches[1]);
+                break;
+            }
+
+            if (ctype_digit($value)) {
+                $address = (int) $value;
+                break;
+            }
+        }
+
+        return preg_match('/SIGSEGV|SEGV_MAPERR|access/i', $reason) === 1 && $address !== null && $address >= 0 && $address <= 4096;
+    }
+
+    private static function culpritKindPriority(string $kind): int
+    {
+        return match ($kind) {
+            'Likely plugin cause' => 90,
+            'Native failure site' => 70,
+            'Entry point' => 60,
+            'Bridge' => 40,
+            'Supporting signal' => 30,
+            'Native module' => 25,
+            'Runtime' => 10,
+            'Context' => 5,
+            default => 20,
+        };
+    }
+
+    private static function culpritKindClass(string $kind): string
+    {
+        return match ($kind) {
+            'Likely plugin cause' => 'label-success',
+            'Native failure site' => 'label-important',
+            'Entry point' => 'label-warning',
+            'Bridge' => 'label-info',
+            'Runtime' => 'label-inverse',
+            default => 'label-default',
+        };
+    }
+
+    private static function culpritKindTitle(string $kind): string
+    {
+        return match ($kind) {
+            'Likely plugin cause' => 'Most likely user-controlled cause. Prefer raw stack SourcePawn/JIT frames; terminal console exceptions are secondary evidence.',
+            'Native failure site' => 'Native module where execution faulted. It may be where the crash happened, not the original cause.',
+            'Entry point' => 'Plugin command, callback, timer, hook, or event that started the relevant SourcePawn path.',
+            'Bridge' => 'Glue frame between SourcePawn/SourceMod and native engine code, such as SDKCall, bintools, or JIT.',
+            'Supporting signal' => 'Extra evidence from metadata or logs that supports another candidate.',
+            'Native module' => 'Engine or game binary involved in the stack, but less likely to be the root cause when plugin/bridge evidence exists.',
+            'Runtime' => 'System/runtime library frame. Usually noise unless the crash frame is clearly inside it.',
+            'Context' => 'Contextual information, not a direct crash cause.',
+            default => 'Candidate produced by stack, symbol, metadata, or log heuristics.',
+        };
+    }
+
+    private static function culpritCategory(string $kind): string
+    {
+        return match ($kind) {
+            'Likely plugin cause', 'Entry point' => 'plugin',
+            'Bridge' => 'bridge',
+            'Native failure site', 'Native module', 'Runtime' => 'native',
+            default => $kind === 'Context' ? 'context' : 'context',
+        };
+    }
+
+    private static function culpritCategoryLabel(string $category): string
+    {
+        return match ($category) {
+            'plugin' => 'Plugin chain',
+            'bridge' => 'Extensions / bridges',
+            'native' => 'Native failure site',
+            default => 'Context',
+        };
+    }
+
+    private static function groupCulpritCandidates(array $candidates): array
+    {
+        $groups = array(
+            'plugin' => array('key' => 'plugin', 'label' => self::culpritCategoryLabel('plugin'), 'candidates' => array()),
+            'bridge' => array('key' => 'bridge', 'label' => self::culpritCategoryLabel('bridge'), 'candidates' => array()),
+            'native' => array('key' => 'native', 'label' => self::culpritCategoryLabel('native'), 'candidates' => array()),
+            'context' => array('key' => 'context', 'label' => self::culpritCategoryLabel('context'), 'candidates' => array()),
+        );
+
+        foreach (array_slice($candidates, 1) as $candidate) {
+            $category = (string) ($candidate['category'] ?? 'context');
+            if (!isset($groups[$category])) {
+                $category = 'context';
+            }
+            $groups[$category]['candidates'][] = $candidate;
+        }
+
+        return array_values(array_filter($groups, static fn (array $group): bool => !empty($group['candidates'])));
     }
 
     private static function candidateLabelFromFrame(string $module, string $function, string $rendered): ?string
@@ -440,6 +1034,11 @@ class Crash
     private static function isSystemRuntimeModule(string $label): bool
     {
         return preg_match('/^(?:ld-linux|linux-gate|steamclient\.so|libc\.so|libstdc\+\+|libgcc_s|libm\.so|libpthread|libdl|librt|libcurl|libcrypto|libssl|libgnutls|libgssapi|libkrb5|libk5crypto|libkrb5support|libldap|liblber|libssh|libsasl|libz\.so|libzstd|libbrotli|libnghttp2|libpsl|libidn|libunistring|libnettle|libhogweed|libtasn1|libp11-kit|libgmp|libffi|libresolv|libcom_err|libkeyutils|librtmp)/i', basename($label)) === 1;
+    }
+
+    private static function isBootstrapRuntimeModule(string $label): bool
+    {
+        return preg_match('/^(?:srcds_linux|hl2_linux|srcds_run)$/i', basename($label)) === 1;
     }
 
     private static function stripAnsiEscapeSequences(string $value): string
@@ -852,6 +1451,7 @@ class Crash
             unset($crash['metadata']['ExtensionBuild']);
         }
 
+        $terminalConsoleCause = self::loadTerminalSourceModCause($app, $id, (bool) $crash['has_console_log']);
         $crash['dump_available'] = \Filesystem::pathExists($app['root'] . '/dumps/' . substr($id, 0, 2) . '/' . $id . '.dmp');
 
         ksort($crash['metadata']);
@@ -860,7 +1460,10 @@ class Crash
         $stack = $app['db']->executeQuery('SELECT frame, module, function, rendered, url FROM frame WHERE crash = ? AND thread = ? ORDER BY frame', array($id, $crash['thread']))->fetchAll();
         $modules = $app['db']->executeQuery('SELECT name, identifier, processed, present, HEX(base) AS base FROM module WHERE crash = ? ORDER BY name', array($id))->fetchAll();
         $modules = self::buildModuleCoverageRows($modules, $app['config']);
+        $rawSourcePawnChain = self::loadRawSourcePawnCauseChain($app, $id, $stack, $crash['metadata']);
+        $culpritCandidates = self::buildCulpritCandidates($stack, $modules, $crash['metadata'], $crash['cmdline'], $terminalConsoleCause['blaming'] ?? null, $terminalConsoleCause, $rawSourcePawnChain);
         $stats = $app['db']->executeQuery('SELECT COUNT(DISTINCT crash.owner_id) AS owners, COUNT(DISTINCT crash.ip) AS ips, COUNT(*) AS crashes FROM crash, (SELECT owner_id, stackhash FROM crash WHERE id = ?) AS this WHERE this.stackhash = crash.stackhash', [$id])->fetch();
+        $signatureNotes = self::loadSignatureNotes($app, $crash['stackhash'] ?? null);
         $processing_log = $app['db']->executeQuery('SELECT created_at, status, duration_ms, message FROM crash_processing_log WHERE crash = ? ORDER BY created_at DESC LIMIT 1', [$id])->fetch();
         if ($processing_log === false) {
             $processing_log = null;
@@ -893,11 +1496,13 @@ class Crash
             'stack' => $stack,
             'modules' => $modules,
             'stats' => $stats,
+            'signature_notes' => $signatureNotes,
             'outdated' => $outdated,
             'has_error_string' => $has_error_string,
             'show_sourcepawn_message' => $show_sourcepawn_message,
             'symbol_coverage' => self::buildSymbolCoverage($modules),
-            'culprit_candidates' => self::buildCulpritCandidates($stack, $modules, $crash['metadata'], $crash['cmdline']),
+            'culprit_candidates' => $culpritCandidates,
+            'culprit_groups' => self::groupCulpritCandidates($culpritCandidates),
             'processing_log' => $processing_log,
             'sourcemod_snapshots' => $snapshots,
             'symbol_upload_log' => self::loadSymbolUploadLog($app, $modules),
@@ -920,6 +1525,241 @@ class Crash
         }
 
         return $app->redirect($app['url_generator']->generate('details', array('id' => $id)) . '#modules');
+    }
+
+    public function createSignatureNote(Application $app, string $id)
+    {
+        if ($app['user'] === null) {
+            $app->abort(401);
+        }
+
+        $stackhash = self::loadCrashStackhash($app, $id);
+        if ($stackhash === null) {
+            $app->abort(404);
+        }
+
+        [$title, $body] = self::validateSignatureNoteInput($app);
+        if ($title === '' || $body === '') {
+            $app['session']->getFlashBag()->add('error_note', 'Title and note body are required.');
+
+            return $app->redirect($app['url_generator']->generate('details', array('id' => $id)) . '#signature-notes');
+        }
+
+        $app['db']->executeUpdate(
+            'INSERT INTO crash_signature_note (stackhash, author_id, title, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL)',
+            array($stackhash, (int) $app['user']['id'], $title, $body, date('Y-m-d H:i:s'))
+        );
+
+        return $app->redirect($app['url_generator']->generate('details', array('id' => $id)) . '#signature-notes');
+    }
+
+    public function editSignatureNote(Application $app, string $id, int $noteId)
+    {
+        if ($app['user'] === null) {
+            $app->abort(401);
+        }
+
+        $stackhash = self::loadCrashStackhash($app, $id);
+        if ($stackhash === null) {
+            $app->abort(404);
+        }
+
+        $note = $app['db']->executeQuery('SELECT id, stackhash, author_id FROM crash_signature_note WHERE id = ?', array($noteId))->fetch();
+        if ($note === false || (string) $note['stackhash'] !== $stackhash) {
+            $app->abort(404);
+        }
+
+        if ((int) $note['author_id'] !== (int) $app['user']['id']) {
+            $app->abort(403);
+        }
+
+        [$title, $body] = self::validateSignatureNoteInput($app);
+        if ($title === '' || $body === '') {
+            $app['session']->getFlashBag()->add('error_note', 'Title and note body are required.');
+
+            return $app->redirect($app['url_generator']->generate('details', array('id' => $id)) . '#signature-notes');
+        }
+
+        $app['db']->executeUpdate(
+            'UPDATE crash_signature_note SET title = ?, body = ?, updated_at = ? WHERE id = ?',
+            array($title, $body, date('Y-m-d H:i:s'), $noteId)
+        );
+
+        return $app->redirect($app['url_generator']->generate('details', array('id' => $id)) . '#signature-notes');
+    }
+
+    public function deleteSignatureNote(Application $app, string $id, int $noteId)
+    {
+        if ($app['user'] === null) {
+            $app->abort(401);
+        }
+
+        $stackhash = self::loadCrashStackhash($app, $id);
+        if ($stackhash === null) {
+            $app->abort(404);
+        }
+
+        $note = $app['db']->executeQuery('SELECT id, stackhash, author_id FROM crash_signature_note WHERE id = ?', array($noteId))->fetch();
+        if ($note === false || (string) $note['stackhash'] !== $stackhash) {
+            $app->abort(404);
+        }
+
+        if (!$app['user']['admin'] && (int) $note['author_id'] !== (int) $app['user']['id']) {
+            $app->abort(403);
+        }
+
+        $app['db']->executeUpdate('DELETE FROM crash_signature_note WHERE id = ?', array($noteId));
+
+        return $app->redirect($app['url_generator']->generate('details', array('id' => $id)) . '#signature-notes');
+    }
+
+    private static function loadTerminalSourceModCause(Application $app, string $id, bool $hasConsoleLog): ?array
+    {
+        if (!$hasConsoleLog) {
+            return null;
+        }
+
+        $path = $app['root'] . '/dumps/' . substr($id, 0, 2) . '/' . $id . '.meta.txt';
+        if (\Filesystem::pathExists($path . '.gz')) {
+            $contents = gzdecode(\Filesystem::readFile($path . '.gz'));
+        } elseif (\Filesystem::pathExists($path)) {
+            $contents = \Filesystem::readFile($path);
+        } else {
+            return null;
+        }
+
+        if (!is_string($contents) || trim($contents) === '') {
+            return null;
+        }
+
+        return self::extractTerminalSourceModCause($contents);
+    }
+
+    private static function extractTerminalConsoleBlaming(string $contents): ?string
+    {
+        return self::extractTerminalSourceModCause($contents)['blaming'] ?? null;
+    }
+
+    private static function extractTerminalSourceModCause(string $contents): ?array
+    {
+        $contents = self::stripAnsiEscapeSequences($contents);
+        if (preg_match('/-------- CONSOLE HISTORY BEGIN --------(.+?)-------- CONSOLE HISTORY END --------/is', $contents, $matches) === 1) {
+            $contents = $matches[1];
+        }
+
+        $lines = preg_split('/\R/', str_replace("\0", '', $contents)) ?: array();
+        $normalized = array();
+        foreach ($lines as $line) {
+            $line = trim((string) $line);
+            if ($line === '' || str_starts_with($line, '-------- CONSOLE HISTORY')) {
+                continue;
+            }
+
+            $line = preg_replace('/^\d+\(\d+(?:\.\d+)?\):\s+/', '', $line) ?? $line;
+            $line = preg_replace('/^\d+\s+\d+(?:\.\d+)?\s+/', '', $line) ?? $line;
+            $line = trim($line);
+            if ($line !== '') {
+                $normalized[] = $line;
+            }
+        }
+
+        if (empty($normalized)) {
+            return null;
+        }
+
+        $exceptionIndexes = array();
+        foreach ($normalized as $index => $line) {
+            if (preg_match('/\[SM\]\s+Exception reported/i', $line) === 1) {
+                $exceptionIndexes[] = $index;
+            }
+        }
+
+        if (empty($exceptionIndexes)) {
+            return null;
+        }
+
+        $best = null;
+        $lineCount = count($normalized);
+        foreach ($exceptionIndexes as $position => $exceptionIndex) {
+            $nextException = $exceptionIndexes[$position + 1] ?? $lineCount;
+            $block = array(
+                'plugin' => null,
+                'function' => null,
+                'exception' => null,
+                'blaming' => null,
+                'last_relevant' => $exceptionIndex,
+            );
+
+            for ($i = $exceptionIndex; $i < $nextException; $i++) {
+                $line = $normalized[$i];
+                if ($i === $exceptionIndex && preg_match('/\[SM\]\s+Exception reported:\s*(.+)$/i', $line, $matches) === 1) {
+                    $block['exception'] = trim($matches[1]);
+                    $block['last_relevant'] = $i;
+                    continue;
+                }
+
+                if (preg_match('/\[SM\]\s+Blaming:\s*(?:\[[^\]]+\]\s*)?([^\r\n]+?\.smx)\b/i', $line, $matches) === 1) {
+                    $block['blaming'] = basename(trim($matches[1]));
+                    $block['plugin'] ??= $block['blaming'];
+                    $block['last_relevant'] = $i;
+                    continue;
+                }
+
+                $sourcePawnLine = self::parseSourceModConsoleSourceLine($line);
+                if ($sourcePawnLine !== null) {
+                    $block['plugin'] = $sourcePawnLine['plugin'];
+                    $block['function'] = $sourcePawnLine['function'];
+                    $block['last_relevant'] = $i;
+                    continue;
+                }
+
+                if (self::isSourceModExceptionLine($line)) {
+                    $block['last_relevant'] = $i;
+                }
+            }
+
+            if ($block['plugin'] !== null || $block['blaming'] !== null) {
+                $best = $block;
+            }
+        }
+
+        if ($best === null || ($lineCount - 1 - (int) $best['last_relevant']) > 80) {
+            return null;
+        }
+
+        return array(
+            'plugin' => $best['plugin'] ?? $best['blaming'],
+            'function' => $best['function'],
+            'exception' => $best['exception'],
+            'blaming' => $best['blaming'],
+        );
+    }
+
+    private static function isSourceModExceptionLine(string $line): bool
+    {
+        if (preg_match('/\[SM\]\s+(?:Exception reported|Blaming:|Call stack trace:|\[\d+\]\s|Displaying call stack trace)/i', $line) === 1) {
+            return true;
+        }
+
+        return preg_match('/^\[SM\]\s+Line\s+\d+/i', $line) === 1;
+    }
+
+    private static function parseSourceModConsoleSourceLine(string $line): ?array
+    {
+        if (preg_match('/(?:^|\s)([A-Za-z]:\\\\[^:\r\n]+?|\/[^:\r\n]+?|[^:\r\n]+?)\.sp::([A-Za-z_][A-Za-z0-9_]*)\b/i', $line, $matches) !== 1) {
+            return null;
+        }
+
+        $path = str_replace('\\', '/', trim($matches[1]));
+        $source = basename($path);
+        $source = preg_replace('/^\[[^\]]+\]\s*/', '', $source) ?? $source;
+        $source = preg_replace('/^\d+\./', '', $source) ?? $source;
+        $plugin = $source . '.smx';
+
+        return array(
+            'plugin' => $plugin,
+            'function' => trim($matches[2]),
+        );
     }
 
     private static function loadSymbolUploadLog(Application $app, array $modules): array

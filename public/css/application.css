@@ -1036,6 +1036,153 @@ body.theme-dark .module-log-toggle {
     margin-top: 10px;
 }
 
+.signature-note {
+    border-top: 1px solid #e5e5e5;
+    padding: 12px 0;
+}
+
+.signature-note:first-of-type {
+    border-top: 0;
+    padding-top: 0;
+}
+
+.signature-note-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: baseline;
+    margin-bottom: 6px;
+}
+
+.signature-note-body p:last-child {
+    margin-bottom: 0;
+}
+
+.signature-note-actions {
+    margin-top: 8px;
+}
+
+.signature-note-actions .button-form,
+.signature-note-actions .btn-link {
+    display: inline-block;
+    margin: 0;
+    padding: 0;
+    vertical-align: baseline;
+}
+
+.signature-note-edit {
+    margin-top: 10px;
+}
+
+.signature-note-edit input,
+.signature-note-edit textarea {
+    margin-bottom: 8px;
+}
+
+.markdown-editor {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    margin-bottom: 8px;
+    overflow: hidden;
+}
+
+.markdown-editor .markdown-tabs {
+    border-bottom: 1px solid #ddd;
+    margin-bottom: 0;
+    padding: 0 8px;
+}
+
+.markdown-editor .markdown-tabs>li>a {
+    padding: 8px 14px;
+}
+
+.markdown-toolbar {
+    align-items: center;
+    background: #f6f8fa;
+    border-bottom: 1px solid #ddd;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    justify-content: flex-end;
+    padding: 7px 8px;
+}
+
+.markdown-toolbar button {
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    color: #586069;
+    min-width: 28px;
+    padding: 4px 6px;
+}
+
+.markdown-toolbar button:hover,
+.markdown-toolbar button:focus {
+    background: #eaeef2;
+    color: #24292f;
+}
+
+.markdown-toolbar-divider {
+    border-left: 1px solid #d8dee4;
+    display: inline-block;
+    height: 20px;
+    margin: 0 5px;
+}
+
+.markdown-editor textarea {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    margin: 0 !important;
+    resize: vertical;
+}
+
+.markdown-preview {
+    min-height: 110px;
+    padding: 10px 12px;
+}
+
+body.theme-dark .signature-note {
+    border-color: #303948;
+}
+
+body.theme-dark .markdown-editor {
+    border-color: #303948;
+}
+
+body.theme-dark .markdown-editor .markdown-tabs {
+    border-color: #303948;
+}
+
+body.theme-dark .markdown-toolbar {
+    background: #151b24;
+    border-color: #303948;
+}
+
+body.theme-dark .markdown-toolbar button {
+    color: #9aa6b5;
+}
+
+body.theme-dark .markdown-toolbar button:hover,
+body.theme-dark .markdown-toolbar button:focus {
+    background: #273140;
+    color: #f4f8fb;
+}
+
+body.theme-dark .markdown-toolbar-divider {
+    border-color: #303948;
+}
+
+body.theme-dark .modal-content {
+    background-color: #202630;
+    color: #d7dde6;
+}
+
+body.theme-dark .modal-header,
+body.theme-dark .modal-footer {
+    border-color: #303948;
+}
+
 body.theme-dark ::-webkit-scrollbar,
 body.theme-system ::-webkit-scrollbar {
     width: 12px;

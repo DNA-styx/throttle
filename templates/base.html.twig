@@ -18,16 +18,17 @@
             })();
         </script>
         <style>
-            [data-bs-theme="dark"] body { background: #111820; color: #e5edf5; color-scheme: dark; }
+            [data-bs-theme="dark"], [data-bs-theme="dark"] body { background: #111820; color: #e5edf5; color-scheme: dark; }
         </style>
         {% block stylesheets %}
             {{ encore_entry_link_tags('app') }}
         {% endblock %}
         <style>
-            [data-bs-theme="dark"] body { background: #111820; color: #e5edf5; }
+            [data-bs-theme="dark"], [data-bs-theme="dark"] body { background: #111820; color: #e5edf5; }
             [data-bs-theme="dark"] header.border-bottom { background: #1a2330; border-color: #303b4a !important; }
             [data-bs-theme="dark"] .navbar-light .text-dark,
-            [data-bs-theme="dark"] .navbar-light .navbar-brand { color: #f4f8fb !important; }
+            [data-bs-theme="dark"] .navbar-light .navbar-brand,
+            [data-bs-theme="dark"] .navbar-text-btn { color: #f4f8fb !important; }
             [data-bs-theme="dark"] .profile-panel { background: #1a2330; border-color: #303b4a; box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03); }
             [data-bs-theme="dark"] .table { color: #dce6f0; border-color: #303b4a; }
             [data-bs-theme="dark"] .table > :not(caption) > * > * { border-color: #303b4a; }

@@ -20,6 +20,11 @@
   color: var(--bs-navbar-color);
 }
 
+.navbar-text-btn:hover,
+.navbar-text-btn:focus {
+  color: var(--bs-navbar-hover-color);
+}
+
 .profile-shell {
   max-width: 960px;
   margin: 0 auto;
@@ -68,6 +73,7 @@
   line-height: 1.2;
 }
 
+[data-bs-theme="dark"],
 [data-bs-theme="dark"] body {
   background: #111820;
   color: #e5edf5;
@@ -79,7 +85,8 @@
 }
 
 [data-bs-theme="dark"] .navbar-light .text-dark,
-[data-bs-theme="dark"] .navbar-light .navbar-brand {
+[data-bs-theme="dark"] .navbar-light .navbar-brand,
+[data-bs-theme="dark"] .navbar-text-btn {
   color: #f4f8fb !important;
 }
 

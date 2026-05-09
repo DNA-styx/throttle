@@ -84,7 +84,122 @@
 {% else %}
     <a class="alert-link" href="{{ path('stats', {module: crash.stackhash}) }}">This crash signature is unique.</a>
 {% endif %}
+{% if crash.stackhash %}
+    <span class="muted"> &middot; </span><a class="alert-link" href="#signature-notes" data-toggle="collapse">View {{ signature_notes|length }} signature note{% if signature_notes|length != 1 %}s{% endif %}</a>
+{% if legacy_app.user %}
+    <span class="muted"> &middot; </span><a class="alert-link" href="#signature-note-form" data-toggle="collapse">Write a note</a>
+{% else %}
+    <span class="muted"> &middot; Login to write a note</span>
+{% endif %}
+{% endif %}
 </div>
+{% if crash.stackhash %}
+{% set note_errors = legacy_app.session.flashbag.get('error_note') %}
+<div id="signature-notes" class="collapse{% if note_errors|length > 0 %} in{% endif %}">
+{% for error in note_errors %}
+    <div class="alert alert-block alert-danger">{{ error }}</div>
+{% endfor %}
+{% if signature_notes|length > 0 %}
+    <div class="well">
+        <h3 style="margin-top: 0;">Crash Signature Notes</h3>
+{% for note in signature_notes %}
+        <div class="signature-note">
+            <div class="signature-note-header">
+                <strong>{{ note.title }}</strong>
+                <span class="muted">by {{ note.author_name ?: ('User #' ~ note.author_id) }} on {{ note.created_at|date }}{% if note.updated_at %}, edited {{ note.updated_at|date }}{% endif %}</span>
+            </div>
+            <div class="signature-note-body">{{ note.body_html|raw }}</div>
+{% if note.can_edit or note.can_delete %}
+            <div class="signature-note-actions">
+{% if note.can_edit %}
+                <a href="#signature-note-edit-{{ note.id }}" data-toggle="collapse">Edit</a>
+{% endif %}
+{% if note.can_delete %}
+                <form action="{{ path('signature_note_delete', {id: crash.id, noteId: note.id}) }}" method="post" class="button-form">
+                    <input type="hidden" name="_token" value="{{ csrf_token('signature-note-delete:' ~ note.id) }}">
+                    <button type="submit" class="btn btn-link btn-mini">Delete</button>
+                </form>
+{% endif %}
+            </div>
+{% endif %}
+{% if note.can_edit %}
+            <form id="signature-note-edit-{{ note.id }}" class="collapse signature-note-edit" action="{{ path('signature_note_edit', {id: crash.id, noteId: note.id}) }}" method="post">
+                <input type="hidden" name="_token" value="{{ csrf_token('signature-note-edit:' ~ note.id) }}">
+                <input type="text" name="title" class="form-control input-block-level" maxlength="100" value="{{ note.title }}" required>
+                <div class="markdown-editor" data-markdown-editor>
+                    <ul class="nav nav-tabs markdown-tabs">
+                        <li class="active"><a href="#" data-md-tab="write">Write</a></li>
+                        <li><a href="#" data-md-tab="preview">Preview</a></li>
+                    </ul>
+                    <div class="markdown-toolbar">
+                        <button type="button" title="Heading" data-md-action="heading"><i class="icon-font"></i></button>
+                        <button type="button" title="Bold" data-md-action="bold"><strong>B</strong></button>
+                        <button type="button" title="Italic" data-md-action="italic"><em>I</em></button>
+                        <button type="button" title="Quote" data-md-action="quote"><i class="icon-indent-left"></i></button>
+                        <button type="button" title="Code" data-md-action="code"><i class="icon-code"></i></button>
+                        <button type="button" title="Link" data-md-action="link"><i class="icon-link"></i></button>
+                        <span class="markdown-toolbar-divider"></span>
+                        <button type="button" title="Bulleted list" data-md-action="ul"><i class="icon-list-ul"></i></button>
+                        <button type="button" title="Numbered list" data-md-action="ol"><i class="icon-list-ol"></i></button>
+                        <button type="button" title="Task list" data-md-action="task"><i class="icon-check"></i></button>
+                        <span class="markdown-toolbar-divider"></span>
+                        <button type="button" title="Mention" data-md-action="mention">@</button>
+                        <button type="button" title="Reference" data-md-action="reference"><i class="icon-external-link"></i></button>
+                        <button type="button" title="Undo" data-md-action="undo"><i class="icon-undo"></i></button>
+                    </div>
+                    <textarea name="body" class="form-control input-block-level" maxlength="500" rows="4" required>{{ note.body }}</textarea>
+                    <div class="markdown-preview signature-note-body" style="display: none;"></div>
+                </div>
+                <button type="submit" class="btn btn-primary btn-small">Save note</button>
+            </form>
+{% endif %}
+        </div>
+{% endfor %}
+    </div>
+{% else %}
+    <div class="well muted">No notes for this crash signature yet.</div>
+{% endif %}
+</div>
+{% if legacy_app.user %}
+<div id="signature-note-form" class="collapse{% if note_errors|length > 0 %} in{% endif %}">
+    <div class="well">
+        <h3 style="margin-top: 0;">Write a Signature Note</h3>
+        <form action="{{ path('signature_note_create', {id: crash.id}) }}" method="post">
+            <input type="hidden" name="_token" value="{{ csrf_token('signature-note:' ~ crash.id) }}">
+            <label for="signature-note-title">Title</label>
+            <input id="signature-note-title" type="text" name="title" class="form-control input-block-level" maxlength="100" required>
+            <label for="signature-note-body">Note</label>
+            <div class="markdown-editor" data-markdown-editor>
+                <ul class="nav nav-tabs markdown-tabs">
+                    <li class="active"><a href="#" data-md-tab="write">Write</a></li>
+                    <li><a href="#" data-md-tab="preview">Preview</a></li>
+                </ul>
+                <div class="markdown-toolbar">
+                    <button type="button" title="Heading" data-md-action="heading"><i class="icon-font"></i></button>
+                    <button type="button" title="Bold" data-md-action="bold"><strong>B</strong></button>
+                    <button type="button" title="Italic" data-md-action="italic"><em>I</em></button>
+                    <button type="button" title="Quote" data-md-action="quote"><i class="icon-indent-left"></i></button>
+                    <button type="button" title="Code" data-md-action="code"><i class="icon-code"></i></button>
+                    <button type="button" title="Link" data-md-action="link"><i class="icon-link"></i></button>
+                    <span class="markdown-toolbar-divider"></span>
+                    <button type="button" title="Bulleted list" data-md-action="ul"><i class="icon-list-ul"></i></button>
+                    <button type="button" title="Numbered list" data-md-action="ol"><i class="icon-list-ol"></i></button>
+                    <button type="button" title="Task list" data-md-action="task"><i class="icon-check"></i></button>
+                    <span class="markdown-toolbar-divider"></span>
+                    <button type="button" title="Mention" data-md-action="mention">@</button>
+                    <button type="button" title="Reference" data-md-action="reference"><i class="icon-external-link"></i></button>
+                    <button type="button" title="Undo" data-md-action="undo"><i class="icon-undo"></i></button>
+                </div>
+                <textarea id="signature-note-body" name="body" class="form-control input-block-level" maxlength="500" rows="5" required></textarea>
+                <div class="markdown-preview signature-note-body" style="display: none;"></div>
+            </div>
+            <p class="muted">Markdown is supported. Title limit: 100 characters. Note limit: 500 characters.</p>
+            <button type="submit" class="btn btn-primary">Save note</button>
+        </form>
+    </div>
+</div>
+{% endif %}
+{% endif %}
 {% endif %}
 
 {% if can_manage %}
@@ -110,8 +225,28 @@
 {% endif %}
         <form action="{{ path('delete', {id: crash.id}) }}" method="post" class="button-form">
             <input type="hidden" name="_token" value="{{ csrf_token('delete-crash:' ~ crash.id) }}">
-            <button type="submit" class="btn btn-danger"><i class="icon-trash"></i> Delete</button>
+            <button type="button" class="btn btn-danger" data-toggle="modal" data-target="#delete-crash-modal"><i class="icon-trash"></i> Delete</button>
         </form>
+    </div>
+</div>
+<div id="delete-crash-modal" class="modal fade" tabindex="-1" role="dialog" aria-labelledby="delete-crash-modal-title" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form action="{{ path('delete', {id: crash.id}) }}" method="post">
+                <input type="hidden" name="_token" value="{{ csrf_token('delete-crash:' ~ crash.id) }}">
+                <div class="modal-header">
+                    <button type="button" class="close" data-dismiss="modal" aria-hidden="true">&times;</button>
+                    <h3 id="delete-crash-modal-title">Delete Crash Dump?</h3>
+                </div>
+                <div class="modal-body">
+                    <p>This will permanently delete this crash report and its stored minidump data.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-danger"><i class="icon-trash"></i> Delete</button>
+                </div>
+            </form>
+        </div>
     </div>
 </div>
 {% endif %}
@@ -122,41 +257,6 @@
 {% endif %}
 
 {% if crash.processed == 1 and crash.failed == 0 %}
-{% if culprit_candidates|length > 0 %}
-<h2>Likely Cause</h2>
-<p class="muted">This is a heuristic score based on stack frames, symbols, and crash metadata.</p>
-<div class="well well-tight">
-    <table class="table table-condensed" style="margin-bottom: 0;">
-        <thead>
-            <tr>
-                <th>Candidate</th>
-                <th style="width: 120px;">Score</th>
-                <th>Signals</th>
-            </tr>
-        </thead>
-        <tbody>
-{% for candidate in culprit_candidates %}
-            <tr>
-                <td class="monospace">{{ candidate.label }}</td>
-                <td>
-                    <div class="progress" style="margin-bottom: 0;">
-                        <div class="progress-bar" style="width: {{ candidate.percent }}%;">{{ candidate.percent }}%</div>
-                    </div>
-                </td>
-                <td>
-                    <ul style="margin-bottom: 0;">
-{% for reason in candidate.reasons %}
-                        <li>{{ reason }}</li>
-{% endfor %}
-                    </ul>
-                </td>
-            </tr>
-{% endfor %}
-        </tbody>
-    </table>
-</div>
-{% endif %}
-
 {% if can_manage and (sourcemod_snapshots.plugins or sourcemod_snapshots.extensions) %}
 <h2>SourceMod Snapshot</h2>
 <div class="well">
@@ -213,6 +313,70 @@
         </tfoot>
     </table>
 </div>
+
+{% if culprit_candidates|length > 0 %}
+<h2>Likely Cause</h2>
+<p class="muted">This heuristic prefers raw stack SourcePawn/JIT chains, then stored stack frames, then the terminal SourceMod console exception.</p>
+{% set primary = culprit_candidates[0] %}
+<div class="well">
+    <div class="row">
+        <div class="col-sm-5">
+            <div class="muted">Primary suspect</div>
+            <h3 style="margin-top: 4px; margin-bottom: 8px;" class="monospace">{{ primary.label }}</h3>
+            <span class="label {{ primary.kind_class|default('label-default') }}" title="{{ primary.kind_title|default('Candidate produced by stack, symbol, metadata, or log heuristics.') }}" data-toggle="tooltip" data-container="body">{{ primary.kind|default('Candidate') }}</span>
+        </div>
+        <div class="col-sm-2">
+            <div class="muted">Score</div>
+            <div class="progress" style="margin-top: 8px;">
+                <div class="progress-bar" style="width: {{ primary.percent }}%;">{{ primary.percent }}%</div>
+            </div>
+        </div>
+        <div class="col-sm-5">
+            <div class="muted">Primary signals</div>
+            <ul style="margin-bottom: 0;">
+{% for reason in primary.reasons %}
+                <li>{{ reason }}</li>
+{% endfor %}
+            </ul>
+        </div>
+    </div>
+</div>
+{% for group in culprit_groups %}
+<div class="well well-tight">
+    <h4 style="margin: 0 0 8px;">{{ group.label }}</h4>
+    <table class="table table-condensed" style="margin-bottom: 0;">
+        <thead>
+            <tr>
+                <th>Candidate</th>
+                <th style="width: 150px;">Type</th>
+                <th style="width: 120px;">Score</th>
+                <th>Signals</th>
+            </tr>
+        </thead>
+        <tbody>
+{% for candidate in group.candidates %}
+            <tr>
+                <td class="monospace">{{ candidate.label }}</td>
+                <td><span class="label {{ candidate.kind_class|default('label-default') }}" title="{{ candidate.kind_title|default('Candidate produced by stack, symbol, metadata, or log heuristics.') }}" data-toggle="tooltip" data-container="body">{{ candidate.kind|default('Candidate') }}</span></td>
+                <td>
+                    <div class="progress" style="margin-bottom: 0;">
+                        <div class="progress-bar" style="width: {{ candidate.percent }}%;">{{ candidate.percent }}%</div>
+                    </div>
+                </td>
+                <td>
+                    <ul style="margin-bottom: 0;">
+{% for reason in candidate.reasons %}
+                        <li>{{ reason }}</li>
+{% endfor %}
+                    </ul>
+                </td>
+            </tr>
+{% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endfor %}
+{% endif %}
 
 {% if can_manage %}
 <h2 id="modules">Modules</h2>
@@ -345,6 +509,139 @@
 
         $(this).toggleClass('table-shown').toggleClass('table-hidden').find('tfoot').click(function() {
             $(this).parent().toggleClass('table-hidden').toggleClass('table-shown');
+        });
+    });
+
+    if (window.location.hash === '#signature-notes' || window.location.hash === '#signature-note-form') {
+        $(window.location.hash).collapse('show');
+    }
+
+    function renderMarkdownPreview(text) {
+        var escaped = $('<div>').text(text || '').html();
+        escaped = escaped.replace(/`([^`\n]+)`/g, '<code>$1</code>')
+            .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*([^*\n]+)\*/g, '<em>$1</em>')
+            .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" rel="nofollow noopener noreferrer" target="_blank">$1</a>');
+
+        var html = [];
+        var list = null;
+        var paragraph = [];
+        var closeList = function() {
+            if (list) {
+                html.push('</' + list + '>');
+                list = null;
+            }
+        };
+        var flushParagraph = function() {
+            if (paragraph.length) {
+                html.push('<p>' + paragraph.join('<br>') + '</p>');
+                paragraph = [];
+            }
+        };
+
+        escaped.split(/\n/).forEach(function(line) {
+            line = line.replace(/\s+$/, '');
+            var match;
+            if (!line) {
+                flushParagraph();
+                closeList();
+                return;
+            }
+            if ((match = line.match(/^#{1,3}\s+(.+)$/))) {
+                flushParagraph();
+                closeList();
+                html.push('<strong>' + match[1] + '</strong>');
+                return;
+            }
+            if ((match = line.match(/^&gt;\s*(.+)$/))) {
+                flushParagraph();
+                closeList();
+                html.push('<blockquote>' + match[1] + '</blockquote>');
+                return;
+            }
+            if ((match = line.match(/^- \[( |x)\]\s+(.+)$/i))) {
+                flushParagraph();
+                if (list !== 'ul') {
+                    closeList();
+                    html.push('<ul>');
+                    list = 'ul';
+                }
+                html.push('<li>' + (match[1].toLowerCase() === 'x' ? '&#9745; ' : '&#9744; ') + match[2] + '</li>');
+                return;
+            }
+            if ((match = line.match(/^[-*]\s+(.+)$/))) {
+                flushParagraph();
+                if (list !== 'ul') {
+                    closeList();
+                    html.push('<ul>');
+                    list = 'ul';
+                }
+                html.push('<li>' + match[1] + '</li>');
+                return;
+            }
+            if ((match = line.match(/^\d+\.\s+(.+)$/))) {
+                flushParagraph();
+                if (list !== 'ol') {
+                    closeList();
+                    html.push('<ol>');
+                    list = 'ol';
+                }
+                html.push('<li>' + match[1] + '</li>');
+                return;
+            }
+            closeList();
+            paragraph.push(line);
+        });
+
+        flushParagraph();
+        closeList();
+        return html.join('\n') || '<p class="muted">Nothing to preview.</p>';
+    }
+
+    $('[data-markdown-editor]').each(function() {
+        var editor = $(this);
+        var textarea = editor.find('textarea');
+        var preview = editor.find('.markdown-preview');
+
+        function wrapSelection(before, after, placeholder) {
+            var element = textarea[0];
+            var start = element.selectionStart || 0;
+            var end = element.selectionEnd || 0;
+            var value = textarea.val();
+            var selected = value.substring(start, end) || placeholder;
+            var next = value.substring(0, start) + before + selected + after + value.substring(end);
+            textarea.val(next).focus();
+            element.setSelectionRange(start + before.length, start + before.length + selected.length);
+        }
+
+        editor.find('[data-md-action]').on('click', function() {
+            var action = $(this).data('md-action');
+            if (action === 'heading') wrapSelection('### ', '', 'Heading');
+            if (action === 'bold') wrapSelection('**', '**', 'strong text');
+            if (action === 'italic') wrapSelection('*', '*', 'emphasized text');
+            if (action === 'quote') wrapSelection('> ', '', 'quoted text');
+            if (action === 'code') wrapSelection('`', '`', 'code');
+            if (action === 'link') wrapSelection('[', '](https://example.com)', 'link text');
+            if (action === 'ul') wrapSelection('- ', '', 'list item');
+            if (action === 'ol') wrapSelection('1. ', '', 'list item');
+            if (action === 'task') wrapSelection('- [ ] ', '', 'task');
+            if (action === 'mention') wrapSelection('@', '', 'username');
+            if (action === 'reference') wrapSelection('#', '', '123');
+            if (action === 'undo') document.execCommand('undo');
+        });
+
+        editor.find('[data-md-tab]').on('click', function(event) {
+            event.preventDefault();
+            var tab = $(this).data('md-tab');
+            editor.find('.markdown-tabs li').removeClass('active');
+            $(this).parent().addClass('active');
+            if (tab === 'preview') {
+                preview.html(renderMarkdownPreview(textarea.val())).show();
+                textarea.hide();
+            } else {
+                preview.hide();
+                textarea.show().focus();
+            }
         });
     });
 

@@ -17,6 +17,11 @@
         <link href="{{ legacy_app.request.baseUrl }}/css/font-awesome.min.css" rel="stylesheet">
 {% block stylesheets %}{% endblock %}
         <link href="{{ legacy_app.request.baseUrl }}/css/application.css" rel="stylesheet">
+{% if theme_preference == 'dark' %}
+        <style>html,body{background:#15191f;color:#d7dde6;color-scheme:dark;}</style>
+{% elseif theme_preference == 'system' %}
+        <style>@media (prefers-color-scheme: dark){html,body{background:#15191f;color:#d7dde6;color-scheme:dark;}}</style>
+{% endif %}
 {% if 'Kindle/3.0' in legacy_app.request.headers.get('User-Agent') %}
         <link href="{{ legacy_app.request.baseUrl }}/css/kindle.css" rel="stylesheet">
 {% endif %}

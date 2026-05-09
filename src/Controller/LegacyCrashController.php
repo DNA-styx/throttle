@@ -121,6 +121,36 @@ class LegacyCrashController extends AbstractController
         return $this->legacyResponse((new \Throttle\Crash())->delete($this->legacyBridgeFactory->createHttp($request), $id));
     }
 
+    #[Route('/{id}/signature-notes', name: 'signature_note_create', methods: ['POST'], requirements: ['id' => '[0-9a-zA-Z]{12}'], priority: -10)]
+    public function createSignatureNote(Request $request, string $id): Response
+    {
+        if (!$this->isCsrfTokenValid('signature-note:'.$id, (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        return $this->legacyResponse((new \Throttle\Crash())->createSignatureNote($this->legacyBridgeFactory->createHttp($request), $id));
+    }
+
+    #[Route('/{id}/signature-notes/{noteId}/edit', name: 'signature_note_edit', methods: ['POST'], requirements: ['id' => '[0-9a-zA-Z]{12}', 'noteId' => '\d+'], priority: -10)]
+    public function editSignatureNote(Request $request, string $id, int $noteId): Response
+    {
+        if (!$this->isCsrfTokenValid('signature-note-edit:'.$noteId, (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        return $this->legacyResponse((new \Throttle\Crash())->editSignatureNote($this->legacyBridgeFactory->createHttp($request), $id, $noteId));
+    }
+
+    #[Route('/{id}/signature-notes/{noteId}/delete', name: 'signature_note_delete', methods: ['POST'], requirements: ['id' => '[0-9a-zA-Z]{12}', 'noteId' => '\d+'], priority: -10)]
+    public function deleteSignatureNote(Request $request, string $id, int $noteId): Response
+    {
+        if (!$this->isCsrfTokenValid('signature-note-delete:'.$noteId, (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        return $this->legacyResponse((new \Throttle\Crash())->deleteSignatureNote($this->legacyBridgeFactory->createHttp($request), $id, $noteId));
+    }
+
     #[Route('/{crashId}', name: 'details_crashid', methods: ['GET'], requirements: ['crashId' => '[0-9a-zA-Z]{4}(?:-[0-9a-zA-Z]{4}){2}'], priority: -95)]
     public function formattedId(string $crashId): Response
     {
