@@ -1,4 +1,5 @@
 # Throttle
+<img width="1901" height="908" alt="image" src="https://github.com/user-attachments/assets/b8676856-ba23-4291-85b7-4d3fa64f8094" />
 
 ## English
 
