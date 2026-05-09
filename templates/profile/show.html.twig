@@ -49,24 +49,6 @@
         </div>
 
         <section class="profile-panel mb-3">
-            <h2 class="h5 mb-3">Appearance</h2>
-            <form method="post" action="{{ path('profile_theme') }}" class="row g-2 align-items-end">
-                <input type="hidden" name="_token" value="{{ csrf_token('profile-theme') }}">
-                <div class="col-sm-8 col-md-5">
-                    <label for="profile-theme" class="form-label">Theme</label>
-                    <select id="profile-theme" name="theme" class="form-select">
-                        <option value="light"{% if user.theme == 'light' %} selected{% endif %}>Light</option>
-                        <option value="dark"{% if user.theme == 'dark' %} selected{% endif %}>Dark</option>
-                        <option value="system"{% if user.theme == 'system' %} selected{% endif %}>System</option>
-                    </select>
-                </div>
-                <div class="col-sm-auto">
-                    <button type="submit" class="btn btn-primary">Save theme</button>
-                </div>
-            </form>
-        </section>
-
-        <section class="profile-panel mb-3">
             <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
                 <h2 class="h5 mb-0">Upload token</h2>
                 <a href="{{ path('profile_token_statistics') }}" class="btn btn-sm btn-outline-secondary">Open statistics</a>

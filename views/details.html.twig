@@ -87,7 +87,11 @@
 {% if crash.stackhash %}
     <span class="muted"> &middot; </span><a class="alert-link" href="#signature-notes" data-toggle="collapse">View {{ signature_notes|length }} signature note{% if signature_notes|length != 1 %}s{% endif %}</a>
 {% if legacy_app.user %}
+{% if can_create_signature_note %}
     <span class="muted"> &middot; </span><a class="alert-link" href="#signature-note-form" data-toggle="collapse">Write a note</a>
+{% elseif user_signature_note %}
+    <span class="muted"> &middot; </span><a class="alert-link" href="#signature-note-edit-{{ user_signature_note.id }}" data-toggle="collapse" data-open-signature-notes="1">Edit your note</a>
+{% endif %}
 {% else %}
     <span class="muted"> &middot; Login to write a note</span>
 {% endif %}
@@ -115,10 +119,7 @@
                 <a href="#signature-note-edit-{{ note.id }}" data-toggle="collapse">Edit</a>
 {% endif %}
 {% if note.can_delete %}
-                <form action="{{ path('signature_note_delete', {id: crash.id, noteId: note.id}) }}" method="post" class="button-form">
-                    <input type="hidden" name="_token" value="{{ csrf_token('signature-note-delete:' ~ note.id) }}">
-                    <button type="submit" class="btn btn-link btn-mini">Delete</button>
-                </form>
+                <button type="button" class="btn btn-link btn-mini" data-toggle="modal" data-target="#signature-note-delete-{{ note.id }}">Delete</button>
 {% endif %}
             </div>
 {% endif %}
@@ -153,6 +154,28 @@
                 <button type="submit" class="btn btn-primary btn-small">Save note</button>
             </form>
 {% endif %}
+{% if note.can_delete %}
+            <div id="signature-note-delete-{{ note.id }}" class="modal fade" tabindex="-1" role="dialog" aria-labelledby="signature-note-delete-title-{{ note.id }}" aria-hidden="true">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <form action="{{ path('signature_note_delete', {id: crash.id, noteId: note.id}) }}" method="post">
+                            <input type="hidden" name="_token" value="{{ csrf_token('signature-note-delete:' ~ note.id) }}">
+                            <div class="modal-header">
+                                <button type="button" class="close" data-dismiss="modal" aria-hidden="true">&times;</button>
+                                <h3 id="signature-note-delete-title-{{ note.id }}">Delete Signature Note?</h3>
+                            </div>
+                            <div class="modal-body">
+                                <p>This will permanently delete this note.</p>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                                <button type="submit" class="btn btn-danger"><i class="icon-trash"></i> Delete</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+{% endif %}
         </div>
 {% endfor %}
     </div>
@@ -160,7 +183,7 @@
     <div class="well muted">No notes for this crash signature yet.</div>
 {% endif %}
 </div>
-{% if legacy_app.user %}
+{% if legacy_app.user and can_create_signature_note %}
 <div id="signature-note-form" class="collapse{% if note_errors|length > 0 %} in{% endif %}">
     <div class="well">
         <h3 style="margin-top: 0;">Write a Signature Note</h3>
@@ -392,7 +415,17 @@
 {% endif %}
 {% if modules|length > 0 %}
 <div class="well well-tight">
-    <table class="table table-modules table-shown">
+    <div class="modules-toolbar clearfix">
+        <div class="btn-group btn-group-sm pull-left" data-toggle="buttons-radio">
+            <button type="button" class="btn btn-default active" data-module-filter="all">All</button>
+            <button type="button" class="btn btn-default" data-module-filter="missing">Missing</button>
+            <button type="button" class="btn btn-default" data-module-filter="available">Available</button>
+            <button type="button" class="btn btn-default" data-module-filter="invalid-id">Invalid</button>
+            <button type="button" class="btn btn-default" data-module-filter="useful">Useful</button>
+        </div>
+        <button type="button" class="btn btn-default btn-sm pull-right" id="show-all-modules">Show all modules</button>
+    </div>
+    <table class="table table-modules">
         <thead>
             <tr>
                 <th>Status</th>
@@ -405,7 +438,9 @@
         </thead>
         <tbody>
 {% for module in modules %}
-            <tr class="{{ module.coverage_class }}">
+{% set module_status_key = module.coverage_status|lower|replace({' ': '-'}) %}
+{% set default_hidden = loop.index > 18 and module.coverage_status == 'Available' and module.usefulness_hint != 'High' %}
+            <tr class="module-row {{ module.coverage_class }}{% if default_hidden %} module-extra hidden{% endif %}" data-module-status="{{ module_status_key }}" data-module-useful="{{ module.usefulness_hint|lower }}">
                 <td>{{ module.coverage_status }}</td>
                 <td>{{ module.name }}</td>
                 <td class="monospace">{{ module.identifier }}</td>
@@ -415,54 +450,43 @@
             </tr>
 {% endfor %}
         </tbody>
-        <tfoot>
-            <tr>
-                <td colspan="6"><i class="icon-ellipsis-horizontal"></i></td>
-            </tr>
-        </tfoot>
     </table>
+    <div class="modules-empty text-center muted hidden">No modules match this filter.</div>
 {% if symbol_upload_log is defined and symbol_upload_log|length > 0 %}
     <div class="table-more module-log-toggle">
         <a href="#symbol-upload-log" data-toggle="collapse"><i class="icon-ellipsis-horizontal"></i> Symbol Upload Log</a>
     </div>
-{% endif %}
-</div>
-{% endif %}
-{% if symbol_upload_log is defined and symbol_upload_log|length > 0 %}
-<div id="symbol-upload-log" class="collapse">
-<div class="well well-tight module-upload-log">
-    <table class="table table-condensed table-shown">
-        <thead>
-            <tr>
-                <th>Time</th>
-                <th>Endpoint</th>
-                <th>Module</th>
-                <th>Identifier</th>
-                <th>Status</th>
-                <th>Result</th>
-                <th>Reason</th>
-            </tr>
-        </thead>
-        <tbody>
+    <div id="symbol-upload-log" class="collapse">
+        <div class="module-upload-log">
+            <table class="table table-condensed">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Endpoint</th>
+                        <th>Module</th>
+                        <th>Identifier</th>
+                        <th>Status</th>
+                        <th>Result</th>
+                        <th>Reason</th>
+                    </tr>
+                </thead>
+                <tbody>
 {% for entry in symbol_upload_log %}
-            <tr class="{% if entry.status_code >= 400 %}danger{% elseif entry.result == 'stored' %}success{% endif %}">
-                <td class="nowrap">{{ entry.created_at }}</td>
-                <td>{{ entry.endpoint }}</td>
-                <td>{{ entry.module }}</td>
-                <td class="monospace">{{ entry.identifier }}</td>
-                <td>{{ entry.status_code }}</td>
-                <td>{{ entry.result }}</td>
-                <td>{{ entry.reason }}</td>
-            </tr>
+                    <tr class="{% if entry.status_code >= 400 %}danger{% elseif entry.result == 'stored' %}success{% endif %}">
+                        <td class="nowrap">{{ entry.created_at }}</td>
+                        <td>{{ entry.endpoint }}</td>
+                        <td>{{ entry.module }}</td>
+                        <td class="monospace">{{ entry.identifier }}</td>
+                        <td>{{ entry.status_code }}</td>
+                        <td>{{ entry.result }}</td>
+                        <td>{{ entry.reason }}</td>
+                    </tr>
 {% endfor %}
-        </tbody>
-        <tfoot>
-            <tr>
-                <td colspan="7"><i class="icon-ellipsis-horizontal"></i></td>
-            </tr>
-        </tfoot>
-    </table>
-</div>
+                </tbody>
+            </table>
+        </div>
+    </div>
+{% endif %}
 </div>
 {% endif %}
 {% endif %}
@@ -503,18 +527,64 @@
     });
 
     $('.table-shown').each(function() {
-        if ($(this).find('tbody tr').length <= 10) {
+        var table = $(this);
+        if (table.find('tbody tr').length <= 10 || table.find('tfoot').length === 0) {
             return;
         }
 
-        $(this).toggleClass('table-shown').toggleClass('table-hidden').find('tfoot').click(function() {
+        table.toggleClass('table-shown').toggleClass('table-hidden').find('tfoot').click(function() {
             $(this).parent().toggleClass('table-hidden').toggleClass('table-shown');
         });
     });
 
+    (function() {
+        var moduleRows = $('.table-modules .module-row');
+        var showAll = false;
+        var activeFilter = 'all';
+
+        function applyModuleFilter() {
+            var visible = 0;
+            moduleRows.each(function() {
+                var row = $(this);
+                var matches = activeFilter === 'all'
+                    || row.data('module-status') === activeFilter
+                    || (activeFilter === 'useful' && row.data('module-useful') === 'high');
+                var hiddenByLimit = !showAll && row.hasClass('module-extra');
+                row.toggleClass('hidden', !matches || hiddenByLimit);
+                if (matches && !hiddenByLimit) {
+                    visible++;
+                }
+            });
+            $('.modules-empty').toggleClass('hidden', visible !== 0);
+            $('#show-all-modules').toggleClass('hidden', showAll || activeFilter !== 'all' || $('.table-modules .module-extra').length === 0);
+        }
+
+        $('[data-module-filter]').on('click', function() {
+            $('[data-module-filter]').removeClass('active');
+            $(this).addClass('active');
+            activeFilter = $(this).data('module-filter');
+            applyModuleFilter();
+        });
+
+        $('#show-all-modules').on('click', function() {
+            showAll = true;
+            applyModuleFilter();
+        });
+
+        applyModuleFilter();
+    })();
+
     if (window.location.hash === '#signature-notes' || window.location.hash === '#signature-note-form') {
         $(window.location.hash).collapse('show');
     }
+    if (window.location.hash && window.location.hash.indexOf('#signature-note-edit-') === 0) {
+        $('#signature-notes').collapse('show');
+        $(window.location.hash).collapse('show');
+    }
+
+    $('[data-open-signature-notes]').on('click', function() {
+        $('#signature-notes').collapse('show');
+    });
 
     function renderMarkdownPreview(text) {
         var escaped = $('<div>').text(text || '').html();
@@ -603,31 +673,48 @@
         var textarea = editor.find('textarea');
         var preview = editor.find('.markdown-preview');
 
-        function wrapSelection(before, after, placeholder) {
+        function selectedText(placeholder) {
             var element = textarea[0];
             var start = element.selectionStart || 0;
             var end = element.selectionEnd || 0;
+            var text = textarea.val().substring(start, end);
+            if (text) {
+                return text;
+            }
+
+            return placeholder;
+        }
+
+        function replaceSelection(before, after, placeholder) {
+            var element = textarea[0];
             var value = textarea.val();
-            var selected = value.substring(start, end) || placeholder;
-            var next = value.substring(0, start) + before + selected + after + value.substring(end);
-            textarea.val(next).focus();
-            element.setSelectionRange(start + before.length, start + before.length + selected.length);
+            var start = element.selectionStart || 0;
+            var end = element.selectionEnd || 0;
+            var text = value.substring(start, end) || placeholder;
+            var replacement = before + text + after;
+            textarea.val((value.substring(0, start) + replacement + value.substring(end)).substring(0, 500));
+            textarea.focus();
+            element.selectionStart = start + before.length;
+            element.selectionEnd = start + before.length + text.length;
         }
 
         editor.find('[data-md-action]').on('click', function() {
             var action = $(this).data('md-action');
-            if (action === 'heading') wrapSelection('### ', '', 'Heading');
-            if (action === 'bold') wrapSelection('**', '**', 'strong text');
-            if (action === 'italic') wrapSelection('*', '*', 'emphasized text');
-            if (action === 'quote') wrapSelection('> ', '', 'quoted text');
-            if (action === 'code') wrapSelection('`', '`', 'code');
-            if (action === 'link') wrapSelection('[', '](https://example.com)', 'link text');
-            if (action === 'ul') wrapSelection('- ', '', 'list item');
-            if (action === 'ol') wrapSelection('1. ', '', 'list item');
-            if (action === 'task') wrapSelection('- [ ] ', '', 'task');
-            if (action === 'mention') wrapSelection('@', '', 'username');
-            if (action === 'reference') wrapSelection('#', '', '123');
+            if (action === 'heading') replaceSelection('### ', '', 'Heading');
+            if (action === 'bold') replaceSelection('**', '**', 'strong text');
+            if (action === 'italic') replaceSelection('*', '*', 'emphasized text');
+            if (action === 'quote') replaceSelection('> ', '', 'quoted text');
+            if (action === 'code') replaceSelection('`', '`', 'code');
+            if (action === 'link') replaceSelection('[', '](https://example.com)', 'link text');
+            if (action === 'ul') replaceSelection('- ', '', 'list item');
+            if (action === 'ol') replaceSelection('1. ', '', 'list item');
+            if (action === 'task') replaceSelection('- [ ] ', '', 'task');
+            if (action === 'mention') replaceSelection('@', '', 'username');
+            if (action === 'reference') replaceSelection('#', '', '123');
             if (action === 'undo') document.execCommand('undo');
+            if (preview.is(':visible')) {
+                preview.html(renderMarkdownPreview(textarea.val()));
+            }
         });
 
         editor.find('[data-md-tab]').on('click', function(event) {

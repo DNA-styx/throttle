@@ -15,11 +15,22 @@ import * as Sentry from "@sentry/browser";
 import { BrowserTracing } from "@sentry/tracing";
 
 function applyThemePreference() {
-    if (APP_CONFIG.theme_preference !== 'system') {
-        return;
+    let stored = null;
+    try {
+        stored = window.localStorage?.getItem('throttleTheme') ?? null;
+    } catch (e) {
+        stored = null;
     }
 
-    document.documentElement.dataset.bsTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    const preference = /^(light|dark|system)$/.test(stored || '')
+        ? stored
+        : (APP_CONFIG.theme_preference || 'system');
+    const effective = preference === 'system'
+        ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+        : preference;
+
+    document.documentElement.dataset.themePreference = preference;
+    document.documentElement.dataset.bsTheme = effective === 'dark' ? 'dark' : 'light';
 }
 
 applyThemePreference();

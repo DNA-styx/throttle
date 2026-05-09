@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-{% set theme_preference = app.user ? app.user.theme|default('light') : 'light' %}
-<html lang="{{ app.request.locale }}" data-theme-preference="{{ theme_preference }}" data-bs-theme="{{ theme_preference == 'dark' ? 'dark' : 'light' }}">
+{% set theme_preference = 'system' %}
+<html lang="{{ app.request.locale }}" data-theme-preference="{{ theme_preference }}" data-bs-theme="light">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -12,9 +12,19 @@
         <script>
             (function() {
                 var root = document.documentElement;
-                if (root.getAttribute('data-theme-preference') === 'system') {
-                    root.setAttribute('data-bs-theme', window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+                var stored = null;
+                try {
+                    stored = window.localStorage && window.localStorage.getItem('throttleTheme');
+                } catch (e) {}
+                var preference = /^(light|dark|system)$/.test(stored || '') ? stored : (root.getAttribute('data-theme-preference') || 'system');
+                if (!/^(light|dark|system)$/.test(preference)) {
+                    preference = 'system';
                 }
+                var effective = preference === 'system' && window.matchMedia
+                    ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+                    : preference;
+                root.setAttribute('data-theme-preference', preference);
+                root.setAttribute('data-bs-theme', effective === 'dark' ? 'dark' : 'light');
             })();
         </script>
         <style>
@@ -72,14 +82,33 @@
     <body>
         {% block page_body %}
             <header class="mb-3 border-bottom">
-                <div class="container">
-                    <div class="navbar navbar-light align-items-center justify-content-center justify-content-sm-between">
-                        <a href="{{ path('index') }}" class="py-1 px-2 d-flex align-items-center text-dark text-decoration-none">
+                <div class="container-fluid px-2">
+                    <div class="navbar navbar-light align-items-center">
+                        <div class="navbar-start">
+                        <div class="theme-switcher" role="group" aria-label="Theme">
+                            <button type="button" class="theme-switcher-btn" data-theme-choice="light" title="Light theme" aria-label="Light theme">
+                                <svg class="theme-switcher-icon" viewBox="0 0 16 16" aria-hidden="true">
+                                    <path d="M8 3.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9zm0-3a.6.6 0 0 1 .6.6v1.2a.6.6 0 1 1-1.2 0V1.1A.6.6 0 0 1 8 .5zm0 12.6a.6.6 0 0 1 .6.6v1.2a.6.6 0 1 1-1.2 0v-1.2a.6.6 0 0 1 .6-.6zM1.1 7.4h1.2a.6.6 0 1 1 0 1.2H1.1a.6.6 0 1 1 0-1.2zm12.6 0h1.2a.6.6 0 1 1 0 1.2h-1.2a.6.6 0 1 1 0-1.2zM3.2 3.2a.6.6 0 0 1 .8 0l.9.9a.6.6 0 1 1-.8.8L3.2 4a.6.6 0 0 1 0-.8zm8.9 8.9a.6.6 0 0 1 .8 0l.9.9a.6.6 0 1 1-.8.8l-.9-.9a.6.6 0 0 1 0-.8zm1.7-8.9a.6.6 0 0 1 0 .8l-.9.9a.6.6 0 1 1-.8-.8l.9-.9a.6.6 0 0 1 .8 0zM4.9 12.1a.6.6 0 0 1 0 .8l-.9.9a.6.6 0 1 1-.8-.8l.9-.9a.6.6 0 0 1 .8 0z"/>
+                                </svg>
+                            </button>
+                            <button type="button" class="theme-switcher-btn" data-theme-choice="dark" title="Dark theme" aria-label="Dark theme">
+                                <svg class="theme-switcher-icon" viewBox="0 0 16 16" aria-hidden="true">
+                                    <path d="M13.8 10.6A6.3 6.3 0 0 1 5.4 2.2a.6.6 0 0 0-.7-.8 7 7 0 1 0 9.9 9.9.6.6 0 0 0-.8-.7z"/>
+                                </svg>
+                            </button>
+                            <button type="button" class="theme-switcher-btn" data-theme-choice="system" title="System theme" aria-label="System theme">
+                                <svg class="theme-switcher-icon" viewBox="0 0 16 16" aria-hidden="true">
+                                    <path d="M8 1.2a6.8 6.8 0 1 0 0 13.6A6.8 6.8 0 0 0 8 1.2zM8 13.6V2.4a5.6 5.6 0 0 1 0 11.2z"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <a href="{{ path('index') }}" class="py-1 px-2 d-flex align-items-center text-dark text-decoration-none navbar-brand-link">
                             <svg class="me-2" width="32" height="32" fill="currentColor" role="img" aria-label="{{ app_name }}">
                                 <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#speedometer2"></use>
                             </svg>
                             {{ app_name }}
                         </a>
+                        </div>
                         <div class="d-flex align-items-center ms-auto">
                             {% if app.user %}
                                 {{ include('_account_menu_bootstrap5.html.twig') }}
@@ -99,5 +128,50 @@
                 {% block body %}{% endblock %}
             </div>
         {% endblock %}
+        <script>
+            (function() {
+                var root = document.documentElement;
+                var media = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+                var buttons = Array.prototype.slice.call(document.querySelectorAll('[data-theme-choice]'));
+
+                function storedPreference() {
+                    try {
+                        var stored = window.localStorage && window.localStorage.getItem('throttleTheme');
+                        return /^(light|dark|system)$/.test(stored || '') ? stored : null;
+                    } catch (e) {
+                        return null;
+                    }
+                }
+
+                function apply(preference, persist) {
+                    preference = /^(light|dark|system)$/.test(preference || '') ? preference : 'system';
+                    var effective = preference === 'system' && media ? (media.matches ? 'dark' : 'light') : preference;
+                    root.setAttribute('data-theme-preference', preference);
+                    root.setAttribute('data-bs-theme', effective === 'dark' ? 'dark' : 'light');
+                    buttons.forEach(function(button) {
+                        var active = button.getAttribute('data-theme-choice') === preference;
+                        button.classList.toggle('active', active);
+                        button.setAttribute('aria-pressed', active ? 'true' : 'false');
+                    });
+                    if (persist) {
+                        try {
+                            window.localStorage && window.localStorage.setItem('throttleTheme', preference);
+                        } catch (e) {}
+                    }
+                }
+
+                buttons.forEach(function(button) {
+                    button.addEventListener('click', function() {
+                        apply(button.getAttribute('data-theme-choice'), true);
+                    });
+                });
+                if (media && media.addEventListener) {
+                    media.addEventListener('change', function() {
+                        apply(storedPreference() || root.getAttribute('data-theme-preference') || 'system', false);
+                    });
+                }
+                apply(storedPreference() || root.getAttribute('data-theme-preference') || 'system', false);
+            })();
+        </script>
     </body>
 </html>

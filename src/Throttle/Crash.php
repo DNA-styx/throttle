@@ -94,7 +94,7 @@ class Crash
             'deny-prefixes' => ['lib'],
             'deny-suffixes' => ['_srv.so'],
             'allow-path-contains' => ['/addons/sourcemod/', '/addons/metamod/', '/addons/', '/extensions/', '/plugins/'],
-            'allow-exact' => ['srcds_linux'],
+            'allow-exact' => ['srcds_linux', 'server_srv.so'],
             'allow-regex' => ['/^.*\.ext(?:\.[^.]+)*\.so$/', '/^(sourcemod|sourcepawn|metamod|crashhandler)\b.*\.so$/'],
         ];
 
@@ -1464,6 +1464,15 @@ class Crash
         $culpritCandidates = self::buildCulpritCandidates($stack, $modules, $crash['metadata'], $crash['cmdline'], $terminalConsoleCause['blaming'] ?? null, $terminalConsoleCause, $rawSourcePawnChain);
         $stats = $app['db']->executeQuery('SELECT COUNT(DISTINCT crash.owner_id) AS owners, COUNT(DISTINCT crash.ip) AS ips, COUNT(*) AS crashes FROM crash, (SELECT owner_id, stackhash FROM crash WHERE id = ?) AS this WHERE this.stackhash = crash.stackhash', [$id])->fetch();
         $signatureNotes = self::loadSignatureNotes($app, $crash['stackhash'] ?? null);
+        $userSignatureNote = null;
+        if ($app['user'] !== null) {
+            foreach ($signatureNotes as $note) {
+                if ((int) $note['author_id'] === (int) $app['user']['id']) {
+                    $userSignatureNote = $note;
+                    break;
+                }
+            }
+        }
         $processing_log = $app['db']->executeQuery('SELECT created_at, status, duration_ms, message FROM crash_processing_log WHERE crash = ? ORDER BY created_at DESC LIMIT 1', [$id])->fetch();
         if ($processing_log === false) {
             $processing_log = null;
@@ -1497,6 +1506,8 @@ class Crash
             'modules' => $modules,
             'stats' => $stats,
             'signature_notes' => $signatureNotes,
+            'user_signature_note' => $userSignatureNote,
+            'can_create_signature_note' => $app['user'] !== null && ($app['user']['admin'] || $userSignatureNote === null),
             'outdated' => $outdated,
             'has_error_string' => $has_error_string,
             'show_sourcepawn_message' => $show_sourcepawn_message,
@@ -1543,6 +1554,18 @@ class Crash
             $app['session']->getFlashBag()->add('error_note', 'Title and note body are required.');
 
             return $app->redirect($app['url_generator']->generate('details', array('id' => $id)) . '#signature-notes');
+        }
+
+        if (!$app['user']['admin']) {
+            $existing = $app['db']->executeQuery(
+                'SELECT id FROM crash_signature_note WHERE stackhash = ? AND author_id = ? LIMIT 1',
+                array($stackhash, (int) $app['user']['id'])
+            )->fetchColumn(0);
+            if ($existing !== false) {
+                $app['session']->getFlashBag()->add('error_note', 'You already have a note for this crash signature. Edit your existing note instead.');
+
+                return $app->redirect($app['url_generator']->generate('details', array('id' => $id)) . '#signature-notes');
+            }
         }
 
         $app['db']->executeUpdate(

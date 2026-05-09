@@ -97,7 +97,10 @@
                         <option value="1G">
                         <option value="-1">
                     </datalist>
-                    <div class="form-text">Current PHP request limit: <code>{{ currentMemoryLimit }}</code>.</div>
+                    <div class="form-text">
+                        Upload endpoints will use: <code>{{ uploadSettings.upload_memory_limit }}</code>.<br>
+                        Current /health request limit: <code>{{ currentMemoryLimit }}</code>.
+                    </div>
                 </div>
                 <div class="col-md-3 d-flex gap-2">
                     <button type="submit" class="btn btn-primary">Save</button>
