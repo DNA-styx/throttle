@@ -89,6 +89,53 @@ $(function() {
   bindLiveCounter($('#crash-count-lifetime'), '{{ path('stats_lifetime') }}', 10);
   bindLiveCounter($('#crash-count-today'), '{{ path('stats_today') }}', 300);
 
+  var darkCharts = document.body.classList.contains('theme-dark');
+  if (darkCharts && window.Highcharts) {
+    Highcharts.setOptions({
+      chart: {
+        backgroundColor: '#202630',
+        plotBackgroundColor: '#202630',
+        plotBorderColor: '#303948',
+        style: {
+          color: '#d7dde6'
+        }
+      },
+      colors: ['#6da8ff', '#79d28f', '#f2c46d', '#d88a8f'],
+      xAxis: {
+        gridLineColor: '#303948',
+        lineColor: '#536174',
+        tickColor: '#536174',
+        labels: {
+          style: {
+            color: '#b8c4d2'
+          }
+        }
+      },
+      yAxis: {
+        gridLineColor: '#303948',
+        lineColor: '#536174',
+        tickColor: '#536174',
+        labels: {
+          style: {
+            color: '#b8c4d2'
+          }
+        },
+        title: {
+          style: {
+            color: '#b8c4d2'
+          }
+        }
+      },
+      tooltip: {
+        backgroundColor: '#111820',
+        borderColor: '#536174',
+        style: {
+          color: '#e5edf5'
+        }
+      }
+    });
+  }
+
   $.get('{{ path('stats_daily', {module: module, function: function}) }}', function(csv) {
     $('#chart_daily').highcharts({
       chart: {

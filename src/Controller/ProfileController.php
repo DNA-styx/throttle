@@ -85,6 +85,26 @@ class ProfileController extends AbstractController
         return $this->redirectToRoute('profile', [], Response::HTTP_SEE_OTHER);
     }
 
+    #[Route('/profile/theme', name: 'profile_theme', methods: ['POST'])]
+    public function saveTheme(Request $request, EntityManagerInterface $entityManager): Response
+    {
+        if (!$this->isCsrfTokenValid('profile-theme', (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        $theme = (string) $request->request->get('theme', User::THEME_LIGHT);
+        if (!in_array($theme, User::THEMES, true)) {
+            return new Response('Invalid theme preference.', Response::HTTP_BAD_REQUEST);
+        }
+
+        $this->currentUser()->setTheme($theme);
+        $entityManager->flush();
+
+        $this->addFlash('success', 'Theme preference saved.');
+
+        return $this->redirectToRoute('profile', [], Response::HTTP_SEE_OTHER);
+    }
+
     private function currentUser(): User
     {
         $user = $this->getUser();

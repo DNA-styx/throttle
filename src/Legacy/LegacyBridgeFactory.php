@@ -2,6 +2,7 @@
 
 namespace App\Legacy;
 
+use App\Runtime\UploadSettings;
 use App\Entity\User;
 use Doctrine\DBAL\Connection;
 use Psr\Log\LoggerInterface;
@@ -51,15 +52,16 @@ class LegacyBridgeFactory
         $this->redisUrl = $redisUrl;
     }
 
-    public function createHttp(Request $request): Application
+    public function createHttp(Request $request, bool $includeContent = true): Application
     {
         $app = new Application();
         $user = $this->getUser();
-        $legacyRequest = LegacyRequest::fromBaseRequest($request);
+        $legacyRequest = LegacyRequest::fromBaseRequest($request, $includeContent);
         $legacyConfig = $this->getEffectiveLegacyConfig();
 
         $app['db'] = new LegacyDbalConnection($this->connection);
         $app['request'] = $legacyRequest;
+        $app['base_request'] = $request;
         $app['session'] = $legacyRequest->getSession();
         $app['url_generator'] = $this->urlGenerator;
         $app['monolog'] = $this->logger;
@@ -113,6 +115,7 @@ class LegacyBridgeFactory
             'avatar' => $this->crashOwnerResolver->getAvatarForUser($user),
             'pending' => 0,
             'admin' => $this->crashOwnerResolver->isAdmin($user),
+            'theme' => $user->getTheme(),
             'owner_ids' => $this->crashOwnerResolver->getAllowedOwnerIds($user),
             'owners' => $this->crashOwnerResolver->getAllowedOwners($user),
         ];
@@ -143,6 +146,7 @@ class LegacyBridgeFactory
         if ($policy !== null) {
             $config['symbol-request'] = $policy;
         }
+        $config['upload-settings'] = UploadSettings::load($this->projectDir);
 
         return $config;
     }

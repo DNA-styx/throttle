@@ -63,7 +63,7 @@ docker compose --env-file .env.prod.docker -f compose.prod.yaml ps
 docker compose --env-file .env.prod.docker -f compose.prod.yaml exec app php bin/console doctrine:migrations:status --env=prod
 ```
 
-The production compose file starts the web app plus a `processor` service that runs `crash:process --update --limit=10` every minute. Persistent Docker volumes keep the database, Redis data, crash dumps, symbol files, and runtime `var/` data, including `/health` symbol request policy changes.
+The production compose file starts the web app plus a `processor` service that runs `crash:process --update --limit=10` every minute. Persistent Docker volumes keep the database, Redis data, crash dumps, symbol files, and runtime `var/` data, including `/health` symbol request policy and upload processing settings.
 
 Open `http://SERVER_IP:18080/` or put Nginx/Traefik/Caddy in front of the container. After first Steam login, use `APP_ADMINS` to grant access to `/health`.
 
@@ -190,11 +190,11 @@ sudo -u www-data php8.4 /var/www/throttle/bin/console crash:process --env=prod -
 
 ### Health and Troubleshooting
 
-- `/health` is admin-only and shows queue, storage, binary, and runtime health. It also edits the binary upload request policy used by Accelerator presubmit; saved changes are stored in `var/symbol-request-policy.json`.
+- `/health` is admin-only and shows queue, storage, binary, and runtime health. It edits the binary upload request policy used by Accelerator presubmit and upload processing settings for streaming `.sym` handling and upload endpoint memory limits. Saved changes are stored in `var/symbol-request-policy.json` and `var/upload-settings.json`.
 - Grant admin access without editing the database by setting `APP_ADMINS` in `.env.local` or the service environment. Accepted values are comma-separated user ids, `user:<id>`, SteamID64 values, or `steam:<SteamID64>`, for example `APP_ADMINS="steam:STEAMID64,user:1"`.
 - Pending crashes usually mean `crash:process` is not running or failed.
 - `bin/carburetor`, `bin/minidump_stackwalk`, `bin/dump_syms`, `bin/breakpad_moduleid`, and `bin/nm` must be executable.
-- `var/`, `cache/`, `dumps/`, and `symbols/` must be writable by the PHP-FPM user. Back up `var/symbol-request-policy.json` if you use custom `/health` policy rules.
+- `var/`, `cache/`, `dumps/`, and `symbols/` must be writable by the PHP-FPM user. Back up `var/symbol-request-policy.json` and `var/upload-settings.json` if you use custom `/health` rules.
 - If templates fail with missing Encore entrypoints, run `npm ci && npm run build` and verify `public/build/entrypoints.json` exists.
 - If Composer uses PHP 8.1 on a PHP 8.4 project, run Composer through PHP 8.4: `php8.4 $(which composer) install --no-dev --optimize-autoloader`.
 - If PHP-FPM logs duplicate or missing extensions, fix `/etc/php/8.4/fpm/php.ini` and use package-managed `conf.d` extension files.

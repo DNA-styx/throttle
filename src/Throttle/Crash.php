@@ -112,64 +112,80 @@ class Crash
         return $configured;
     }
 
-    private static function shouldRequestSymbolsForModule(string $module, array $config = []): bool
+    public static function getSymbolRequestDecision(string $module, array $config = []): array
     {
         $policy = self::getSymbolRequestPolicy($config);
         $module = str_replace('\\', '/', $module);
         $lower = strtolower($module);
+        $basename = basename($lower);
 
         foreach ($policy['deny-path-prefixes'] as $prefix) {
             if ($prefix !== '' && str_starts_with($lower, strtolower((string) $prefix))) {
-                return false;
+                return self::symbolRequestDecision($module, $basename, false, 'hard deny', 'deny-path-prefixes', (string) $prefix);
             }
         }
 
         foreach ($policy['deny-path-contains'] as $needle) {
             if ($needle !== '' && str_contains($lower, strtolower((string) $needle))) {
-                return false;
+                return self::symbolRequestDecision($module, $basename, false, 'hard deny', 'deny-path-contains', (string) $needle);
             }
         }
-
-        $basename = basename($lower);
 
         foreach ($policy['deny-exact'] as $exact) {
             if ($basename === strtolower((string) $exact)) {
-                return false;
-            }
-        }
-
-        foreach ($policy['deny-prefixes'] as $prefix) {
-            if ($prefix !== '' && str_starts_with($basename, strtolower((string) $prefix))) {
-                return false;
-            }
-        }
-
-        foreach ($policy['deny-suffixes'] as $suffix) {
-            if ($suffix !== '' && str_ends_with($basename, strtolower((string) $suffix))) {
-                return false;
-            }
-        }
-
-        foreach ($policy['allow-path-contains'] as $needle) {
-            if ($needle !== '' && str_contains($lower, strtolower((string) $needle))) {
-                return true;
+                return self::symbolRequestDecision($module, $basename, false, 'hard deny', 'deny-exact', (string) $exact);
             }
         }
 
         foreach ($policy['allow-exact'] as $exact) {
             if ($basename === strtolower((string) $exact)) {
-                return true;
+                return self::symbolRequestDecision($module, $basename, true, 'allow', 'allow-exact', (string) $exact);
+            }
+        }
+
+        foreach ($policy['allow-path-contains'] as $needle) {
+            if ($needle !== '' && str_contains($lower, strtolower((string) $needle))) {
+                return self::symbolRequestDecision($module, $basename, true, 'allow', 'allow-path-contains', (string) $needle);
             }
         }
 
         foreach ($policy['allow-regex'] as $pattern) {
             $pattern = (string) $pattern;
             if ($pattern !== '' && @preg_match($pattern, $basename) === 1) {
-                return true;
+                return self::symbolRequestDecision($module, $basename, true, 'allow', 'allow-regex', $pattern);
             }
         }
 
-        return false;
+        foreach ($policy['deny-prefixes'] as $prefix) {
+            if ($prefix !== '' && str_starts_with($basename, strtolower((string) $prefix))) {
+                return self::symbolRequestDecision($module, $basename, false, 'generic deny', 'deny-prefixes', (string) $prefix);
+            }
+        }
+
+        foreach ($policy['deny-suffixes'] as $suffix) {
+            if ($suffix !== '' && str_ends_with($basename, strtolower((string) $suffix))) {
+                return self::symbolRequestDecision($module, $basename, false, 'generic deny', 'deny-suffixes', (string) $suffix);
+            }
+        }
+
+        return self::symbolRequestDecision($module, $basename, false, 'default deny', null, null);
+    }
+
+    private static function shouldRequestSymbolsForModule(string $module, array $config = []): bool
+    {
+        return self::getSymbolRequestDecision($module, $config)['requested'];
+    }
+
+    private static function symbolRequestDecision(string $module, string $basename, bool $requested, string $stage, ?string $rule, ?string $value): array
+    {
+        return [
+            'module' => $module,
+            'basename' => $basename,
+            'requested' => $requested,
+            'stage' => $stage,
+            'rule' => $rule,
+            'value' => $value,
+        ];
     }
 
     private static function getSymbolModuleName(string $module): string
@@ -238,12 +254,57 @@ class Crash
         );
     }
 
+    private static function buildModuleCoverageRows(array $modules, array $config = []): array
+    {
+        foreach ($modules as &$module) {
+            $name = (string) ($module['name'] ?? '');
+            $identifier = (string) ($module['identifier'] ?? '');
+            $basename = basename(str_replace('\\', '/', $name));
+            $invalid = $identifier === '000000000000000000000000000000000';
+            $present = (int) ($module['present'] ?? 0) === 1;
+            $requestedByPolicy = !$invalid && self::shouldRequestSymbolsForModule($name, $config);
+
+            if ($invalid) {
+                $module['coverage_status'] = 'Invalid id';
+                $module['coverage_class'] = 'warning';
+                $module['policy_hint'] = 'Not a code module; symbols are not needed';
+            } elseif ($present) {
+                $module['coverage_status'] = 'Available';
+                $module['coverage_class'] = 'success';
+                $module['policy_hint'] = $requestedByPolicy ? 'Allowed by upload policy' : 'Symbols already available';
+            } else {
+                $module['coverage_status'] = 'Missing';
+                $module['coverage_class'] = $requestedByPolicy ? 'danger' : 'muted';
+                $module['policy_hint'] = $requestedByPolicy ? 'Allowed by upload policy' : 'Blocked by upload policy';
+            }
+
+            if ($invalid || str_ends_with(strtolower($basename), '.mmdb')) {
+                $module['usefulness_hint'] = 'No';
+            } elseif (self::isSystemRuntimeModule($basename)) {
+                $module['usefulness_hint'] = 'Low';
+            } elseif ($requestedByPolicy || self::isPluginLikeLabel($basename) || self::isServerEngineModule($basename)) {
+                $module['usefulness_hint'] = 'High';
+            } else {
+                $module['usefulness_hint'] = 'Medium';
+            }
+        }
+        unset($module);
+
+        usort($modules, static function (array $a, array $b): int {
+            return strcasecmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''));
+        });
+
+        return $modules;
+    }
+
     private static function buildCulpritCandidates(array $stack, array $modules, array $metadata, ?string $cmdline): array
     {
         $candidates = array();
         $presentByModule = array();
         foreach ($modules as $module) {
-            $presentByModule[$module['name']] = (int) $module['present'] === 1;
+            $moduleName = (string) ($module['name'] ?? '');
+            $presentByModule[$moduleName] = (int) $module['present'] === 1;
+            $presentByModule[basename(str_replace('\\', '/', $moduleName))] = (int) $module['present'] === 1;
         }
 
         foreach ($stack as $index => $frame) {
@@ -257,29 +318,56 @@ class Crash
             }
 
             $score = max(8, 45 - ($index * 5));
+            $reasons = array('Frame #' . ($frame['frame'] ?? $index) . ': ' . $rendered);
             if ($index === 0) {
                 $score += 20;
             }
-            if (preg_match('/\.(smx|ext(?:\.[^ ]+)?\.so)$/i', $label) === 1 || str_contains($label, '.ext.')) {
-                $score += 20;
-            }
-            if (preg_match('/sourcepawn|sourcemod|metamod|engine_srv|dedicated_srv|libc\.so|linux-gate/i', $label) === 1) {
-                $score -= 12;
-            }
-            if ($module !== '' && isset($presentByModule[$module]) && !$presentByModule[$module]) {
-                $score -= 5;
+
+            if (self::isPluginLikeLabel($label)) {
+                $score += 35;
+                $reasons[] = 'SourceMod plugin or extension module';
             }
 
-            self::addCulpritCandidate($candidates, $label, $score, 'Frame #' . ($frame['frame'] ?? $index) . ': ' . $rendered);
+            if (self::isServerEngineModule($label)) {
+                $score += 12;
+                $reasons[] = 'Game or Source engine module';
+            }
+
+            if (preg_match('/__SourceHook_/i', $rendered) === 1) {
+                $score -= 35;
+                $reasons[] = 'Hook frame';
+            }
+
+            if (self::isSystemRuntimeModule($label)) {
+                $score -= 35;
+                $reasons[] = 'System/runtime module';
+            }
+
+            $moduleKey = $module !== '' && isset($presentByModule[$module]) ? $module : basename(str_replace('\\', '/', $module));
+            if ($moduleKey !== '' && isset($presentByModule[$moduleKey]) && !$presentByModule[$moduleKey]) {
+                $score -= 18;
+                $reasons[] = 'Module has no symbols';
+            }
+
+            self::addCulpritCandidate($candidates, $label, $score, $reasons);
 
             if (preg_match('/\[\s*([^\\[\\]]+\\.smx)::([^\\[\\]]+)\s*\]/i', $rendered, $matches) === 1) {
-                self::addCulpritCandidate($candidates, $matches[1], $score + 18, 'SourcePawn function: ' . $matches[2]);
+                self::addCulpritCandidate($candidates, $matches[1], $score + 28, array(
+                    'SourcePawn function: ' . $matches[2],
+                    'Custom plugin frame',
+                ));
             }
         }
 
-        foreach (array('Plugin', 'SourceModPlugin', 'Extension', 'SourceModExtension') as $key) {
+        foreach (array('Plugin', 'SourceModPlugin') as $key) {
             if (!empty($metadata[$key]) && is_string($metadata[$key])) {
-                self::addCulpritCandidate($candidates, basename($metadata[$key]), 18, 'Crash metadata field: ' . $key);
+                self::addCulpritCandidate($candidates, basename($metadata[$key]), 28, 'Crash metadata field: ' . $key);
+            }
+        }
+
+        foreach (array('Extension', 'SourceModExtension') as $key) {
+            if (!empty($metadata[$key]) && is_string($metadata[$key])) {
+                self::addCulpritCandidate($candidates, basename($metadata[$key]), 24, 'Crash metadata field: ' . $key);
             }
         }
 
@@ -303,7 +391,7 @@ class Crash
         }, array_values($top));
     }
 
-    private static function addCulpritCandidate(array &$candidates, string $label, int $score, string $reason): void
+    private static function addCulpritCandidate(array &$candidates, string $label, int $score, string|array $reasons): void
     {
         $label = trim($label);
         if ($label === '') {
@@ -315,7 +403,11 @@ class Crash
         }
 
         $candidates[$label]['score'] += max(1, $score);
-        $candidates[$label]['reasons'][] = $reason;
+        foreach ((array) $reasons as $reason) {
+            if (is_string($reason) && trim($reason) !== '') {
+                $candidates[$label]['reasons'][] = $reason;
+            }
+        }
     }
 
     private static function candidateLabelFromFrame(string $module, string $function, string $rendered): ?string
@@ -333,6 +425,54 @@ class Crash
         }
 
         return null;
+    }
+
+    private static function isPluginLikeLabel(string $label): bool
+    {
+        return preg_match('/\.(?:smx|ext(?:\.[^ ]+)?\.so)$/i', $label) === 1 || str_contains(strtolower($label), '.ext.');
+    }
+
+    private static function isServerEngineModule(string $label): bool
+    {
+        return preg_match('/^(?:server_srv|engine_srv|dedicated_srv|datacache_srv|materialsystem_srv|studiorender_srv|vphysics_srv|vscript_srv|soundemittersystem_srv|shaderapiempty_srv|libtier0_srv|libvstdlib_srv)\.so$/i', basename($label)) === 1;
+    }
+
+    private static function isSystemRuntimeModule(string $label): bool
+    {
+        return preg_match('/^(?:ld-linux|linux-gate|steamclient\.so|libc\.so|libstdc\+\+|libgcc_s|libm\.so|libpthread|libdl|librt|libcurl|libcrypto|libssl|libgnutls|libgssapi|libkrb5|libk5crypto|libkrb5support|libldap|liblber|libssh|libsasl|libz\.so|libzstd|libbrotli|libnghttp2|libpsl|libidn|libunistring|libnettle|libhogweed|libtasn1|libp11-kit|libgmp|libffi|libresolv|libcom_err|libkeyutils|librtmp)/i', basename($label)) === 1;
+    }
+
+    private static function stripAnsiEscapeSequences(string $value): string
+    {
+        return preg_replace('/\x1b\[[0-9;?]*[ -\/]*[@-~]/', '', $value) ?? $value;
+    }
+
+    private static function classifyConsoleLine(string $message, ?string $activeGroup): array
+    {
+        $lower = strtolower($message);
+        $isSourceModCrashLine = preg_match('/\[SM\]\s+(?:Exception reported|Blaming|Call stack trace:|\[\d+\])/i', $message) === 1;
+
+        if (preg_match('/\[SM\]\s+Exception reported/i', $message) === 1) {
+            return array('danger', 'sourcemod-exception');
+        }
+
+        if ($activeGroup === 'sourcemod-exception' && $isSourceModCrashLine) {
+            return array('danger', 'sourcemod-exception');
+        }
+
+        if (preg_match('/\b(error|exception|crash|segmentation fault|fatal|assert|failed)\b/i', $message) === 1) {
+            return array('danger', null);
+        }
+
+        if (preg_match('/\b(warning|missing|invalid|timeout|unknown command)\b/i', $message) === 1) {
+            return array('warning', null);
+        }
+
+        if (preg_match('/\b(loaded|started|map)\b/i', $message) === 1 || preg_match('/\[SM\].*\bplugin\b/i', $message) === 1) {
+            return array('info', null);
+        }
+
+        return array('', null);
     }
 
     private static function extractSourceModSnapshots(array &$metadata): array
@@ -719,6 +859,7 @@ class Crash
         $notices = $app['db']->executeQuery('SELECT severity, text FROM crashnotice JOIN notice ON notice.id = crashnotice.notice WHERE crash = ?', array($id))->fetchAll();
         $stack = $app['db']->executeQuery('SELECT frame, module, function, rendered, url FROM frame WHERE crash = ? AND thread = ? ORDER BY frame', array($id, $crash['thread']))->fetchAll();
         $modules = $app['db']->executeQuery('SELECT name, identifier, processed, present, HEX(base) AS base FROM module WHERE crash = ? ORDER BY name', array($id))->fetchAll();
+        $modules = self::buildModuleCoverageRows($modules, $app['config']);
         $stats = $app['db']->executeQuery('SELECT COUNT(DISTINCT crash.owner_id) AS owners, COUNT(DISTINCT crash.ip) AS ips, COUNT(*) AS crashes FROM crash, (SELECT owner_id, stackhash FROM crash WHERE id = ?) AS this WHERE this.stackhash = crash.stackhash', [$id])->fetch();
         $processing_log = $app['db']->executeQuery('SELECT created_at, status, duration_ms, message FROM crash_processing_log WHERE crash = ? ORDER BY created_at DESC LIMIT 1', [$id])->fetch();
         if ($processing_log === false) {
@@ -759,6 +900,7 @@ class Crash
             'culprit_candidates' => self::buildCulpritCandidates($stack, $modules, $crash['metadata'], $crash['cmdline']),
             'processing_log' => $processing_log,
             'sourcemod_snapshots' => $snapshots,
+            'symbol_upload_log' => self::loadSymbolUploadLog($app, $modules),
         ));
     }
 
@@ -777,14 +919,7 @@ class Crash
             $app->abort(403);
         }
 
-        $modules = $app['db']->executeQuery('SELECT name, identifier, processed, present, HEX(base) AS base FROM module WHERE crash = ? ORDER BY present ASC, name ASC', array($id))->fetchAll();
-
-        return $app['twig']->render('symbol_coverage.html.twig', array(
-            'id' => $id,
-            'modules' => $modules,
-            'symbol_coverage' => self::buildSymbolCoverage($modules),
-            'symbol_upload_log' => self::loadSymbolUploadLog($app, $modules),
-        ));
+        return $app->redirect($app['url_generator']->generate('details', array('id' => $id)) . '#modules');
     }
 
     private static function loadSymbolUploadLog(Application $app, array $modules): array
@@ -960,6 +1095,19 @@ class Crash
                 preg_match_all('/(\\d+)\\((\\d+\\.?\\d*)\\):  ([^\\x00]*?)(?=(?:\\d+\\(\\d+\\.\\d+\\):  )|$)/', $console, $console, PREG_SET_ORDER);
 
                 $console = array_reverse($console); // Flip them back into chronological order.
+                $activeGroup = null;
+                $console = array_map(function (array $line) use (&$activeGroup): array {
+                    $message = trim(self::stripAnsiEscapeSequences((string) ($line[3] ?? '')));
+                    [$severity, $nextGroup] = self::classifyConsoleLine($message, $activeGroup);
+                    $activeGroup = $nextGroup;
+
+                    return array(
+                        'tick' => trim((string) ($line[1] ?? '')),
+                        'time' => trim((string) ($line[2] ?? '')),
+                        'message' => $message,
+                        'severity' => $severity,
+                    );
+                }, $console);
             }
         }
 

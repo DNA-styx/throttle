@@ -6,7 +6,7 @@ use Symfony\Component\HttpFoundation\Request;
 
 class LegacyRequest extends Request
 {
-    public static function fromBaseRequest(Request $request): self
+    public static function fromBaseRequest(Request $request, bool $includeContent = true): self
     {
         $legacyRequest = new self(
             $request->query->all(),
@@ -15,7 +15,7 @@ class LegacyRequest extends Request
             $request->cookies->all(),
             $request->files->all(),
             $request->server->all(),
-            $request->getContent()
+            $includeContent ? $request->getContent() : ''
         );
 
         if ($request->hasSession()) {

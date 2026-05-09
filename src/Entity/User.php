@@ -16,10 +16,19 @@ class User extends ServerOwner implements UserInterface
     public const ROLE_USER = 'ROLE_USER';
     public const ROLE_ADMIN = 'ROLE_ADMIN';
     public const ROLE_ALLOWED_TO_SWITCH = 'ROLE_ALLOWED_TO_SWITCH';
+    public const THEME_LIGHT = 'light';
+    public const THEME_DARK = 'dark';
+    public const THEME_SYSTEM = 'system';
 
     public const MANAGED_ROLES = [
         self::ROLE_ADMIN,
         self::ROLE_ALLOWED_TO_SWITCH,
+    ];
+
+    public const THEMES = [
+        self::THEME_LIGHT,
+        self::THEME_DARK,
+        self::THEME_SYSTEM,
     ];
 
     /** @var array<int, string> */
@@ -31,6 +40,9 @@ class User extends ServerOwner implements UserInterface
 
     #[ORM\Column(length: 128, unique: true)]
     protected string $uploadToken = '';
+
+    #[ORM\Column(length: 16, options: ['default' => self::THEME_LIGHT])]
+    protected string $theme = self::THEME_LIGHT;
 
     /** @var Collection<int, ExternalAccount> */
     #[ORM\OneToMany(mappedBy: 'user', targetEntity: ExternalAccount::class, cascade: ['remove'])]
@@ -105,6 +117,22 @@ class User extends ServerOwner implements UserInterface
     public function regenerateUploadToken(): self
     {
         $this->uploadToken = bin2hex(random_bytes(32));
+
+        return $this;
+    }
+
+    public function getTheme(): string
+    {
+        return in_array($this->theme, self::THEMES, true) ? $this->theme : self::THEME_LIGHT;
+    }
+
+    public function setTheme(string $theme): self
+    {
+        if (!in_array($theme, self::THEMES, true)) {
+            throw new \InvalidArgumentException('Unsupported theme preference');
+        }
+
+        $this->theme = $theme;
 
         return $this;
     }

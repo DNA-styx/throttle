@@ -3,12 +3,14 @@
 namespace App\Controller;
 
 use App\Legacy\LegacyBridgeFactory;
+use App\Runtime\UploadSettings;
 use App\Repository\UserRepository;
 use Doctrine\DBAL\Connection;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 
@@ -21,13 +23,15 @@ class LegacySymbolsController extends AbstractController
     private UserRepository $userRepository;
     private Connection $connection;
     private string $symbolUploadToken;
+    private string $projectDir;
 
-    public function __construct(LegacyBridgeFactory $legacyBridgeFactory, AuthorizationCheckerInterface $authorizationChecker, UserRepository $userRepository, Connection $connection, string $symbolUploadToken)
+    public function __construct(LegacyBridgeFactory $legacyBridgeFactory, AuthorizationCheckerInterface $authorizationChecker, UserRepository $userRepository, Connection $connection, KernelInterface $kernel, string $symbolUploadToken)
     {
         $this->legacyBridgeFactory = $legacyBridgeFactory;
         $this->authorizationChecker = $authorizationChecker;
         $this->userRepository = $userRepository;
         $this->connection = $connection;
+        $this->projectDir = $kernel->getProjectDir();
         $this->symbolUploadToken = $symbolUploadToken;
     }
 
@@ -41,7 +45,8 @@ class LegacySymbolsController extends AbstractController
             return new Response('Forbidden', Response::HTTP_FORBIDDEN);
         }
 
-        $response = $this->legacyResponse((new \Throttle\Symbols())->submit($this->legacyBridgeFactory->createHttp($request)));
+        UploadSettings::applyMemoryLimit($this->projectDir);
+        $response = $this->legacyResponse((new \Throttle\Symbols())->submit($this->legacyBridgeFactory->createHttp($request, false)));
         $this->recordTokenUsage($request, $response, $tokenUser, 'symbols');
 
         return $response;
@@ -57,7 +62,8 @@ class LegacySymbolsController extends AbstractController
             return new Response('Forbidden', Response::HTTP_FORBIDDEN);
         }
 
-        $response = $this->legacyResponse((new \Throttle\Binary())->submit($this->legacyBridgeFactory->createHttp($request)));
+        UploadSettings::applyMemoryLimit($this->projectDir);
+        $response = $this->legacyResponse((new \Throttle\Binary())->submit($this->legacyBridgeFactory->createHttp($request, false)));
         $this->recordTokenUsage($request, $response, $tokenUser, 'binary');
 
         return $response;
@@ -116,19 +122,38 @@ class LegacySymbolsController extends AbstractController
         $bytes = 0;
 
         if ($endpoint === 'symbols') {
+            $uploadInfo = $request->attributes->get('_symbol_upload_info');
+            if (is_array($uploadInfo)) {
+                $module = isset($uploadInfo['module']) ? (string) $uploadInfo['module'] : null;
+                $identifier = isset($uploadInfo['identifier']) ? (string) $uploadInfo['identifier'] : null;
+                $bytes = isset($uploadInfo['bytes']) ? (int) $uploadInfo['bytes'] : 0;
+            }
+
             $uploaded = $this->findUploadedSymbolFile($request);
-            if ($uploaded instanceof UploadedFile) {
-                $data = (string) file_get_contents($uploaded->getPathname());
-            } else {
-                $data = $request->request->get('symbol_file');
+            if ($bytes === 0 && $uploaded instanceof UploadedFile) {
+                $bytes = (int) $uploaded->getSize();
             }
-            if ($data === null || $data === '') {
-                $data = $request->getContent();
-            }
-            if (is_string($data)) {
-                $bytes = strlen($data);
-                $firstLine = strtok($data, "\r\n");
-                if (is_string($firstLine) && preg_match('/^MODULE [^ ]+ [^ ]+ (?P<id>[a-fA-F0-9]+) (?P<name>[^\/\\\\\r\n]+)$/', $firstLine, $matches) === 1) {
+
+            if ($module === null || $identifier === null) {
+                $firstLine = null;
+                if ($uploaded instanceof UploadedFile) {
+                    $handle = @fopen($uploaded->getPathname(), 'rb');
+                    if (is_resource($handle)) {
+                        $line = fgets($handle);
+                        fclose($handle);
+                        $firstLine = is_string($line) ? $line : null;
+                    }
+                } else {
+                    $data = $request->request->get('symbol_file');
+                    if (is_string($data)) {
+                        $bytes = strlen($data);
+                        $firstLine = strtok($data, "\r\n");
+                    } else {
+                        $bytes = (int) $request->headers->get('Content-Length', '0');
+                    }
+                }
+
+                if (is_string($firstLine) && preg_match('/^MODULE [^ ]+ [^ ]+ (?P<id>[a-fA-F0-9]+) (?P<name>[^\/\\\\\r\n]+)$/', rtrim($firstLine, "\r\n"), $matches) === 1) {
                     $module = $matches['name'];
                     $identifier = $matches['id'];
                 }

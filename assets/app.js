@@ -14,6 +14,22 @@ import './styles/app.scss';
 import * as Sentry from "@sentry/browser";
 import { BrowserTracing } from "@sentry/tracing";
 
+function applyThemePreference() {
+    if (APP_CONFIG.theme_preference !== 'system') {
+        return;
+    }
+
+    document.documentElement.dataset.bsTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+applyThemePreference();
+const themeMedia = window.matchMedia('(prefers-color-scheme: dark)');
+if (themeMedia.addEventListener) {
+    themeMedia.addEventListener('change', applyThemePreference);
+} else if (themeMedia.addListener) {
+    themeMedia.addListener(applyThemePreference);
+}
+
 if (APP_CONFIG.sentry_dsn !== null) {
     Sentry.init({
         dsn: APP_CONFIG.sentry_dsn,

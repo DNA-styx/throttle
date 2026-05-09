@@ -95,9 +95,6 @@
 {% if crash.has_console_log %}
     <a class="btn btn-default" href="{{ path('console', {'id': crash.id}) }}"><i class="icon-terminal"></i> View Console</a>
 {% endif %}
-{% if can_manage %}
-    <a class="btn btn-default" href="{{ path('symbol_coverage', {'id': crash.id}) }}"><i class="icon-puzzle-piece"></i> Symbol Coverage</a>
-{% endif %}
 {% if processing_log %}
     <a class="btn btn-default" href="{{ path('logs', {'id': crash.id}) }}"><i class="icon-cogs"></i> Processing Log</a>
 {% endif %}
@@ -119,15 +116,21 @@
 </div>
 {% endif %}
 
+{% if can_manage and crash.processed == 0 %}
+<h2 id="modules">Modules</h2>
+<div class="alert alert-block alert-info">This crash is still pending processing; symbol coverage may be incomplete.</div>
+{% endif %}
+
 {% if crash.processed == 1 and crash.failed == 0 %}
 {% if culprit_candidates|length > 0 %}
 <h2>Likely Cause</h2>
+<p class="muted">This is a heuristic score based on stack frames, symbols, and crash metadata.</p>
 <div class="well well-tight">
     <table class="table table-condensed" style="margin-bottom: 0;">
         <thead>
             <tr>
                 <th>Candidate</th>
-                <th style="width: 120px;">Confidence</th>
+                <th style="width: 120px;">Score</th>
                 <th>Signals</th>
             </tr>
         </thead>
@@ -154,19 +157,6 @@
 </div>
 {% endif %}
 
-{% if can_manage %}
-<h2>Symbol Coverage</h2>
-<div class="well">
-    <div class="row">
-        <div class="col-sm-3"><strong>{{ symbol_coverage.percent }}%</strong><br><span class="text-muted">coverage</span></div>
-        <div class="col-sm-3"><strong>{{ symbol_coverage.with_symbols }}</strong><br><span class="text-muted">with symbols</span></div>
-        <div class="col-sm-3"><strong>{{ symbol_coverage.missing }}</strong><br><span class="text-muted">missing</span></div>
-        <div class="col-sm-3"><strong>{{ symbol_coverage.invalid }}</strong><br><span class="text-muted">invalid id</span></div>
-    </div>
-    <p style="margin: 10px 0 0;"><a href="{{ path('symbol_coverage', {'id': crash.id}) }}">Open full symbol coverage</a></p>
-</div>
-{% endif %}
-
 {% if can_manage and (sourcemod_snapshots.plugins or sourcemod_snapshots.extensions) %}
 <h2>SourceMod Snapshot</h2>
 <div class="well">
@@ -186,7 +176,12 @@
 </div>
 {% endif %}
 
-<h2>Stack Trace</h2>
+<div class="clearfix">
+    <h2 class="pull-left">Stack Trace</h2>
+    <button type="button" class="btn btn-default btn-sm pull-right" id="copy-stacktrace" style="margin-top: 18px;" title="Copy stack trace" data-toggle="tooltip" data-container="body">
+        <i class="icon-copy"></i>
+    </button>
+</div>
 <div class="well well-tight">
     <table class="table table-stacktrace table-shown">
         <thead>
@@ -197,7 +192,7 @@
         </thead>
         <tbody>
 {% for frame in stack %}
-            <tr class="{% if '__SourceHook_' in frame.rendered %}text-muted{% endif %}">
+            <tr class="{% if '__SourceHook_' in frame.rendered %}text-muted{% endif %}" data-stack-frame="{{ frame.frame }}" data-stack-rendered="{{ frame.rendered|e('html_attr') }}">
                 <th>{{ frame.frame }}</th>
                 <td class="monospace">
                   {{ frame.rendered }}
@@ -219,34 +214,93 @@
     </table>
 </div>
 
-{% if modules|length > 0 and can_manage %}
-<h2>Modules</h2>
+{% if can_manage %}
+<h2 id="modules">Modules</h2>
+{% if symbol_coverage.total > 0 %}
+<div class="well">
+    <div class="row">
+        <div class="col-sm-3"><strong>{{ symbol_coverage.percent }}%</strong><br><span class="text-muted">symbol coverage</span></div>
+        <div class="col-sm-3"><strong>{{ symbol_coverage.with_symbols }}</strong><br><span class="text-muted">with symbols</span></div>
+        <div class="col-sm-3"><strong>{{ symbol_coverage.missing }}</strong><br><span class="text-muted">missing</span></div>
+        <div class="col-sm-3"><strong>{{ symbol_coverage.invalid }}</strong><br><span class="text-muted">invalid id</span></div>
+    </div>
+</div>
+{% endif %}
+{% if modules|length > 0 %}
 <div class="well well-tight">
     <table class="table table-modules table-shown">
         <thead>
             <tr>
-                <th>Name</th>
+                <th>Status</th>
+                <th>Module</th>
                 <th>Identifier</th>
                 <th>Base</th>
+                <th>Useful</th>
+                <th>Policy hint</th>
             </tr>
         </thead>
         <tbody>
 {% for module in modules %}
-{% set class = ((module.identifier == '000000000000000000000000000000000') ? 'info' : (module.processed ? '' : (module.present ? 'warning' : 'danger'))) %}
-            <tr class="{{ class }}">
+            <tr class="{{ module.coverage_class }}">
+                <td>{{ module.coverage_status }}</td>
                 <td>{{ module.name }}</td>
                 <td class="monospace">{{ module.identifier }}</td>
                 <td class="monospace">{{ module.base|address }}</td>
+                <td>{{ module.usefulness_hint }}</td>
+                <td>{{ module.policy_hint }}</td>
             </tr>
 {% endfor %}
         </tbody>
         <tfoot>
             <tr>
-                <td colspan="3"><i class="icon-ellipsis-horizontal"></i></td>
+                <td colspan="6"><i class="icon-ellipsis-horizontal"></i></td>
+            </tr>
+        </tfoot>
+    </table>
+{% if symbol_upload_log is defined and symbol_upload_log|length > 0 %}
+    <div class="table-more module-log-toggle">
+        <a href="#symbol-upload-log" data-toggle="collapse"><i class="icon-ellipsis-horizontal"></i> Symbol Upload Log</a>
+    </div>
+{% endif %}
+</div>
+{% endif %}
+{% if symbol_upload_log is defined and symbol_upload_log|length > 0 %}
+<div id="symbol-upload-log" class="collapse">
+<div class="well well-tight module-upload-log">
+    <table class="table table-condensed table-shown">
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Endpoint</th>
+                <th>Module</th>
+                <th>Identifier</th>
+                <th>Status</th>
+                <th>Result</th>
+                <th>Reason</th>
+            </tr>
+        </thead>
+        <tbody>
+{% for entry in symbol_upload_log %}
+            <tr class="{% if entry.status_code >= 400 %}danger{% elseif entry.result == 'stored' %}success{% endif %}">
+                <td class="nowrap">{{ entry.created_at }}</td>
+                <td>{{ entry.endpoint }}</td>
+                <td>{{ entry.module }}</td>
+                <td class="monospace">{{ entry.identifier }}</td>
+                <td>{{ entry.status_code }}</td>
+                <td>{{ entry.result }}</td>
+                <td>{{ entry.reason }}</td>
+            </tr>
+{% endfor %}
+        </tbody>
+        <tfoot>
+            <tr>
+                <td colspan="7"><i class="icon-ellipsis-horizontal"></i></td>
             </tr>
         </tfoot>
     </table>
 </div>
+</div>
+{% endif %}
 {% endif %}
 {% endif %}
 {% endblock %}
@@ -255,6 +309,34 @@
 <script src="{{ legacy_app.request.baseUrl }}/js/jquery.hoverIntent.min.js"></script>
 <script type="text/javascript">
     $('.table-stacktrace tbody tr').hoverIntent(function() { $(this).toggleClass('stackframe-expand'); });
+
+    $('#copy-stacktrace').on('click', function() {
+        var lines = [];
+        $('.table-stacktrace tbody tr').each(function() {
+            var frame = $(this).data('stack-frame');
+            var rendered = $(this).data('stack-rendered');
+            if (frame !== undefined && rendered) {
+                lines.push('#' + frame + ' ' + rendered);
+            }
+        });
+
+        var text = lines.join('\n');
+        if (!text) {
+            return;
+        }
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text);
+            return;
+        }
+
+        var textarea = $('<textarea>').val(text).css({position: 'fixed', left: '-9999px', top: '0'});
+        $('body').append(textarea);
+        textarea[0].focus();
+        textarea[0].select();
+        document.execCommand('copy');
+        textarea.remove();
+    });
 
     $('.table-shown').each(function() {
         if ($(this).find('tbody tr').length <= 10) {

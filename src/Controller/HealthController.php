@@ -3,6 +3,7 @@
 namespace App\Controller;
 
 use App\Entity\User;
+use App\Runtime\UploadSettings;
 use Doctrine\DBAL\Connection;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
@@ -23,25 +24,53 @@ class HealthController extends AbstractController
         $root = $kernel->getProjectDir();
         $checks = [];
         $policyErrors = [];
+        $uploadSettingsErrors = [];
+        $policyTestInput = '';
+        $policyTest = null;
         $runtimePolicy = $this->loadRuntimeSymbolRequestPolicy($root);
+        $uploadSettings = UploadSettings::load($root);
 
         if ($request->isMethod('POST')) {
-            if (!$this->isCsrfTokenValid('symbol-request-policy', (string) $request->request->get('_token'))) {
+            if ($request->request->get('upload_settings_form') !== null) {
+                if (!$this->isCsrfTokenValid('upload-settings', (string) $request->request->get('_token'))) {
+                    return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+                }
+
+                if ($request->request->get('reset_upload_settings') !== null) {
+                    UploadSettings::delete($root);
+
+                    return $this->redirectToRoute('health', ['upload_settings_reset' => 1]);
+                }
+
+                $uploadSettings = $this->readUploadSettingsFromRequest($request);
+                $uploadSettingsErrors = $this->validateUploadSettings($uploadSettings);
+                if ($uploadSettingsErrors === []) {
+                    UploadSettings::save($root, $uploadSettings);
+
+                    return $this->redirectToRoute('health', ['upload_settings_saved' => 1]);
+                }
+            } elseif (!$this->isCsrfTokenValid('symbol-request-policy', (string) $request->request->get('_token'))) {
                 return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
-            }
+            } else {
+                if ($request->request->get('reset_policy') !== null) {
+                    $this->deleteRuntimeSymbolRequestPolicy($root);
 
-            if ($request->request->get('reset_policy') !== null) {
-                $this->deleteRuntimeSymbolRequestPolicy($root);
+                    return $this->redirectToRoute('health', ['policy_reset' => 1]);
+                }
 
-                return $this->redirectToRoute('health', ['policy_reset' => 1]);
-            }
+                $runtimePolicy = $this->readSymbolRequestPolicyFromRequest($request);
+                $policyErrors = $this->validateSymbolRequestPolicy($runtimePolicy);
+                $policyTestInput = trim((string) $request->request->get('policy_test_module', ''));
 
-            $runtimePolicy = $this->readSymbolRequestPolicyFromRequest($request);
-            $policyErrors = $this->validateSymbolRequestPolicy($runtimePolicy);
-            if ($policyErrors === []) {
-                $this->saveRuntimeSymbolRequestPolicy($root, $runtimePolicy);
+                if ($request->request->get('test_policy') !== null) {
+                    if ($policyErrors === [] && $policyTestInput !== '') {
+                        $policyTest = \Throttle\Crash::getSymbolRequestDecision($policyTestInput, ['symbol-request' => $runtimePolicy]);
+                    }
+                } elseif ($policyErrors === []) {
+                    $this->saveRuntimeSymbolRequestPolicy($root, $runtimePolicy);
 
-                return $this->redirectToRoute('health', ['policy_saved' => 1]);
+                    return $this->redirectToRoute('health', ['policy_saved' => 1]);
+                }
             }
         }
 
@@ -79,12 +108,20 @@ class HealthController extends AbstractController
         return $this->render('health/index.html.twig', [
             'checks' => $checks,
             'queue' => $queue,
+            'uploadSettings' => $uploadSettings,
+            'uploadSettingsErrors' => $uploadSettingsErrors,
+            'uploadSettingsSaved' => $request->query->getBoolean('upload_settings_saved'),
+            'uploadSettingsReset' => $request->query->getBoolean('upload_settings_reset'),
+            'uploadSettingsSource' => is_file(UploadSettings::path($root)) ? UploadSettings::PATH : 'Default config',
+            'currentMemoryLimit' => ini_get('memory_limit'),
             'symbolRequestPolicy' => \Throttle\Crash::getSymbolRequestPolicy($effectiveLegacyConfig),
             'symbolRequestPolicyFields' => $this->buildSymbolRequestPolicyFields(\Throttle\Crash::getSymbolRequestPolicy($effectiveLegacyConfig)),
             'symbolRequestPolicyErrors' => $policyErrors,
             'symbolRequestPolicySaved' => $request->query->getBoolean('policy_saved'),
             'symbolRequestPolicyReset' => $request->query->getBoolean('policy_reset'),
             'symbolRequestPolicySource' => $runtimePolicy === null ? 'Default config' : self::SYMBOL_REQUEST_POLICY_PATH,
+            'policyTestInput' => $policyTestInput,
+            'policyTest' => $policyTest,
             'healthy' => !in_array(false, array_column($checks, 'ok'), true),
         ]);
     }
@@ -205,5 +242,29 @@ class HealthController extends AbstractController
         }
 
         return $fields;
+    }
+
+    /**
+     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string}
+     */
+    private function readUploadSettingsFromRequest(Request $request): array
+    {
+        return [
+            'streaming_symbols_enabled' => $request->request->getBoolean('streaming_symbols_enabled'),
+            'upload_memory_limit' => strtoupper(trim((string) $request->request->get('upload_memory_limit', '256M'))),
+        ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function validateUploadSettings(array $settings): array
+    {
+        $errors = [];
+        if (!UploadSettings::isValidMemoryLimit((string) ($settings['upload_memory_limit'] ?? ''))) {
+            $errors[] = 'Invalid upload memory limit. Use values like 256M, 512M, 1G, or -1.';
+        }
+
+        return $errors;
     }
 }

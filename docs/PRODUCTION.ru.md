@@ -36,7 +36,7 @@ docker compose --env-file .env.prod.docker -f compose.prod.yaml exec app php bin
 - `db` - MariaDB.
 - `redis` - Redis.
 
-Постоянные Docker volumes хранят базу, Redis, `var/`, `dumps/` и `symbols/`. Это важно: настройки Binary upload request policy из `/health` сохраняются в `var/symbol-request-policy.json`.
+Постоянные Docker volumes хранят базу, Redis, `var/`, `dumps/` и `symbols/`. Это важно: настройки Binary upload request policy из `/health` сохраняются в `var/symbol-request-policy.json`, а настройки обработки upload endpoints - в `var/upload-settings.json`.
 
 ## Ручная установка Ubuntu/Nginx/PHP-FPM
 
@@ -136,4 +136,4 @@ sudo -u www-data php8.4 /var/www/throttle/bin/console crash:process --env=prod -
 APP_ADMINS="steam:STEAMID64,user:1"
 ```
 
-На `/health` видны checks, очередь, бинарники и Binary upload request policy. Если policy меняется через UI, она сохраняется в `var/symbol-request-policy.json`; этот файл надо сохранять при бэкапах.
+На `/health` видны checks, очередь, бинарники, Binary upload request policy и настройки обработки upload endpoints. Через UI можно включать потоковую обработку `.sym` и задавать `memory_limit` только для `/symbols/submit` и `/binary/submit`. Policy сохраняется в `var/symbol-request-policy.json`, upload-настройки сохраняются в `var/upload-settings.json`; оба файла надо сохранять при бэкапах.

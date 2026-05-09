@@ -1,5 +1,6 @@
 <!DOCTYPE html>
-<html lang="en">
+{% set theme_preference = legacy_app.user ? legacy_app.user.theme|default('light') : 'light' %}
+<html lang="en" data-theme-preference="{{ theme_preference }}">
     <head>
         <meta charset="utf-8">
         <meta content="IE=EDGE" http-equiv="X-UA-Compatible">
@@ -7,6 +8,11 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
 {% endif %}
         <title>Throttle</title>
+{% if theme_preference == 'dark' %}
+        <style>html,body{background:#15191f;color:#d7dde6;color-scheme:dark;}</style>
+{% elseif theme_preference == 'system' %}
+        <style>@media (prefers-color-scheme: dark){html,body{background:#15191f;color:#d7dde6;color-scheme:dark;}}</style>
+{% endif %}
         <link href="{{ legacy_app.request.baseUrl }}/css/bootstrap.no-icons.min.css" rel="stylesheet">
         <link href="{{ legacy_app.request.baseUrl }}/css/font-awesome.min.css" rel="stylesheet">
 {% block stylesheets %}{% endblock %}
@@ -15,7 +21,7 @@
         <link href="{{ legacy_app.request.baseUrl }}/css/kindle.css" rel="stylesheet">
 {% endif %}
     </head>
-    <body>
+    <body class="theme-{{ theme_preference == 'system' ? 'light' : theme_preference }}" data-theme-preference="{{ theme_preference }}">
         <div class="navbar navbar-default navbar-static-top">
             <div class="container">
                 <a class="navbar-brand" href="/"><i class="icon-dashboard"></i> Throttle</a>
@@ -40,6 +46,24 @@
         <script src="{{ legacy_app.request.baseUrl }}/js/jquery.min.js"></script>
         <script src="{{ legacy_app.request.baseUrl }}/js/bootstrap.min.js"></script>
         <script type="text/javascript">
+        (function() {
+            var body = document.body;
+            if (!body || body.getAttribute('data-theme-preference') !== 'system') {
+                return;
+            }
+
+            var media = window.matchMedia('(prefers-color-scheme: dark)');
+            var apply = function() {
+                body.classList.toggle('theme-dark', media.matches);
+                body.classList.toggle('theme-light', !media.matches);
+            };
+
+            apply();
+            if (media.addEventListener) {
+                media.addEventListener('change', apply);
+            }
+        })();
+
         $(function() {
             $('[data-toggle="tooltip"]').tooltip();
         })
