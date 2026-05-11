@@ -361,3 +361,249 @@
 [data-bs-theme="dark"] .alert-info .muted {
   color: #b8c7d8;
 }
+
+.signature-note {
+  border-top: 1px solid rgba(120, 136, 156, 0.25);
+  padding: 1rem 0;
+}
+
+.signature-note:first-of-type {
+  border-top: 0;
+  padding-top: 0.25rem;
+}
+
+.signature-note-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.45rem;
+}
+
+.signature-note-header-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-shrink: 0;
+  color: #6b7c8f;
+  font-size: 0.85rem;
+  line-height: 1.2;
+}
+
+.signature-note-footer {
+  margin-top: 0.95rem;
+  padding-top: 0.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.signature-note-votes {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.signature-note-vote-form {
+  display: inline-flex;
+  margin: 0;
+}
+
+.signature-note-pin-form {
+  margin: 0;
+}
+
+.signature-note-vote-form .btn-link,
+.signature-note-actions .btn-link,
+.signature-note-pin-form .btn-link {
+  padding: 0;
+  border: 0;
+  vertical-align: baseline;
+}
+
+.signature-note-vote-form .btn-link.active,
+.signature-note-pin.active {
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.signature-note-vote-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  text-decoration: none;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.signature-note-vote-count.positive {
+  color: #1d6d39;
+  font-weight: 700;
+}
+
+.signature-note-vote-count.negative {
+  color: #8c1f37;
+  font-weight: 700;
+}
+
+.signature-note-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.signature-note-pin {
+  color: #6b7c8f;
+  line-height: 1;
+}
+
+.signature-note-pin.static {
+  display: inline-flex;
+  align-items: center;
+}
+
+.signature-note-pin.active {
+  color: #2f7ec7;
+}
+
+.signature-note-pin-date {
+  color: #6b7c8f;
+  white-space: nowrap;
+}
+
+.signature-note-body {
+  margin-top: 0.35rem;
+}
+
+.signature-note-vote-button.positive,
+.signature-note-vote-button.positive i {
+  color: #1d6d39;
+}
+
+.signature-note-vote-button.negative,
+.signature-note-vote-button.negative i {
+  color: #8c1f37;
+}
+
+.signature-note-vote-button.active {
+  text-decoration: none;
+}
+
+.signature-note-edit {
+  margin-top: 0.85rem;
+}
+
+.signature-notes-pagination {
+  margin: 1rem 0 0;
+}
+
+.signature-notes-pagination ul {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  justify-content: center;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.signature-notes-pagination li {
+  margin: 0;
+}
+
+.signature-notes-pagination a,
+.signature-notes-pagination span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.5rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid #c8d2df;
+  border-radius: 0.35rem;
+  background: #f7f9fc;
+  color: #2f7ec7;
+  text-decoration: none;
+  line-height: 1.1;
+}
+
+.signature-notes-pagination .active span {
+  background: #e9eef5;
+  color: #213246;
+  border-color: #c8d2df;
+  font-weight: 700;
+}
+
+.signature-notes-pagination .disabled span,
+.signature-notes-pagination .disabled a {
+  color: #90a0b3;
+  background: #f3f5f8;
+  border-color: #d8e0ea;
+  pointer-events: none;
+}
+
+[data-bs-theme="dark"] .signature-note-header-meta,
+[data-bs-theme="dark"] .signature-note-pin-date {
+  color: #93a4b7;
+}
+
+[data-bs-theme="dark"] .signature-note {
+  border-top-color: rgba(120, 136, 156, 0.35);
+}
+
+[data-bs-theme="dark"] .signature-note-vote-button.positive,
+[data-bs-theme="dark"] .signature-note-vote-button.positive i {
+  color: #8fe0a3;
+}
+
+[data-bs-theme="dark"] .signature-note-vote-button.negative,
+[data-bs-theme="dark"] .signature-note-vote-button.negative i {
+  color: #ff9bb0;
+}
+
+[data-bs-theme="dark"] .signature-note-vote-count.positive {
+  color: #8fe0a3;
+}
+
+[data-bs-theme="dark"] .signature-note-vote-count.negative {
+  color: #ff9bb0;
+}
+
+[data-bs-theme="dark"] .signature-note-pin {
+  color: #93a4b7;
+}
+
+[data-bs-theme="dark"] .signature-note-pin.active {
+  color: #8bd3ff;
+}
+
+[data-bs-theme="dark"] .signature-notes-pagination a,
+[data-bs-theme="dark"] .signature-notes-pagination span {
+  background: #1a2330;
+  color: #d7e0ea;
+  border-color: #3a4758;
+}
+
+[data-bs-theme="dark"] .signature-notes-pagination a:hover,
+[data-bs-theme="dark"] .signature-notes-pagination a:focus {
+  background: #2b3849;
+  color: #fff;
+  border-color: #536174;
+}
+
+[data-bs-theme="dark"] .signature-notes-pagination .active span {
+  background: #2b3849;
+  color: #fff;
+  border-color: #536174;
+}
+
+[data-bs-theme="dark"] .signature-notes-pagination .disabled span,
+[data-bs-theme="dark"] .signature-notes-pagination .disabled a {
+  color: #6f7b8a;
+  background: #151c25;
+  border-color: #303b4a;
+}

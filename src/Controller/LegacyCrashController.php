@@ -163,6 +163,26 @@ class LegacyCrashController extends AbstractController
         return $this->legacyResponse((new \Throttle\Crash())->deleteSignatureNote($this->legacyBridgeFactory->createHttp($request), $id, $noteId));
     }
 
+    #[Route('/{id}/signature-notes/{noteId}/vote', name: 'signature_note_vote', methods: ['POST'], requirements: ['id' => '[0-9a-zA-Z]{12}', 'noteId' => '\d+'], priority: -10)]
+    public function voteSignatureNote(Request $request, string $id, int $noteId): Response
+    {
+        if (!$this->isCsrfTokenValid('signature-note-vote:'.$noteId, (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        return $this->legacyResponse((new \Throttle\Crash())->voteSignatureNote($this->legacyBridgeFactory->createHttp($request), $id, $noteId));
+    }
+
+    #[Route('/{id}/signature-notes/{noteId}/pin', name: 'signature_note_pin', methods: ['POST'], requirements: ['id' => '[0-9a-zA-Z]{12}', 'noteId' => '\d+'], priority: -10)]
+    public function pinSignatureNote(Request $request, string $id, int $noteId): Response
+    {
+        if (!$this->isCsrfTokenValid('signature-note-pin:'.$noteId, (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        return $this->legacyResponse((new \Throttle\Crash())->pinSignatureNote($this->legacyBridgeFactory->createHttp($request), $id, $noteId));
+    }
+
     #[Route('/{crashId}', name: 'details_crashid', methods: ['GET'], requirements: ['crashId' => '[0-9a-zA-Z]{4}(?:-[0-9a-zA-Z]{4}){2}'], priority: -95)]
     public function formattedId(string $crashId): Response
     {

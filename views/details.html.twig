@@ -2,6 +2,182 @@
 
 {% set supports_mobile = true %}
 
+{% block stylesheets %}
+<style>
+.signature-note {
+    border-top: 1px solid rgba(120, 136, 156, 0.25);
+    padding: 12px 0;
+}
+
+.signature-note:first-of-type {
+    border-top: 0;
+    padding-top: 4px;
+}
+
+.signature-note-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 6px;
+}
+
+.signature-note-header-meta {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    color: #8a97a6;
+    font-size: 12px;
+    line-height: 1.2;
+}
+
+.signature-note-body {
+    margin-top: 5px;
+}
+
+.signature-note-footer {
+    margin-top: 12px;
+    padding-top: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.signature-note-votes {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: nowrap;
+}
+
+.signature-note-vote-form,
+.signature-note-pin-form {
+    margin: 0;
+    display: inline-flex;
+}
+
+.signature-note-vote-form .btn-link,
+.signature-note-actions .btn-link,
+.signature-note-pin-form .btn-link {
+    padding: 0;
+    border: 0;
+    text-decoration: none;
+    box-shadow: none;
+}
+
+.signature-note-vote-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    line-height: 1;
+    white-space: nowrap;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.signature-note-vote-button i {
+    line-height: 1;
+}
+
+.signature-note-vote-button.positive,
+.signature-note-vote-button.positive i,
+.signature-note-vote-count.positive {
+    color: #4aa564;
+}
+
+.signature-note-vote-button.negative,
+.signature-note-vote-button.negative i,
+.signature-note-vote-count.negative {
+    color: #d06075;
+}
+
+.signature-note-vote-count {
+    font-weight: 700;
+}
+
+.signature-note-pin,
+.signature-note-pin i {
+    color: #5f9fe6;
+    line-height: 1;
+}
+
+.signature-note-pin-date {
+    color: #8a97a6;
+    white-space: nowrap;
+}
+
+.signature-note-actions {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+.signature-note-edit {
+    margin-top: 12px;
+}
+
+.signature-notes-pagination {
+    margin-top: 14px;
+}
+
+.signature-notes-pagination ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.signature-notes-pagination li {
+    margin: 0;
+    padding: 0;
+}
+
+.signature-notes-pagination a,
+.signature-notes-pagination span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 34px;
+    padding: 6px 12px;
+    border: 1px solid #3a4758;
+    border-radius: 4px;
+    background: #1a2330;
+    color: #d7e0ea;
+    text-decoration: none;
+    line-height: 1.1;
+}
+
+.signature-notes-pagination a:hover,
+.signature-notes-pagination a:focus {
+    background: #2b3849;
+    color: #fff;
+    border-color: #536174;
+}
+
+.signature-notes-pagination .active span {
+    background: #2b3849;
+    color: #fff;
+    border-color: #536174;
+    font-weight: 700;
+}
+
+.signature-notes-pagination .disabled span,
+.signature-notes-pagination .disabled a {
+    color: #6f7b8a;
+    background: #151c25;
+    border-color: #303b4a;
+    pointer-events: none;
+}
+</style>
+{% endblock %}
+
 {% block content %}
 {% if not crash.owner %}
 {% if legacy_app.config.accelerator %}
@@ -85,7 +261,7 @@
     <a class="alert-link" href="{{ path('stats', {module: crash.stackhash}) }}">This crash signature is unique.</a>
 {% endif %}
 {% if crash.stackhash %}
-    <span class="muted"> &middot; </span><a class="alert-link" href="#signature-notes" data-toggle="collapse">View {{ signature_notes|length }} signature note{% if signature_notes|length != 1 %}s{% endif %}</a>
+    <span class="muted"> &middot; </span><a class="alert-link" href="#signature-notes" data-toggle="collapse">View {{ signature_notes_total }} signature note{% if signature_notes_total != 1 %}s{% endif %}</a>
 {% if legacy_app.user %}
 {% if can_create_signature_note %}
     <span class="muted"> &middot; </span><a class="alert-link" href="#signature-note-form" data-toggle="collapse">Write a note</a>
@@ -109,23 +285,64 @@
 {% for note in signature_notes %}
         <div class="signature-note">
             <div class="signature-note-header">
-                <strong>{{ note.title }}</strong>
-                <span class="muted">by {{ note.author_name ?: ('User #' ~ note.author_id) }} on {{ note.created_at|date }}{% if note.updated_at %}, edited {{ note.updated_at|date }}{% endif %}</span>
+                <div>
+                    <strong>{{ note.title }}</strong>
+                </div>
+                <div class="signature-note-header-meta">
+                    <span>by {{ note.author_name ?: ('User #' ~ note.author_id) }} on {{ note.created_at|date }}{% if note.updated_at %}, edited {{ note.updated_at|date }}{% endif %}</span>
+{% if note.can_pin %}
+                    <form action="{{ path('signature_note_pin', {id: crash.id, noteId: note.id}) }}" method="post" class="signature-note-pin-form">
+                        <input type="hidden" name="_token" value="{{ csrf_token('signature-note-pin:' ~ note.id) }}">
+                        <input type="hidden" name="notes_page" value="{{ signature_notes_page }}">
+                        <button type="submit" class="btn btn-link btn-mini signature-note-pin{% if note.pinned %} active{% endif %}" title="{% if note.pinned %}Pinned on {{ note.pinned_at ? note.pinned_at|date : 'unknown date' }}. Click to unpin.{% else %}Pin{% endif %}"><i class="icon-pushpin"></i></button>
+                    </form>
+{% elseif note.pinned %}
+                    <span class="signature-note-pin static" title="Pinned on {{ note.pinned_at ? note.pinned_at|date : 'unknown date' }}"><i class="icon-pushpin"></i></span>
+{% endif %}
+                </div>
             </div>
             <div class="signature-note-body">{{ note.body_html|raw }}</div>
+            <div class="signature-note-footer">
+                <div class="signature-note-votes">
+{% if legacy_app.user %}
+                    <form action="{{ path('signature_note_vote', {id: crash.id, noteId: note.id}) }}" method="post" class="signature-note-vote-form">
+                        <input type="hidden" name="_token" value="{{ csrf_token('signature-note-vote:' ~ note.id) }}">
+                        <input type="hidden" name="notes_page" value="{{ signature_notes_page }}">
+                        <input type="hidden" name="value" value="1">
+                        <button type="submit" class="btn btn-link btn-mini signature-note-vote-button positive{% if note.user_vote > 0 %} active{% endif %}" title="Like">
+                            <i class="icon-thumbs-up"></i>
+                            (<span class="signature-note-vote-count positive">{{ note.likes }}</span>)
+                        </button>
+                    </form>
+                    <form action="{{ path('signature_note_vote', {id: crash.id, noteId: note.id}) }}" method="post" class="signature-note-vote-form">
+                        <input type="hidden" name="_token" value="{{ csrf_token('signature-note-vote:' ~ note.id) }}">
+                        <input type="hidden" name="notes_page" value="{{ signature_notes_page }}">
+                        <input type="hidden" name="value" value="-1">
+                        <button type="submit" class="btn btn-link btn-mini signature-note-vote-button negative{% if note.user_vote < 0 %} active{% endif %}" title="Dislike">
+                            <i class="icon-thumbs-down"></i>
+                            (<span class="signature-note-vote-count negative">{{ note.dislikes }}</span>)
+                        </button>
+                    </form>
+{% else %}
+                    <span class="signature-note-vote-button positive" title="Likes"><i class="icon-thumbs-up"></i> (<span class="signature-note-vote-count positive">{{ note.likes }}</span>)</span>
+                    <span class="signature-note-vote-button negative" title="Dislikes"><i class="icon-thumbs-down"></i> (<span class="signature-note-vote-count negative">{{ note.dislikes }}</span>)</span>
+{% endif %}
+                </div>
 {% if note.can_edit or note.can_delete %}
-            <div class="signature-note-actions">
+                <div class="signature-note-actions">
 {% if note.can_edit %}
-                <a href="#signature-note-edit-{{ note.id }}" data-toggle="collapse">Edit</a>
+                    <a href="#signature-note-edit-{{ note.id }}" data-toggle="collapse">Edit</a>
 {% endif %}
 {% if note.can_delete %}
-                <button type="button" class="btn btn-link btn-mini" data-toggle="modal" data-target="#signature-note-delete-{{ note.id }}">Delete</button>
+                    <button type="button" class="btn btn-link btn-mini" data-toggle="modal" data-target="#signature-note-delete-{{ note.id }}">Delete</button>
+{% endif %}
+                </div>
 {% endif %}
             </div>
-{% endif %}
 {% if note.can_edit %}
             <form id="signature-note-edit-{{ note.id }}" class="collapse signature-note-edit" action="{{ path('signature_note_edit', {id: crash.id, noteId: note.id}) }}" method="post">
                 <input type="hidden" name="_token" value="{{ csrf_token('signature-note-edit:' ~ note.id) }}">
+                <input type="hidden" name="notes_page" value="{{ signature_notes_page }}">
                 <input type="text" name="title" class="form-control input-block-level" maxlength="100" value="{{ note.title }}" required>
                 <div class="markdown-editor" data-markdown-editor>
                     <ul class="nav nav-tabs markdown-tabs">
@@ -160,6 +377,7 @@
                     <div class="modal-content">
                         <form action="{{ path('signature_note_delete', {id: crash.id, noteId: note.id}) }}" method="post">
                             <input type="hidden" name="_token" value="{{ csrf_token('signature-note-delete:' ~ note.id) }}">
+                            <input type="hidden" name="notes_page" value="{{ signature_notes_page }}">
                             <div class="modal-header">
                                 <button type="button" class="close" data-dismiss="modal" aria-hidden="true">&times;</button>
                                 <h3 id="signature-note-delete-title-{{ note.id }}">Delete Signature Note?</h3>
@@ -178,6 +396,21 @@
 {% endif %}
         </div>
 {% endfor %}
+{% if signature_notes_pages > 1 %}
+        <div class="signature-notes-pagination">
+            <ul>
+                <li class="{{ signature_notes_page > 1 ? '' : 'disabled' }}">
+                    <a {% if signature_notes_page > 1 %}href="{{ path('details', {id: crash.id, notes_page: signature_notes_page - 1}) ~ '#signature-notes' }}"{% endif %}>&larr; Previous</a>
+                </li>
+                <li class="active">
+                    <span>{{ signature_notes_page }}</span>
+                </li>
+                <li class="{{ signature_notes_page < signature_notes_pages ? '' : 'disabled' }}">
+                    <a {% if signature_notes_page < signature_notes_pages %}href="{{ path('details', {id: crash.id, notes_page: signature_notes_page + 1}) ~ '#signature-notes' }}"{% endif %}>Next &rarr;</a>
+                </li>
+            </ul>
+        </div>
+{% endif %}
     </div>
 {% else %}
     <div class="well muted">No notes for this crash signature yet.</div>
@@ -189,6 +422,7 @@
         <h3 style="margin-top: 0;">Write a Signature Note</h3>
         <form action="{{ path('signature_note_create', {id: crash.id}) }}" method="post">
             <input type="hidden" name="_token" value="{{ csrf_token('signature-note:' ~ crash.id) }}">
+            <input type="hidden" name="notes_page" value="{{ signature_notes_page }}">
             <label for="signature-note-title">Title</label>
             <input id="signature-note-title" type="text" name="title" class="form-control input-block-level" maxlength="100" required>
             <label for="signature-note-body">Note</label>

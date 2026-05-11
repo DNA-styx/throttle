@@ -415,7 +415,24 @@ sudo -u www-data php8.4 /var/www/throttle/bin/console crash:process --env=prod -
 
 ### Health И Диагностика
 
-- `/health` доступен только администратору и показывает состояние очереди, директорий, бинарников и runtime.
+- `/health` доступен только администраторам и показывает checks, очередь, каталоги runtime, бинарники, состояние symbol storage и runtime-настройки.
+- Админов можно задавать через `APP_ADMINS`: поддерживаются `user:<id>`, SteamID64 и `steam:<SteamID64>`, разделители `,`, пробел и `;`.
+- В `Upload processing settings` можно:
+  - включать или отключать анонимные `/submit` uploads;
+  - включать потоковую обработку `.sym`;
+  - задавать отдельный `memory_limit` только для `/symbols/submit` и `/binary/submit`;
+  - включать upload failure backoff, чтобы Throttle не просил один и тот же missing module бесконечно после повторяющихся 4xx/5xx ошибок upload endpoints;
+  - настраивать threshold и TTL для этого backoff.
+- `Binary upload request policy` по умолчанию пустой. После fresh install Throttle не будет автоматически запрашивать symbols или binaries, пока вы явно не зададите allow-правила.
+- Через `/health` также можно:
+  - обновить symbol cache и пересчитать `present` после ручной загрузки symbols;
+  - очистить upload-failure backoff state;
+  - загрузить бинарник и автоматически сгенерировать `.sym.gz` через `dump_syms` или деградированный fallback через `nm`;
+  - искать сохранённые symbols и экспортировать выбранные `.sym.gz` в ZIP.
+- Runtime-файлы `/health`, которые стоит включать в бэкапы:
+  - `var/symbol-request-policy.json`
+  - `var/upload-settings.json`
+  - `var/upload-failure-backoff.json`
 - Если краши долго pending, значит `crash:process` не запущен или падает.
 - `bin/carburetor`, `bin/minidump_stackwalk`, `bin/dump_syms`, `bin/breakpad_moduleid` и `bin/nm` должны быть executable.
 - `var/`, `cache/`, `dumps/` и `symbols/` должны быть writable для пользователя PHP-FPM.

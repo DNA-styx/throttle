@@ -36,7 +36,7 @@ docker compose --env-file .env.prod.docker -f compose.prod.yaml exec app php bin
 - `db` - MariaDB.
 - `redis` - Redis.
 
-Постоянные Docker volumes хранят базу, Redis, `var/`, `dumps/` и `symbols/`. Это важно: настройки Binary upload request policy из `/health` сохраняются в `var/symbol-request-policy.json`, а настройки обработки upload endpoints - в `var/upload-settings.json`.
+Постоянные Docker volumes хранят базу, Redis, `var/`, `dumps/` и `symbols/`. Это важно: настройки Binary upload request policy из `/health` сохраняются в `var/symbol-request-policy.json`, настройки обработки upload endpoints - в `var/upload-settings.json`, а upload failure backoff state - в `var/upload-failure-backoff.json`.
 
 ## Ручная установка Ubuntu/Nginx/PHP-FPM
 
@@ -136,10 +136,18 @@ sudo -u www-data php8.4 /var/www/throttle/bin/console crash:process --env=prod -
 APP_ADMINS="steam:STEAMID64,user:1"
 ```
 
-На `/health` видны checks, очередь, бинарники, Binary upload request policy и настройки обработки upload endpoints. Через UI можно включать потоковую обработку `.sym` и задавать `memory_limit` только для `/symbols/submit` и `/binary/submit`. Policy сохраняется в `var/symbol-request-policy.json`, upload-настройки сохраняются в `var/upload-settings.json`; оба файла надо сохранять при бэкапах.
+На `/health` видны checks, очередь, runtime-каталоги, бинарники, Binary upload request policy, состояние upload failure backoff и настройки обработки upload endpoints. Через UI можно включать потоковую обработку `.sym`, задавать отдельный `memory_limit` для `/symbols/submit` и `/binary/submit`, включать защиту от бесконечных retry-циклов upload endpoints, вручную обновлять symbol cache, очищать backoff state, загружать бинарники с автогенерацией `.sym.gz` и экспортировать выбранные сохранённые symbols.
 
-Additional runtime notes:
+`Binary upload request policy` по умолчанию пустой. На новой установке Throttle не будет автоматически запрашивать missing symbols или binaries у Accelerator, пока администратор явно не задаст allow-правила.
 
-- The Light/Dark/System theme switcher is available before login and defaults to system theme.
-- `/health` upload settings can disable anonymous `/submit` minidump uploads; when disabled, `/submit` requires a profile upload token or `SYMBOL_UPLOAD_TOKEN`.
-- `APP_ADMINS` accepts values separated by comma, space, or semicolon: `user:<id>`, SteamID64, or `steam:<SteamID64>`. Admins can access `/health`, global dashboard/audit data, crash management, reprocess/delete actions, and delete any signature note.
+При бэкапах сохраняйте все runtime-файлы `/health`:
+
+- `var/symbol-request-policy.json`
+- `var/upload-settings.json`
+- `var/upload-failure-backoff.json`
+
+Дополнительные runtime-заметки:
+
+- Переключатель темы Light/Dark/System доступен ещё до входа и по умолчанию использует системную тему.
+- Настройки upload в `/health` могут отключать анонимные `/submit` minidump uploads; тогда `/submit` требует profile upload token или `SYMBOL_UPLOAD_TOKEN`.
+- `APP_ADMINS` принимает значения, разделённые запятой, пробелом или `;`: `user:<id>`, SteamID64 или `steam:<SteamID64>`. Администраторы получают доступ к `/health`, глобальным dashboard/audit данным, управлению crash reports, действиям reprocess/delete и удалению любых signature notes.

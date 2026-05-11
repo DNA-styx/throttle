@@ -7,6 +7,8 @@ use Silex\Application;
 
 class Crash
 {
+    private const SIGNATURE_NOTES_PER_PAGE = 5;
+
     private static function getSafeReturnPath(Application $app, ?string $return, string $fallbackRoute): string
     {
         if (is_string($return) && $return !== '' && str_starts_with($return, '/') && !str_starts_with($return, '//')) {
@@ -286,29 +288,91 @@ class Crash
         return is_string($stackhash) && $stackhash !== '' ? $stackhash : null;
     }
 
-    private static function loadSignatureNotes(Application $app, ?string $stackhash): array
+    private static function getSignatureNotesPage(Application $app): int
+    {
+        $page = (int) $app['request']->get('notes_page', 1);
+
+        return max(1, $page);
+    }
+
+    private static function buildSignatureNotesUrl(Application $app, string $id, int $page, string $hash = '#signature-notes'): string
+    {
+        return $app['url_generator']->generate('details', array('id' => $id, 'notes_page' => max(1, $page))) . $hash;
+    }
+
+    private static function loadSignatureNotes(Application $app, ?string $stackhash, int $page = 1): array
     {
         if ($stackhash === null || $stackhash === '') {
-            return array();
+            return array(
+                'items' => array(),
+                'page' => 1,
+                'pages' => 1,
+                'total' => 0,
+            );
+        }
+
+        $page = max(1, $page);
+        $perPage = self::SIGNATURE_NOTES_PER_PAGE;
+        $offset = ($page - 1) * $perPage;
+        $userId = $app['user'] !== null ? (int) $app['user']['id'] : 0;
+        $total = (int) $app['db']->executeQuery(
+            'SELECT COUNT(*) FROM crash_signature_note WHERE stackhash = ?',
+            array($stackhash)
+        )->fetchColumn(0);
+        $pages = max(1, (int) ceil($total / $perPage));
+        if ($page > $pages) {
+            $page = $pages;
+            $offset = ($page - 1) * $perPage;
         }
 
         $notes = $app['db']->executeQuery(
-            'SELECT crash_signature_note.id, crash_signature_note.stackhash, crash_signature_note.author_id, crash_signature_note.title, crash_signature_note.body, crash_signature_note.created_at, crash_signature_note.updated_at, server_owner.name AS author_name
+            'SELECT crash_signature_note.id, crash_signature_note.stackhash, crash_signature_note.author_id, crash_signature_note.title, crash_signature_note.body, crash_signature_note.created_at, crash_signature_note.updated_at, crash_signature_note.pinned, crash_signature_note.pinned_at, server_owner.name AS author_name,
+                    COALESCE(SUM(vote.value), 0) AS score,
+                    COALESCE(SUM(CASE WHEN vote.value > 0 THEN 1 ELSE 0 END), 0) AS likes,
+                    COALESCE(SUM(CASE WHEN vote.value < 0 THEN 1 ELSE 0 END), 0) AS dislikes,
+                    COUNT(vote.id) AS vote_count,
+                    COALESCE(MAX(CASE WHEN vote.voter_id = ? THEN vote.value ELSE 0 END), 0) AS user_vote
              FROM crash_signature_note
              LEFT JOIN server_owner ON server_owner.id = crash_signature_note.author_id
+             LEFT JOIN crash_signature_note_vote vote ON vote.note_id = crash_signature_note.id
              WHERE crash_signature_note.stackhash = ?
-             ORDER BY crash_signature_note.created_at DESC, crash_signature_note.id DESC',
-            array($stackhash)
+             GROUP BY crash_signature_note.id, crash_signature_note.stackhash, crash_signature_note.author_id, crash_signature_note.title, crash_signature_note.body, crash_signature_note.created_at, crash_signature_note.updated_at, crash_signature_note.pinned, crash_signature_note.pinned_at, server_owner.name
+             ORDER BY crash_signature_note.pinned DESC,
+                      CASE
+                        WHEN COUNT(vote.id) = 0 THEN 1
+                        WHEN COALESCE(SUM(vote.value), 0) < 0 THEN 2
+                        ELSE 0
+                      END ASC,
+                      COALESCE(SUM(vote.value), 0) DESC,
+                      COALESCE(SUM(CASE WHEN vote.value > 0 THEN 1 ELSE 0 END), 0) DESC,
+                      crash_signature_note.created_at DESC,
+                      crash_signature_note.id DESC
+             LIMIT ? OFFSET ?',
+            array($userId, $stackhash, $perPage, $offset),
+            array(\PDO::PARAM_INT, \PDO::PARAM_STR, \PDO::PARAM_INT, \PDO::PARAM_INT)
         )->fetchAll();
 
         foreach ($notes as &$note) {
             $note['body_html'] = self::renderMarkdown((string) $note['body']);
             $note['can_edit'] = $app['user'] !== null && (int) $note['author_id'] === (int) $app['user']['id'];
             $note['can_delete'] = $app['user'] !== null && ($app['user']['admin'] || (int) $note['author_id'] === (int) $app['user']['id']);
+            $note['can_pin'] = $app['user'] !== null && $app['user']['admin'];
+            $note['pinned'] = (bool) $note['pinned'];
+            $note['pinned_at'] = $note['pinned_at'] ?: null;
+            $note['score'] = (int) $note['score'];
+            $note['likes'] = (int) $note['likes'];
+            $note['dislikes'] = (int) $note['dislikes'];
+            $note['vote_count'] = (int) $note['vote_count'];
+            $note['user_vote'] = (int) $note['user_vote'];
         }
         unset($note);
 
-        return $notes;
+        return array(
+            'items' => $notes,
+            'page' => $page,
+            'pages' => $pages,
+            'total' => $total,
+        );
     }
 
     private static function validateSignatureNoteInput(Application $app): array
@@ -1525,10 +1589,11 @@ class Crash
         $rawSourcePawnChain = self::loadRawSourcePawnCauseChain($app, $id, $stack, $crash['metadata']);
         $culpritCandidates = self::buildCulpritCandidates($stack, $modules, $crash['metadata'], $crash['cmdline'], $terminalConsoleCause['blaming'] ?? null, $terminalConsoleCause, $rawSourcePawnChain);
         $stats = $app['db']->executeQuery('SELECT COUNT(DISTINCT crash.owner_id) AS owners, COUNT(DISTINCT crash.ip) AS ips, COUNT(*) AS crashes FROM crash, (SELECT owner_id, stackhash FROM crash WHERE id = ?) AS this WHERE this.stackhash = crash.stackhash', [$id])->fetch();
-        $signatureNotes = self::loadSignatureNotes($app, $crash['stackhash'] ?? null);
+        $signatureNotesPage = self::getSignatureNotesPage($app);
+        $signatureNotes = self::loadSignatureNotes($app, $crash['stackhash'] ?? null, $signatureNotesPage);
         $userSignatureNote = null;
         if ($app['user'] !== null) {
-            foreach ($signatureNotes as $note) {
+            foreach ($signatureNotes['items'] as $note) {
                 if ((int) $note['author_id'] === (int) $app['user']['id']) {
                     $userSignatureNote = $note;
                     break;
@@ -1567,7 +1632,10 @@ class Crash
             'stack' => $stack,
             'modules' => $modules,
             'stats' => $stats,
-            'signature_notes' => $signatureNotes,
+            'signature_notes' => $signatureNotes['items'],
+            'signature_notes_page' => $signatureNotes['page'],
+            'signature_notes_pages' => $signatureNotes['pages'],
+            'signature_notes_total' => $signatureNotes['total'],
             'user_signature_note' => $userSignatureNote,
             'can_create_signature_note' => $app['user'] !== null && ($app['user']['admin'] || $userSignatureNote === null),
             'outdated' => $outdated,
@@ -1615,7 +1683,7 @@ class Crash
         if ($title === '' || $body === '') {
             $app['session']->getFlashBag()->add('error_note', 'Title and note body are required.');
 
-            return $app->redirect($app['url_generator']->generate('details', array('id' => $id)) . '#signature-notes');
+            return $app->redirect(self::buildSignatureNotesUrl($app, $id, self::getSignatureNotesPage($app)));
         }
 
         if (!$app['user']['admin']) {
@@ -1626,7 +1694,7 @@ class Crash
             if ($existing !== false) {
                 $app['session']->getFlashBag()->add('error_note', 'You already have a note for this crash signature. Edit your existing note instead.');
 
-                return $app->redirect($app['url_generator']->generate('details', array('id' => $id)) . '#signature-notes');
+                return $app->redirect(self::buildSignatureNotesUrl($app, $id, self::getSignatureNotesPage($app)));
             }
         }
 
@@ -1635,7 +1703,7 @@ class Crash
             array($stackhash, (int) $app['user']['id'], $title, $body, date('Y-m-d H:i:s'))
         );
 
-        return $app->redirect($app['url_generator']->generate('details', array('id' => $id)) . '#signature-notes');
+        return $app->redirect(self::buildSignatureNotesUrl($app, $id, self::getSignatureNotesPage($app)));
     }
 
     public function editSignatureNote(Application $app, string $id, int $noteId)
@@ -1662,7 +1730,7 @@ class Crash
         if ($title === '' || $body === '') {
             $app['session']->getFlashBag()->add('error_note', 'Title and note body are required.');
 
-            return $app->redirect($app['url_generator']->generate('details', array('id' => $id)) . '#signature-notes');
+            return $app->redirect(self::buildSignatureNotesUrl($app, $id, self::getSignatureNotesPage($app)));
         }
 
         $app['db']->executeUpdate(
@@ -1670,7 +1738,7 @@ class Crash
             array($title, $body, date('Y-m-d H:i:s'), $noteId)
         );
 
-        return $app->redirect($app['url_generator']->generate('details', array('id' => $id)) . '#signature-notes');
+        return $app->redirect(self::buildSignatureNotesUrl($app, $id, self::getSignatureNotesPage($app)));
     }
 
     public function deleteSignatureNote(Application $app, string $id, int $noteId)
@@ -1695,7 +1763,78 @@ class Crash
 
         $app['db']->executeUpdate('DELETE FROM crash_signature_note WHERE id = ?', array($noteId));
 
-        return $app->redirect($app['url_generator']->generate('details', array('id' => $id)) . '#signature-notes');
+        return $app->redirect(self::buildSignatureNotesUrl($app, $id, self::getSignatureNotesPage($app)));
+    }
+
+    public function voteSignatureNote(Application $app, string $id, int $noteId)
+    {
+        if ($app['user'] === null) {
+            $app->abort(401);
+        }
+
+        $stackhash = self::loadCrashStackhash($app, $id);
+        if ($stackhash === null) {
+            $app->abort(404);
+        }
+
+        $note = $app['db']->executeQuery('SELECT id, stackhash FROM crash_signature_note WHERE id = ?', array($noteId))->fetch();
+        if ($note === false || (string) $note['stackhash'] !== $stackhash) {
+            $app->abort(404);
+        }
+
+        $value = (int) $app['request']->request->get('value', 0);
+        if ($value !== 1 && $value !== -1) {
+            $app->abort(400);
+        }
+
+        $existing = $app['db']->executeQuery(
+            'SELECT id, value FROM crash_signature_note_vote WHERE note_id = ? AND voter_id = ?',
+            array($noteId, (int) $app['user']['id'])
+        )->fetch();
+
+        if ($existing !== false) {
+            if ((int) $existing['value'] === $value) {
+                $app['db']->executeUpdate('DELETE FROM crash_signature_note_vote WHERE id = ?', array((int) $existing['id']));
+            } else {
+                $app['db']->executeUpdate(
+                    'UPDATE crash_signature_note_vote SET value = ?, updated_at = ? WHERE id = ?',
+                    array($value, date('Y-m-d H:i:s'), (int) $existing['id'])
+                );
+            }
+        } else {
+            $now = date('Y-m-d H:i:s');
+            $app['db']->executeUpdate(
+                'INSERT INTO crash_signature_note_vote (note_id, voter_id, value, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+                array($noteId, (int) $app['user']['id'], $value, $now, $now)
+            );
+        }
+
+        return $app->redirect(self::buildSignatureNotesUrl($app, $id, self::getSignatureNotesPage($app)));
+    }
+
+    public function pinSignatureNote(Application $app, string $id, int $noteId)
+    {
+        if ($app['user'] === null || !$app['user']['admin']) {
+            $app->abort(403);
+        }
+
+        $stackhash = self::loadCrashStackhash($app, $id);
+        if ($stackhash === null) {
+            $app->abort(404);
+        }
+
+        $note = $app['db']->executeQuery('SELECT id, stackhash, pinned FROM crash_signature_note WHERE id = ?', array($noteId))->fetch();
+        if ($note === false || (string) $note['stackhash'] !== $stackhash) {
+            $app->abort(404);
+        }
+
+        $pin = ((int) $note['pinned']) === 1 ? 0 : 1;
+        $app['db']->executeUpdate(
+            'UPDATE crash_signature_note SET pinned = ?, pinned_at = ? WHERE id = ?',
+            array($pin, $pin === 1 ? date('Y-m-d H:i:s') : null, $noteId)
+        );
+
+        return $app->redirect(self::buildSignatureNotesUrl($app, $id, self::getSignatureNotesPage($app)));
     }
 
     private static function loadTerminalSourceModCause(Application $app, string $id, bool $hasConsoleLog): ?array
