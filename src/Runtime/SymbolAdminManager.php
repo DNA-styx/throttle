@@ -75,7 +75,19 @@ final class SymbolAdminManager
     }
 
     /**
-     * @return array<int, array{module: string, identifier: string, file: string, file_path: string, binary_path: string|null, bytes: int, modified_at: int}>
+     * @return array<int, array{
+     *   module: string,
+     *   version_count: int,
+     *   entries: array<int, array{
+     *     module: string,
+     *     identifier: string,
+     *     file: string,
+     *     file_path: string,
+     *     binary_path: string|null,
+     *     bytes: int,
+     *     modified_at: int
+     *   }>
+     * }>
      */
     public function listStoredSymbols(?string $filter = null, int $limit = 500): array
     {
@@ -111,13 +123,13 @@ final class SymbolAdminManager
                     }
 
                     $filePath = $identifierPath . '/' . $file;
-                    $binaryPath = $this->projectDir . '/symbols/binaries/' . $module . '/' . $identifier . '/' . $module;
+                    $binaryPath = $this->findStoredBinaryPath($module, $identifier);
                     $entries[] = [
                         'module' => $module,
                         'identifier' => $identifier,
                         'file' => $file,
                         'file_path' => $filePath,
-                        'binary_path' => is_file($binaryPath) ? $binaryPath : null,
+                        'binary_path' => $binaryPath,
                         'bytes' => is_file($filePath) ? (int) filesize($filePath) : 0,
                         'modified_at' => is_file($filePath) ? (int) filemtime($filePath) : 0,
                     ];
@@ -135,7 +147,22 @@ final class SymbolAdminManager
                 ?: strcmp($left['identifier'], $right['identifier']);
         });
 
-        return $entries;
+        $groups = [];
+        foreach ($entries as $entry) {
+            $module = $entry['module'];
+            if (!isset($groups[$module])) {
+                $groups[$module] = [
+                    'module' => $module,
+                    'version_count' => 0,
+                    'entries' => [],
+                ];
+            }
+
+            $groups[$module]['entries'][] = $entry;
+            $groups[$module]['version_count']++;
+        }
+
+        return array_values($groups);
     }
 
     /**
@@ -194,5 +221,110 @@ final class SymbolAdminManager
         $response->deleteFileAfterSend(true);
 
         return $response;
+    }
+
+    public function deleteStoredSymbolVersion(string $module, string $identifier): array
+    {
+        $publicPath = $this->projectDir . '/symbols/public/' . $module . '/' . $identifier;
+        $binaryPath = $this->projectDir . '/symbols/binaries/' . $module . '/' . $identifier;
+
+        if (!is_dir($publicPath)) {
+            throw new \RuntimeException(sprintf('Stored symbols for %s/%s were not found.', $module, $identifier));
+        }
+
+        $deletedFiles = 0;
+        foreach (\Filesystem::listDirectory($publicPath, false) as $file) {
+            $path = $publicPath . '/' . $file;
+            if (is_file($path)) {
+                unlink($path);
+                $deletedFiles++;
+            }
+        }
+
+        $this->removeEmptyDirectoryTree($publicPath, $this->projectDir . '/symbols/public/' . $module);
+
+        if (is_dir($binaryPath)) {
+            foreach (\Filesystem::listDirectory($binaryPath, false) as $file) {
+                $path = $binaryPath . '/' . $file;
+                if (is_file($path)) {
+                    unlink($path);
+                }
+            }
+
+            $this->removeEmptyDirectoryTree($binaryPath, $this->projectDir . '/symbols/binaries/' . $module);
+        }
+
+        $this->refreshCaches(true);
+
+        return [
+            'module' => $module,
+            'identifier' => $identifier,
+            'deleted_files' => $deletedFiles,
+        ];
+    }
+
+    /**
+     * @param array<int, string> $selected
+     * @return array{deleted_versions: int}
+     */
+    public function deleteSelectedStoredSymbols(array $selected): array
+    {
+        $deletedVersions = 0;
+
+        foreach ($selected as $value) {
+            if (!is_string($value) || $value === '') {
+                continue;
+            }
+
+            [$module, $identifier] = array_pad(explode('|', $value, 2), 2, null);
+            if (!is_string($module) || !is_string($identifier) || $module === '' || $identifier === '') {
+                continue;
+            }
+
+            $publicPath = $this->projectDir . '/symbols/public/' . $module . '/' . $identifier;
+            if (!is_dir($publicPath)) {
+                continue;
+            }
+
+            $this->deleteStoredSymbolVersion($module, $identifier);
+            $deletedVersions++;
+        }
+
+        return [
+            'deleted_versions' => $deletedVersions,
+        ];
+    }
+
+    private function removeEmptyDirectoryTree(string $leaf, string $modulePath): void
+    {
+        if (is_dir($leaf) && \Filesystem::listDirectory($leaf, false) === []) {
+            rmdir($leaf);
+        }
+
+        if (is_dir($modulePath) && \Filesystem::listDirectory($modulePath, false) === []) {
+            rmdir($modulePath);
+        }
+    }
+
+    private function findStoredBinaryPath(string $module, string $identifier): ?string
+    {
+        $binaryDirectory = $this->projectDir . '/symbols/binaries/' . $module . '/' . $identifier;
+        if (!is_dir($binaryDirectory)) {
+            return null;
+        }
+
+        $preferred = $binaryDirectory . '/' . $module;
+        if (is_file($preferred)) {
+            return $preferred;
+        }
+
+        foreach (\Filesystem::listDirectory($binaryDirectory, false) as $file) {
+            $path = $binaryDirectory . '/' . $file;
+            if (is_file($path)) {
+                return $path;
+            }
+        }
+
+        return null;
     }
 }

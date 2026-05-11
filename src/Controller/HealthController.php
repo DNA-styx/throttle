@@ -111,7 +111,11 @@ class HealthController extends AbstractController
             'latest_processed' => $connection->fetchOne('SELECT MAX(created_at) FROM crash_processing_log'),
         ];
 
-        $symbolEntries = $symbolAdminManager->listStoredSymbols($symbolFilter !== '' ? $symbolFilter : null);
+        $symbolGroups = $symbolAdminManager->listStoredSymbols($symbolFilter !== '' ? $symbolFilter : null);
+        $symbolEntriesCount = 0;
+        foreach ($symbolGroups as $group) {
+            $symbolEntriesCount += count($group['entries']);
+        }
         $backoffStats = UploadFailureBackoff::stats($root);
         $symbolsOpen = $symbolFilter !== '' || $request->query->getBoolean('symbols_open');
         $symbolRequestPolicy = \Throttle\Crash::getSymbolRequestPolicy($effectiveLegacyConfig);
@@ -141,7 +145,8 @@ class HealthController extends AbstractController
             'symbolRequestPolicyEmpty' => $policyEmpty,
             'policyTestInput' => $policyTestInput,
             'policyTest' => $policyTest,
-            'symbolEntries' => $symbolEntries,
+            'symbolGroups' => $symbolGroups,
+            'symbolEntriesCount' => $symbolEntriesCount,
             'symbolFilter' => $symbolFilter,
             'symbolsOpen' => $symbolsOpen,
             'backoffStats' => $backoffStats,
@@ -215,7 +220,22 @@ class HealthController extends AbstractController
 
         $selected = $request->request->all('selected_symbols');
         if (!is_array($selected) || $selected === []) {
-            $this->addFlash('danger', 'Select at least one symbol entry to export.');
+            $this->addFlash('danger', $request->request->has('delete_selected') ? 'Select at least one symbol entry to delete.' : 'Select at least one symbol entry to export.');
+
+            return $this->redirectToRoute('health', ['symbols_open' => 1]);
+        }
+
+        if ($request->request->has('delete_selected')) {
+            try {
+                $result = $symbolAdminManager->deleteSelectedStoredSymbols(array_values(array_filter($selected, 'is_string')));
+                if ($result['deleted_versions'] === 0) {
+                    $this->addFlash('danger', 'No stored symbols matched the selected entries.');
+                } else {
+                    $this->addFlash('success', sprintf('Deleted %d stored symbol version(s).', $result['deleted_versions']));
+                }
+            } catch (\Throwable $e) {
+                $this->addFlash('danger', 'Failed to delete stored symbols: ' . $e->getMessage());
+            }
 
             return $this->redirectToRoute('health', ['symbols_open' => 1]);
         }
@@ -228,6 +248,31 @@ class HealthController extends AbstractController
         }
 
         return $response;
+    }
+
+    #[Route('/health/symbols/delete', name: 'health_symbols_delete', methods: ['POST'])]
+    public function deleteSymbolVersion(Request $request, SymbolAdminManager $symbolAdminManager): Response
+    {
+        if (!$this->isCsrfTokenValid('health-symbols-delete', (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        $module = trim((string) $request->request->get('module', ''));
+        $identifier = trim((string) $request->request->get('identifier', ''));
+        if ($module === '' || $identifier === '') {
+            $this->addFlash('danger', 'Select a stored symbol version to delete.');
+
+            return $this->redirectToRoute('health', ['symbols_open' => 1]);
+        }
+
+        try {
+            $result = $symbolAdminManager->deleteStoredSymbolVersion($module, $identifier);
+            $this->addFlash('success', sprintf('Deleted stored symbols for %s/%s.', $result['module'], $result['identifier']));
+        } catch (\Throwable $e) {
+            $this->addFlash('danger', 'Failed to delete stored symbols: ' . $e->getMessage());
+        }
+
+        return $this->redirectToRoute('health', ['symbols_open' => 1]);
     }
 
     /**

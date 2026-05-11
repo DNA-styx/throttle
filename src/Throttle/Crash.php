@@ -221,7 +221,7 @@ class Crash
             }
         }
 
-        return self::symbolRequestDecision($module, $basename, false, 'default deny', null, null);
+        return self::symbolRequestDecision($module, $basename, true, 'default allow', null, null);
     }
 
     private static function shouldRequestSymbolsForModule(string $module, array $config = []): bool

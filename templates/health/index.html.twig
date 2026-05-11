@@ -204,7 +204,7 @@
             </div>
 
             {% if symbolRequestPolicyEmpty %}
-                <div class="alert alert-warning">Defaults are now empty. Until you add allow rules here, Throttle will not ask Accelerator to upload symbols or binaries during presubmit.</div>
+                <div class="alert alert-info">Defaults are currently empty. That now means default allow: Throttle will request missing modules like the original behavior unless a deny rule blocks them or upload-failure backoff suppresses them.</div>
             {% endif %}
 
             {% if symbolRequestPolicySaved %}
@@ -235,7 +235,7 @@
                         {% if policyTest.rule %}
                             Matched <code>{{ policyTest.stage }}</code> rule <code>{{ policyTest.rule }}</code> = <code>{{ policyTest.value }}</code>.
                         {% else %}
-                            No rule matched; default deny.
+                            No rule matched; default allow.
                         {% endif %}
                         <div class="small mt-1">Allow rules override generic deny rules, but hard deny path/exact rules still win.</div>
                     </div>
@@ -332,42 +332,112 @@
                 <form method="post" action="{{ path('health_symbols_export') }}">
                     <input type="hidden" name="_token" value="{{ csrf_token('health-symbols-export') }}">
                     <div class="d-flex flex-wrap align-items-center gap-3 mb-2">
-                        <div class="text-muted">{{ symbolEntries|length }} matching entries</div>
+                        <div class="text-muted">{{ symbolEntriesCount }} matching version{{ symbolEntriesCount == 1 ? '' : 's' }}</div>
                         <button type="submit" class="btn btn-outline-primary">Export selected symbols</button>
+                        <button type="submit" name="delete_selected" value="1" class="btn btn-outline-danger" onclick="return confirm('Delete all selected stored symbol versions?');">Delete selected symbols</button>
                     </div>
-                    <div class="table-responsive health-symbols-table-wrap">
-                        <table class="table table-sm align-middle health-symbols-table">
-                            <thead>
-                                <tr>
-                                    <th></th>
-                                    <th>Module</th>
-                                    <th>Identifier</th>
-                                    <th>File</th>
-                                    <th>Size</th>
-                                    <th>Modified</th>
-                                    <th>Binary</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for entry in symbolEntries %}
+                    {% if symbolGroups %}
+                        <div class="table-responsive health-symbols-table-wrap">
+                            <table class="table table-sm align-middle health-symbols-table">
+                                <colgroup>
+                                    <col class="health-symbols-col-checkbox">
+                                    <col class="health-symbols-col-module">
+                                    <col class="health-symbols-col-identifier">
+                                    <col class="health-symbols-col-size">
+                                    <col class="health-symbols-col-modified">
+                                    <col class="health-symbols-col-binary">
+                                    <col class="health-symbols-col-action">
+                                </colgroup>
+                                <thead>
                                     <tr>
-                                        <td><input type="checkbox" name="selected_symbols[]" value="{{ entry.module }}|{{ entry.identifier }}"></td>
-                                        <td class="font-monospace">{{ entry.module }}</td>
-                                        <td class="font-monospace">{{ entry.identifier }}</td>
-                                        <td class="font-monospace">{{ entry.file }}</td>
-                                        <td>{{ entry.bytes|number_format }}</td>
-                                        <td>{{ entry.modified_at|date('Y-m-d H:i:s') }}</td>
-                                        <td>{{ entry.binary_path ? 'Available' : 'Missing' }}</td>
+                                        <th></th>
+                                        <th>Module</th>
+                                        <th>Identifier</th>
+                                        <th>Size</th>
+                                        <th>Modified</th>
+                                        <th>Binary</th>
+                                        <th class="text-end">Action</th>
                                     </tr>
-                                {% else %}
-                                    <tr>
-                                        <td colspan="7" class="text-muted">No stored symbol files matched the current filter.</td>
-                                    </tr>
+                                </thead>
+                                {% for group in symbolGroups %}
+                                    {% set groupIndex = loop.index %}
+                                    {% set groupId = 'stored-symbol-group-' ~ groupIndex %}
+                                    {% set openGroup = symbolFilter != '' %}
+                                    {% set primaryEntry = group.entries|first %}
+                                    <tbody>
+                                        <tr>
+                                            <td><input type="checkbox" name="selected_symbols[]" value="{{ primaryEntry.module }}|{{ primaryEntry.identifier }}"></td>
+                                            <td class="font-monospace">
+                                                {{ group.module }}
+                                                {% if group.version_count > 1 %}
+                                                    <a href="#{{ groupId }}" data-bs-toggle="collapse" aria-expanded="{{ openGroup ? 'true' : 'false' }}" aria-controls="{{ groupId }}" class="ms-1 text-decoration-none" title="Show {{ group.version_count - 1 }} more version{{ group.version_count - 1 == 1 ? '' : 's' }}">
+                                                        ({{ group.version_count }})
+                                                    </a>
+                                                {% endif %}
+                                            </td>
+                                            <td class="font-monospace">{{ primaryEntry.identifier }}</td>
+                                            <td>{{ primaryEntry.bytes|number_format }}</td>
+                                            <td>{{ primaryEntry.modified_at|date('Y-m-d H:i:s') }}</td>
+                                            <td>{{ primaryEntry.binary_path ? 'Available' : 'Missing' }}</td>
+                                            <td class="text-end">
+                                                <button type="submit" form="delete-symbol-{{ groupIndex }}-1" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete stored symbols for {{ primaryEntry.module }}/{{ primaryEntry.identifier }}?');">Delete</button>
+                                            </td>
+                                        </tr>
+                                        {% if group.version_count > 1 %}
+                                            <tr class="health-symbols-detail-row">
+                                                <td colspan="8" class="p-0 border-0">
+                                                    <div id="{{ groupId }}" class="collapse{% if openGroup %} show{% endif %}">
+                                                        <div class="health-symbols-detail-panel">
+                                                            <table class="table table-sm align-middle health-symbols-table mb-0">
+                                                                <colgroup>
+                                                                    <col class="health-symbols-col-checkbox">
+                                                                    <col class="health-symbols-col-module">
+                                                                    <col class="health-symbols-col-identifier">
+                                                                    <col class="health-symbols-col-size">
+                                                                    <col class="health-symbols-col-modified">
+                                                                    <col class="health-symbols-col-binary">
+                                                                    <col class="health-symbols-col-action">
+                                                                </colgroup>
+                                                                <tbody>
+                                                                    {% for entry in group.entries|slice(1) %}
+                                                                        {% set deleteFormId = 'delete-symbol-' ~ groupIndex ~ '-' ~ (loop.index + 1) %}
+                                                                        <tr class="health-symbols-version-row">
+                                                                            <td><input type="checkbox" name="selected_symbols[]" value="{{ entry.module }}|{{ entry.identifier }}"></td>
+                                                                            <td class="font-monospace"></td>
+                                                                            <td class="font-monospace">{{ entry.identifier }}</td>
+                                                                            <td>{{ entry.bytes|number_format }}</td>
+                                                                            <td>{{ entry.modified_at|date('Y-m-d H:i:s') }}</td>
+                                                                            <td>{{ entry.binary_path ? 'Available' : 'Missing' }}</td>
+                                                                            <td class="text-end">
+                                                                                <button type="submit" form="{{ deleteFormId }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete stored symbols for {{ entry.module }}/{{ entry.identifier }}?');">Delete</button>
+                                                                            </td>
+                                                                        </tr>
+                                                                    {% endfor %}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        {% endif %}
+                                    </tbody>
                                 {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="text-muted">No stored symbol files matched the current filter.</div>
+                    {% endif %}
                 </form>
+                {% for group in symbolGroups %}
+                    {% set groupIndex = loop.index %}
+                    {% for entry in group.entries %}
+                        <form id="delete-symbol-{{ groupIndex }}-{{ loop.index }}" method="post" action="{{ path('health_symbols_delete') }}" class="d-none">
+                            <input type="hidden" name="_token" value="{{ csrf_token('health-symbols-delete') }}">
+                            <input type="hidden" name="module" value="{{ entry.module }}">
+                            <input type="hidden" name="identifier" value="{{ entry.identifier }}">
+                        </form>
+                    {% endfor %}
+                {% endfor %}
             </div>
         </section>
     </div>

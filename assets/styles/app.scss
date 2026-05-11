@@ -122,6 +122,63 @@
   white-space: nowrap;
 }
 
+.health-symbols-col-checkbox {
+  width: 3%;
+}
+
+.health-symbols-col-module {
+  width: 25%;
+}
+
+.health-symbols-col-identifier {
+  width: 37%;
+}
+
+.health-symbols-col-size {
+  width: 10%;
+}
+
+.health-symbols-col-modified {
+  width: 15%;
+}
+
+.health-symbols-col-binary {
+  width: 5%;
+}
+
+.health-symbols-col-action {
+  width: 5%;
+}
+
+.health-symbols-detail-row > td {
+  padding-top: 0 !important;
+}
+
+.health-symbols-detail-panel {
+  margin: 0 0 0.55rem 0;
+  padding: 0.15rem 0 0;
+  border-top: 1px solid rgba(47, 126, 199, 0.18);
+  background: rgba(47, 126, 199, 0.03);
+  border-radius: 0.25rem;
+}
+
+.health-symbols-detail-panel .table {
+  margin-bottom: 0;
+}
+
+.health-symbols-detail-panel .table > :not(caption) > * > * {
+  border-top-width: 0;
+}
+
+.health-symbols-version-row > * {
+  background: transparent;
+}
+
+[data-bs-theme="dark"] .health-symbols-detail-panel {
+  border-top-color: rgba(139, 211, 255, 0.24);
+  background: rgba(139, 211, 255, 0.05);
+}
+
 .profile-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
