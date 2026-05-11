@@ -3,6 +3,8 @@
 namespace App\Controller;
 
 use App\Legacy\LegacyBridgeFactory;
+use App\Runtime\SymbolBinaryUpload;
+use App\Runtime\UploadFailureBackoff;
 use App\Runtime\UploadSettings;
 use App\Repository\UserRepository;
 use Doctrine\DBAL\Connection;
@@ -47,6 +49,7 @@ class LegacySymbolsController extends AbstractController
 
         UploadSettings::applyMemoryLimit($this->projectDir);
         $response = $this->legacyResponse((new \Throttle\Symbols())->submit($this->legacyBridgeFactory->createHttp($request, false)));
+        $this->updateFailureBackoff($request, 'symbols', $response);
         $this->recordTokenUsage($request, $response, $tokenUser, 'symbols');
 
         return $response;
@@ -244,5 +247,81 @@ class LegacySymbolsController extends AbstractController
         $value = $request->request->get($key);
 
         return is_string($value) && $value !== '' ? $value : null;
+    }
+
+    private function updateFailureBackoff(Request $request, string $endpoint, Response $response): void
+    {
+        [$module, $identifier] = $this->resolveModuleIdentifier($request, $endpoint);
+        if ($module === null || $identifier === null) {
+            return;
+        }
+
+        if ($response->getStatusCode() >= 400) {
+            UploadFailureBackoff::registerFailure(
+                $this->projectDir,
+                $module,
+                $identifier,
+                $endpoint,
+                $response->getStatusCode(),
+                trim(strip_tags((string) $response->getContent())) ?: null,
+            );
+
+            return;
+        }
+
+        UploadFailureBackoff::registerSuccess($this->projectDir, $module, $identifier);
+    }
+
+    /**
+     * @return array{0: ?string, 1: ?string}
+     */
+    private function resolveModuleIdentifier(Request $request, string $endpoint): array
+    {
+        if ($endpoint === 'symbols') {
+            $uploadInfo = $request->attributes->get('_symbol_upload_info');
+            if (is_array($uploadInfo)) {
+                $module = isset($uploadInfo['module']) ? (string) $uploadInfo['module'] : null;
+                $identifier = isset($uploadInfo['identifier']) ? (string) $uploadInfo['identifier'] : null;
+
+                return [$module, $identifier];
+            }
+
+            $uploaded = $this->findUploadedSymbolFile($request);
+            $firstLine = null;
+            if ($uploaded instanceof UploadedFile) {
+                $handle = @fopen($uploaded->getPathname(), 'rb');
+                if (is_resource($handle)) {
+                    $line = fgets($handle);
+                    fclose($handle);
+                    $firstLine = is_string($line) ? $line : null;
+                }
+            } else {
+                $data = $request->request->get('symbol_file');
+                if (is_string($data) && $data !== '') {
+                    $firstLine = strtok($data, "\r\n");
+                }
+            }
+
+            if (is_string($firstLine) && preg_match('/^MODULE [^ ]+ [^ ]+ (?P<id>[a-fA-F0-9]+) (?P<name>[^\/\\\\\r\n]+)$/', rtrim($firstLine, "\r\n"), $matches) === 1) {
+                return [$matches['name'], $matches['id']];
+            }
+
+            return [null, null];
+        }
+
+        $file = $this->findUploadedBinaryFile($request);
+        $module = null;
+        if ($file instanceof UploadedFile) {
+            $module = SymbolBinaryUpload::safeBasename((string) (
+                $request->request->get('debug_file_path')
+                ?: $request->request->get('code_file_path')
+                ?: $file->getClientOriginalName()
+            ));
+        }
+
+        $rawIdentifier = $request->request->get('debug_identifier') ?: $request->request->get('code_identifier');
+        $identifier = is_string($rawIdentifier) ? SymbolBinaryUpload::safeIdentifier($rawIdentifier) : null;
+
+        return [$module, $identifier];
     }
 }

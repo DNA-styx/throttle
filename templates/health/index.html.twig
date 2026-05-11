@@ -3,7 +3,7 @@
 {% block title %}Health{% endblock %}
 
 {% block body %}
-    <div class="profile-shell">
+    <div class="profile-shell health-shell">
         <div class="d-flex align-items-center justify-content-between mb-3">
             <div>
                 <h1 class="h3 mb-1">Health</h1>
@@ -11,6 +11,12 @@
             </div>
             <a href="{{ path('dashboard') }}" class="btn btn-outline-secondary">Dashboard</a>
         </div>
+
+        {% for label, messages in app.flashes %}
+            {% for message in messages %}
+                <div class="alert alert-{{ label == 'danger' ? 'danger' : (label == 'warning' ? 'warning' : 'success') }}">{{ message }}</div>
+            {% endfor %}
+        {% endfor %}
 
         <section class="profile-panel mb-3">
             <h2 class="h5 mb-3">Queue</h2>
@@ -77,10 +83,10 @@
                 <div class="alert alert-danger">{{ error }}</div>
             {% endfor %}
 
-            <form method="post" class="row g-3 align-items-end">
+            <form method="post" class="health-settings-stack">
                 <input type="hidden" name="_token" value="{{ csrf_token('upload-settings') }}">
                 <input type="hidden" name="upload_settings_form" value="1">
-                <div class="col-md-5">
+                <div class="mb-3">
                     <div class="form-check form-switch">
                         <input class="form-check-input" type="checkbox" role="switch" id="streaming-symbols-enabled" name="streaming_symbols_enabled" value="1"{% if uploadSettings.streaming_symbols_enabled %} checked{% endif %}>
                         <label class="form-check-label" for="streaming-symbols-enabled">Streaming symbol upload processing</label>
@@ -92,7 +98,7 @@
                     </div>
                     <div class="form-text">Only controls crash dump uploads sent to <code>MinidumpUrl</code> (<code>/submit</code>). Symbol and binary uploads already require tokens.</div>
                 </div>
-                <div class="col-md-4">
+                <div class="mb-3">
                     <label class="form-label" for="upload-memory-limit">Upload memory limit</label>
                     <input id="upload-memory-limit" name="upload_memory_limit" class="form-control font-monospace" value="{{ uploadSettings.upload_memory_limit }}" list="upload-memory-limit-options">
                     <datalist id="upload-memory-limit-options">
@@ -107,11 +113,85 @@
                         Current /health request limit: <code>{{ currentMemoryLimit }}</code>.
                     </div>
                 </div>
-                <div class="col-md-3 d-flex gap-2">
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" role="switch" id="upload-failure-backoff-enabled" name="upload_failure_backoff_enabled" value="1"{% if uploadSettings.upload_failure_backoff_enabled %} checked{% endif %}>
+                        <label class="form-check-label" for="upload-failure-backoff-enabled">Upload failure backoff</label>
+                    </div>
+                    <div class="form-text">Stops re-requesting the same module for a while after repeated upload failures.</div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="upload-failure-backoff-threshold">Failure threshold</label>
+                    <input id="upload-failure-backoff-threshold" name="upload_failure_backoff_threshold" type="number" min="1" class="form-control" value="{{ uploadSettings.upload_failure_backoff_threshold }}">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="upload-failure-backoff-ttl">Backoff TTL (sec)</label>
+                    <input id="upload-failure-backoff-ttl" name="upload_failure_backoff_ttl" type="number" min="60" step="60" class="form-control" value="{{ uploadSettings.upload_failure_backoff_ttl }}">
+                </div>
+                <div class="d-flex gap-2">
                     <button type="submit" class="btn btn-primary">Save</button>
                     <button type="submit" name="reset_upload_settings" value="1" class="btn btn-outline-secondary">Reset</button>
                 </div>
             </form>
+        </section>
+
+        <section class="profile-panel mt-3">
+            <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
+                <div>
+                    <h2 class="h5 mb-1">Upload failure backoff state</h2>
+                    <div class="text-muted">Module-level suppression used to stop endless retry loops after repeated symbol or binary upload failures.</div>
+                </div>
+                <form method="post" action="{{ path('health_symbols_backoff_reset') }}">
+                    <input type="hidden" name="_token" value="{{ csrf_token('health-symbols-backoff-reset') }}">
+                    <button type="submit" class="btn btn-outline-secondary">Clear backoff state</button>
+                </form>
+            </div>
+
+            <div class="profile-stat-grid mb-3">
+                <div>
+                    <div class="profile-stat-value">{{ backoffStats.total }}</div>
+                    <div class="text-muted">Tracked modules</div>
+                </div>
+                <div>
+                    <div class="profile-stat-value">{{ backoffStats.suppressed }}</div>
+                    <div class="text-muted">Currently suppressed</div>
+                </div>
+                <div>
+                    <div class="profile-stat-value">{{ uploadSettings.upload_failure_backoff_enabled ? 'On' : 'Off' }}</div>
+                    <div class="text-muted">Backoff enabled</div>
+                </div>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                    <thead>
+                        <tr>
+                            <th>Module</th>
+                            <th>Identifier</th>
+                            <th>Failures</th>
+                            <th>Blocked until</th>
+                            <th>Last status</th>
+                            <th>Endpoint</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for entry in backoffStats.entries %}
+                            <tr>
+                                <td class="font-monospace">{{ entry.module }}</td>
+                                <td class="font-monospace">{{ entry.identifier }}</td>
+                                <td>{{ entry.count }}</td>
+                                <td>{{ entry.blocked_until ? entry.blocked_until|date('Y-m-d H:i:s') : '-' }}</td>
+                                <td>{{ entry.last_status_code ?: '-' }}</td>
+                                <td>{{ entry.last_endpoint ?: '-' }}</td>
+                            </tr>
+                        {% else %}
+                            <tr>
+                                <td colspan="6" class="text-muted">No upload failure backoff entries are currently tracked.</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </section>
 
         <section class="profile-panel mt-3">
@@ -122,6 +202,10 @@
                 </div>
                 <span class="badge text-bg-secondary">{{ symbolRequestPolicySource }}</span>
             </div>
+
+            {% if symbolRequestPolicyEmpty %}
+                <div class="alert alert-warning">Defaults are now empty. Until you add allow rules here, Throttle will not ask Accelerator to upload symbols or binaries during presubmit.</div>
+            {% endif %}
 
             {% if symbolRequestPolicySaved %}
                 <div class="alert alert-success">Binary upload request policy saved.</div>
@@ -146,7 +230,7 @@
                 </div>
                 {% if policyTest %}
                     <div class="alert {{ policyTest.requested ? 'alert-success' : 'alert-warning' }}">
-                        <strong>{{ policyTest.requested ? 'Requested' : 'Blocked' }}</strong>
+                        <strong>{{ policyTest.requested ? 'Binary upload requested' : 'Blocked' }}</strong>
                         for <code>{{ policyTest.basename }}</code>.
                         {% if policyTest.rule %}
                             Matched <code>{{ policyTest.stage }}</code> rule <code>{{ policyTest.rule }}</code> = <code>{{ policyTest.value }}</code>.
@@ -194,6 +278,96 @@
                         {% endfor %}
                     </tbody>
                 </table>
+            </div>
+        </section>
+
+        <section class="profile-panel mt-3">
+            <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
+                <div>
+                    <h2 class="h5 mb-1">Symbol maintenance</h2>
+                    <div class="text-muted">Refresh caches after manual uploads and keep symbol presence in sync with the filesystem.</div>
+                </div>
+                <form method="post" action="{{ path('health_symbols_refresh') }}">
+                    <input type="hidden" name="_token" value="{{ csrf_token('health-symbols-refresh') }}">
+                    <button type="submit" class="btn btn-primary">Refresh symbol cache</button>
+                </form>
+            </div>
+
+            <form method="post" action="{{ path('health_symbols_upload_binary') }}" enctype="multipart/form-data" class="row g-3 align-items-end">
+                <input type="hidden" name="_token" value="{{ csrf_token('health-symbols-upload-binary') }}">
+                <div class="col-lg">
+                    <label class="form-label" for="binary-file">Upload binary and generate symbols</label>
+                    <input id="binary-file" type="file" name="binary_file" class="form-control" required>
+                    <div class="form-text">Uses <code>dump_syms</code> when possible and falls back to <code>nm</code> for degraded public-symbol output.</div>
+                </div>
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-success">Upload binary</button>
+                </div>
+            </form>
+        </section>
+
+        <section class="profile-panel mt-3">
+            <div class="table-more module-log-toggle mb-3">
+                <a href="#stored-symbols-panel" data-bs-toggle="collapse" aria-expanded="{{ symbolsOpen ? 'true' : 'false' }}" aria-controls="stored-symbols-panel">
+                    <svg class="bi me-1" width="16" height="16" aria-hidden="true">
+                        <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#three-dots"></use>
+                    </svg>
+                    Stored symbols
+                </a>
+            </div>
+
+            <div id="stored-symbols-panel" class="collapse{% if symbolsOpen %} show{% endif %}">
+                <div class="text-muted mb-3">Search, select, and export existing symbol files as a ZIP archive of <code>.sym.gz</code> files.</div>
+                <form method="get" class="row g-2 align-items-end mb-3">
+                    <div class="col-md-8">
+                        <label class="form-label" for="symbol-filter">Filter</label>
+                        <input id="symbol-filter" name="symbol_filter" class="form-control font-monospace" value="{{ symbolFilter }}" placeholder="engine_srv.so or 45EA846F...">
+                    </div>
+                    <div class="col-md-4 d-flex gap-2">
+                        <button type="submit" class="btn btn-outline-primary">Search</button>
+                        <a href="{{ path('health') }}" class="btn btn-outline-secondary">Clear</a>
+                    </div>
+                </form>
+
+                <form method="post" action="{{ path('health_symbols_export') }}">
+                    <input type="hidden" name="_token" value="{{ csrf_token('health-symbols-export') }}">
+                    <div class="d-flex flex-wrap align-items-center gap-3 mb-2">
+                        <div class="text-muted">{{ symbolEntries|length }} matching entries</div>
+                        <button type="submit" class="btn btn-outline-primary">Export selected symbols</button>
+                    </div>
+                    <div class="table-responsive health-symbols-table-wrap">
+                        <table class="table table-sm align-middle health-symbols-table">
+                            <thead>
+                                <tr>
+                                    <th></th>
+                                    <th>Module</th>
+                                    <th>Identifier</th>
+                                    <th>File</th>
+                                    <th>Size</th>
+                                    <th>Modified</th>
+                                    <th>Binary</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for entry in symbolEntries %}
+                                    <tr>
+                                        <td><input type="checkbox" name="selected_symbols[]" value="{{ entry.module }}|{{ entry.identifier }}"></td>
+                                        <td class="font-monospace">{{ entry.module }}</td>
+                                        <td class="font-monospace">{{ entry.identifier }}</td>
+                                        <td class="font-monospace">{{ entry.file }}</td>
+                                        <td>{{ entry.bytes|number_format }}</td>
+                                        <td>{{ entry.modified_at|date('Y-m-d H:i:s') }}</td>
+                                        <td>{{ entry.binary_path ? 'Available' : 'Missing' }}</td>
+                                    </tr>
+                                {% else %}
+                                    <tr>
+                                        <td colspan="7" class="text-muted">No stored symbol files matched the current filter.</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </form>
             </div>
         </section>
     </div>

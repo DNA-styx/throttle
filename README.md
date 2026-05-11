@@ -18,6 +18,7 @@ This 2026 branch includes:
 - `/binary/submit` binary uploads with token checks and symbol generation.
 - Crash processing logs per report.
 - Symbol coverage view for report owners/admins.
+- Admin tools for manual binary uploads, symbol cache refresh, and stored symbol export.
 - Likely crash cause scoring.
 - SourceMod plugin/extension snapshots from Accelerator metadata when available.
 - Admin health page and systemd timer files for processing.
@@ -195,13 +196,28 @@ In a crash report, **Processing Runs** are Throttle processor records: status, d
 
 ### Health and Troubleshooting
 
-- The top-left theme switcher is available before login and stores `light`, `dark`, or `system` in browser local storage. The default is `system`.
-- `/health` is admin-only and shows queue, storage, binary, and runtime health. It edits the binary upload request policy used by Accelerator presubmit and upload processing settings for streaming `.sym` handling, upload endpoint memory limits, and whether anonymous minidump uploads are allowed. Saved changes are stored in `var/symbol-request-policy.json` and `var/upload-settings.json`.
+- The Light/Dark/System theme switcher is available before login and stores `light`, `dark`, or `system` in browser local storage. The default is `system`.
+- `/health` is admin-only and shows queue, storage, binary, and runtime health.
+- `/health` upload processing settings now include:
+  - streaming `.sym` upload processing
+  - upload endpoint memory limit
+  - anonymous minidump upload toggle for `/submit`
+  - upload failure backoff for repeated symbol/binary upload failures on the same `module + identifier`
+- `/health` binary upload request policy controls which Linux modules Accelerator is asked to upload during presubmit. Defaults are intentionally empty, so a fresh install will not request symbol or binary uploads until allow rules are configured.
+- `/health` also includes admin tools to:
+  - refresh symbol caches and rescan stored symbols
+  - clear upload failure backoff state
+  - upload binaries manually and generate symbols from them
+  - browse and export stored `.sym.gz` files
+- Saved health runtime data is stored in:
+  - `var/symbol-request-policy.json`
+  - `var/upload-settings.json`
+  - `var/upload-failure-backoff.json`
 - Grant admin access without editing the database by setting `APP_ADMINS` in `.env.local` or the service environment. Accepted values are separated by comma, space, or semicolon: numeric local user ids, `user:<id>`, SteamID64 values, or `steam:<SteamID64>`, for example `APP_ADMINS="steam:STEAMID64,user:1"`.
 - Admins can access `/health`, see global dashboards/audit data, view and manage crash reports they do not own, reprocess/delete crashes, and delete any crash signature note.
 - Pending crashes usually mean `crash:process` is not running or failed.
 - `bin/carburetor`, `bin/minidump_stackwalk`, `bin/dump_syms`, `bin/breakpad_moduleid`, and `bin/nm` must be executable.
-- `var/`, `cache/`, `dumps/`, and `symbols/` must be writable by the PHP-FPM user. Back up `var/symbol-request-policy.json` and `var/upload-settings.json` if you use custom `/health` rules.
+- `var/`, `cache/`, `dumps/`, and `symbols/` must be writable by the PHP-FPM user. Back up `var/symbol-request-policy.json`, `var/upload-settings.json`, and `var/upload-failure-backoff.json` if you use custom `/health` rules.
 - If templates fail with missing Encore entrypoints, run `npm ci && npm run build` and verify `public/build/entrypoints.json` exists.
 - If Composer uses PHP 8.1 on a PHP 8.4 project, run Composer through PHP 8.4: `php8.4 $(which composer) install --no-dev --optimize-autoloader`.
 - If PHP-FPM logs duplicate or missing extensions, fix `/etc/php/8.4/fpm/php.ini` and use package-managed `conf.d` extension files.

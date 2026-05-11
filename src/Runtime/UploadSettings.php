@@ -7,7 +7,7 @@ final class UploadSettings
     public const PATH = '/var/upload-settings.json';
 
     /**
-     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool}
+     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int}
      */
     public static function defaults(): array
     {
@@ -15,11 +15,14 @@ final class UploadSettings
             'streaming_symbols_enabled' => true,
             'upload_memory_limit' => '256M',
             'allow_anonymous_minidump_uploads' => true,
+            'upload_failure_backoff_enabled' => true,
+            'upload_failure_backoff_threshold' => 3,
+            'upload_failure_backoff_ttl' => 3600,
         ];
     }
 
     /**
-     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool}
+     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int}
      */
     public static function load(string $root): array
     {
@@ -66,7 +69,7 @@ final class UploadSettings
     }
 
     /**
-     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool}
+     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int}
      */
     public static function normalize(array $settings): array
     {
@@ -79,6 +82,20 @@ final class UploadSettings
             $memoryLimit = $defaults['upload_memory_limit'];
         }
 
+        $backoffThreshold = isset($settings['upload_failure_backoff_threshold']) && is_scalar($settings['upload_failure_backoff_threshold'])
+            ? (int) $settings['upload_failure_backoff_threshold']
+            : $defaults['upload_failure_backoff_threshold'];
+        if ($backoffThreshold < 1) {
+            $backoffThreshold = $defaults['upload_failure_backoff_threshold'];
+        }
+
+        $backoffTtl = isset($settings['upload_failure_backoff_ttl']) && is_scalar($settings['upload_failure_backoff_ttl'])
+            ? (int) $settings['upload_failure_backoff_ttl']
+            : $defaults['upload_failure_backoff_ttl'];
+        if ($backoffTtl < 60) {
+            $backoffTtl = $defaults['upload_failure_backoff_ttl'];
+        }
+
         return [
             'streaming_symbols_enabled' => array_key_exists('streaming_symbols_enabled', $settings)
                 ? filter_var($settings['streaming_symbols_enabled'], FILTER_VALIDATE_BOOL)
@@ -87,6 +104,11 @@ final class UploadSettings
             'allow_anonymous_minidump_uploads' => array_key_exists('allow_anonymous_minidump_uploads', $settings)
                 ? filter_var($settings['allow_anonymous_minidump_uploads'], FILTER_VALIDATE_BOOL)
                 : $defaults['allow_anonymous_minidump_uploads'],
+            'upload_failure_backoff_enabled' => array_key_exists('upload_failure_backoff_enabled', $settings)
+                ? filter_var($settings['upload_failure_backoff_enabled'], FILTER_VALIDATE_BOOL)
+                : $defaults['upload_failure_backoff_enabled'],
+            'upload_failure_backoff_threshold' => $backoffThreshold,
+            'upload_failure_backoff_ttl' => $backoffTtl,
         ];
     }
 

@@ -17,14 +17,14 @@ parameters:
         symbol-stores: ['public']
         symbol-upload-token: '%app.symbol_upload_token%'
         symbol-request:
-            deny-path-prefixes: ['/usr/lib/', '/lib/', '/usr/local/lib/', '/lib32/', '/lib64/']
-            deny-path-contains: ['/.steam/', '/i386-linux-gnu/', '/x86_64-linux-gnu/']
-            deny-exact: ['steamclient.so', 'linux-gate.so', 'ld-linux.so.2']
-            deny-prefixes: ['lib']
-            deny-suffixes: ['_srv.so']
-            allow-path-contains: ['/addons/sourcemod/', '/addons/metamod/', '/addons/', '/extensions/', '/plugins/']
-            allow-exact: ['srcds_linux', 'server_srv.so']
-            allow-regex: ['/^.*\.ext(?:\.[^.]+)*\.so$/', '/^(sourcemod|sourcepawn|metamod|crashhandler)\b.*\.so$/']
+            deny-path-prefixes: []
+            deny-path-contains: []
+            deny-exact: []
+            deny-prefixes: []
+            deny-suffixes: []
+            allow-path-contains: []
+            allow-exact: []
+            allow-regex: []
 
 services:
     # default configuration for services in *this* file
@@ -94,3 +94,7 @@ services:
             $projectDir: '%kernel.project_dir%'
             $legacyConfig: '%app.legacy%'
             $redisUrl: '%env(REDIS_URL)%'
+
+    App\Runtime\SymbolAdminManager:
+        arguments:
+            $projectDir: '%kernel.project_dir%'

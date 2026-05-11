@@ -39,17 +39,6 @@
         <div class="navbar navbar-default navbar-static-top">
             <div class="container-fluid navbar-shell">
                 <div class="navbar-start">
-                <div class="theme-switcher" role="group" aria-label="Theme">
-                    <button type="button" class="theme-switcher-btn" data-theme-choice="light" title="Light theme" aria-label="Light theme">
-                        <svg class="theme-switcher-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9zm0-3a.6.6 0 0 1 .6.6v1.2a.6.6 0 1 1-1.2 0V1.1A.6.6 0 0 1 8 .5zm0 12.6a.6.6 0 0 1 .6.6v1.2a.6.6 0 1 1-1.2 0v-1.2a.6.6 0 0 1 .6-.6zM1.1 7.4h1.2a.6.6 0 1 1 0 1.2H1.1a.6.6 0 1 1 0-1.2zm12.6 0h1.2a.6.6 0 1 1 0 1.2h-1.2a.6.6 0 1 1 0-1.2zM3.2 3.2a.6.6 0 0 1 .8 0l.9.9a.6.6 0 1 1-.8.8L3.2 4a.6.6 0 0 1 0-.8zm8.9 8.9a.6.6 0 0 1 .8 0l.9.9a.6.6 0 1 1-.8.8l-.9-.9a.6.6 0 0 1 0-.8zm1.7-8.9a.6.6 0 0 1 0 .8l-.9.9a.6.6 0 1 1-.8-.8l.9-.9a.6.6 0 0 1 .8 0zM4.9 12.1a.6.6 0 0 1 0 .8l-.9.9a.6.6 0 1 1-.8-.8l.9-.9a.6.6 0 0 1 .8 0z"/></svg>
-                    </button>
-                    <button type="button" class="theme-switcher-btn" data-theme-choice="dark" title="Dark theme" aria-label="Dark theme">
-                        <svg class="theme-switcher-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.8 10.6A6.3 6.3 0 0 1 5.4 2.2a.6.6 0 0 0-.7-.8 7 7 0 1 0 9.9 9.9.6.6 0 0 0-.8-.7z"/></svg>
-                    </button>
-                    <button type="button" class="theme-switcher-btn" data-theme-choice="system" title="System theme" aria-label="System theme">
-                        <svg class="theme-switcher-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.2a6.8 6.8 0 1 0 0 13.6A6.8 6.8 0 0 0 8 1.2zM8 13.6V2.4a5.6 5.6 0 0 1 0 11.2z"/></svg>
-                    </button>
-                </div>
                 <a class="navbar-brand throttle-brand-link" href="/">
                     <svg class="throttle-brand-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                         <path d="M8 4a.5.5 0 0 1 .5.5V6a.5.5 0 0 1-1 0V4.5A.5.5 0 0 1 8 4zM3.732 5.732a.5.5 0 0 1 .707 0l.915.914a.5.5 0 1 1-.708.708l-.914-.915a.5.5 0 0 1 0-.707zM2 10a.5.5 0 0 1 .5-.5h1.586a.5.5 0 0 1 0 1H2.5A.5.5 0 0 1 2 10zm9.5 0a.5.5 0 0 1 .5-.5h1.5a.5.5 0 0 1 0 1H12a.5.5 0 0 1-.5-.5zm.754-4.246a.389.389 0 0 0-.527-.02L7.547 9.31a.91.91 0 1 0 1.302 1.258l3.434-4.297a.389.389 0 0 0-.029-.518z"/>
@@ -58,10 +47,12 @@
                     Throttle
                 </a>
                 </div>
-                <div class="pull-right">
+                <div class="pull-right" style="display:flex;align-items:center;gap:8px;">
 {% if legacy_app.user %}
+                    {{ include('_theme_switcher.html.twig') }}
                     {{ include('_account_menu_legacy.html.twig') }}
 {% else %}
+                    {{ include('_theme_switcher.html.twig') }}
                     <a href="{{ path('login_steam', {'return': legacy_app.request.pathInfo}) }}" class="btn btn-success navbar-btn"><i class="icon-signin"></i> Login with Steam</a>
 {% endif %}
                 </div>

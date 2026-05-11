@@ -98,6 +98,30 @@
   margin: 0 auto;
 }
 
+.health-shell {
+  max-width: 1400px;
+}
+
+.health-settings-stack {
+  max-width: 720px;
+}
+
+.health-settings-stack .mb-3:last-of-type {
+  margin-bottom: 1rem !important;
+}
+
+.health-symbols-table-wrap {
+  overflow-x: auto;
+}
+
+.health-symbols-table {
+  min-width: 980px;
+}
+
+.health-symbols-table .font-monospace {
+  white-space: nowrap;
+}
+
 .profile-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));

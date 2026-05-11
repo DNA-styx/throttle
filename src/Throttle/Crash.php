@@ -2,6 +2,7 @@
 
 namespace Throttle;
 
+use App\Runtime\UploadFailureBackoff;
 use Silex\Application;
 
 class Crash
@@ -138,14 +139,14 @@ class Crash
     public static function getSymbolRequestPolicy(array $config = []): array
     {
         $defaults = [
-            'deny-path-prefixes' => ['/usr/lib/', '/lib/', '/usr/local/lib/', '/lib32/', '/lib64/'],
-            'deny-path-contains' => ['/.steam/', '/i386-linux-gnu/', '/x86_64-linux-gnu/'],
-            'deny-exact' => ['steamclient.so', 'linux-gate.so', 'ld-linux.so.2'],
-            'deny-prefixes' => ['lib'],
-            'deny-suffixes' => ['_srv.so'],
-            'allow-path-contains' => ['/addons/sourcemod/', '/addons/metamod/', '/addons/', '/extensions/', '/plugins/'],
-            'allow-exact' => ['srcds_linux', 'server_srv.so'],
-            'allow-regex' => ['/^.*\.ext(?:\.[^.]+)*\.so$/', '/^(sourcemod|sourcepawn|metamod|crashhandler)\b.*\.so$/'],
+            'deny-path-prefixes' => [],
+            'deny-path-contains' => [],
+            'deny-exact' => [],
+            'deny-prefixes' => [],
+            'deny-suffixes' => [],
+            'allow-path-contains' => [],
+            'allow-exact' => [],
+            'allow-regex' => [],
         ];
 
         $configured = $config['symbol-request'] ?? [];
@@ -1252,8 +1253,13 @@ class Crash
             }
 
             $moduleName = self::getSymbolModuleName($module->file);
+            if (UploadFailureBackoff::isSuppressed($app['root'], $moduleName, $module->identifier)) {
+                $return .= 'N';
+                continue;
+            }
+
             $app['db']->executeUpdate('UPDATE module SET present = 0 WHERE name = ? AND identifier = ? AND present = 1', [$moduleName, $module->identifier]);
-            $return .= 'Y';
+            $return .= 'U';
         }
 
         // Stick a random presubmit token on the end for testing.

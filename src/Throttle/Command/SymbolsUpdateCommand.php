@@ -74,8 +74,9 @@ class SymbolsUpdateCommand extends Command
         $lock->lock(300);
 
         $app['redis']->del('throttle:cache:symbol');
+        $app['redis']->del('throttle:cache:repo');
 
-        $output->writeln('Flushed symbol cache');
+        $output->writeln('Flushed symbol caches');
 
         $lock->unlock();
 

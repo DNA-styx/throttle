@@ -3,10 +3,15 @@
 namespace App\Controller;
 
 use App\Entity\User;
+use App\Runtime\SymbolAdminManager;
+use App\Runtime\SymbolBinaryUpload;
+use App\Runtime\UploadFailureBackoff;
 use App\Runtime\UploadSettings;
 use Doctrine\DBAL\Connection;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\KernelInterface;
@@ -19,7 +24,7 @@ class HealthController extends AbstractController
     private const SYMBOL_REQUEST_POLICY_PATH = '/var/symbol-request-policy.json';
 
     #[Route('/health', name: 'health', methods: ['GET', 'POST'])]
-    public function index(Request $request, Connection $connection, KernelInterface $kernel, #[Autowire('%app.legacy%')] array $legacyConfig): Response
+    public function index(Request $request, Connection $connection, KernelInterface $kernel, SymbolAdminManager $symbolAdminManager, #[Autowire('%app.legacy%')] array $legacyConfig): Response
     {
         $root = $kernel->getProjectDir();
         $checks = [];
@@ -29,6 +34,7 @@ class HealthController extends AbstractController
         $policyTest = null;
         $runtimePolicy = $this->loadRuntimeSymbolRequestPolicy($root);
         $uploadSettings = UploadSettings::load($root);
+        $symbolFilter = trim((string) $request->query->get('symbol_filter', ''));
 
         if ($request->isMethod('POST')) {
             if ($request->request->get('upload_settings_form') !== null) {
@@ -105,6 +111,18 @@ class HealthController extends AbstractController
             'latest_processed' => $connection->fetchOne('SELECT MAX(created_at) FROM crash_processing_log'),
         ];
 
+        $symbolEntries = $symbolAdminManager->listStoredSymbols($symbolFilter !== '' ? $symbolFilter : null);
+        $backoffStats = UploadFailureBackoff::stats($root);
+        $symbolsOpen = $symbolFilter !== '' || $request->query->getBoolean('symbols_open');
+        $symbolRequestPolicy = \Throttle\Crash::getSymbolRequestPolicy($effectiveLegacyConfig);
+        $policyEmpty = true;
+        foreach ($symbolRequestPolicy as $values) {
+            if ($values !== []) {
+                $policyEmpty = false;
+                break;
+            }
+        }
+
         return $this->render('health/index.html.twig', [
             'checks' => $checks,
             'queue' => $queue,
@@ -114,16 +132,102 @@ class HealthController extends AbstractController
             'uploadSettingsReset' => $request->query->getBoolean('upload_settings_reset'),
             'uploadSettingsSource' => is_file(UploadSettings::path($root)) ? UploadSettings::PATH : 'Default config',
             'currentMemoryLimit' => ini_get('memory_limit'),
-            'symbolRequestPolicy' => \Throttle\Crash::getSymbolRequestPolicy($effectiveLegacyConfig),
-            'symbolRequestPolicyFields' => $this->buildSymbolRequestPolicyFields(\Throttle\Crash::getSymbolRequestPolicy($effectiveLegacyConfig)),
+            'symbolRequestPolicy' => $symbolRequestPolicy,
+            'symbolRequestPolicyFields' => $this->buildSymbolRequestPolicyFields($symbolRequestPolicy),
             'symbolRequestPolicyErrors' => $policyErrors,
             'symbolRequestPolicySaved' => $request->query->getBoolean('policy_saved'),
             'symbolRequestPolicyReset' => $request->query->getBoolean('policy_reset'),
             'symbolRequestPolicySource' => $runtimePolicy === null ? 'Default config' : self::SYMBOL_REQUEST_POLICY_PATH,
+            'symbolRequestPolicyEmpty' => $policyEmpty,
             'policyTestInput' => $policyTestInput,
             'policyTest' => $policyTest,
+            'symbolEntries' => $symbolEntries,
+            'symbolFilter' => $symbolFilter,
+            'symbolsOpen' => $symbolsOpen,
+            'backoffStats' => $backoffStats,
             'healthy' => !in_array(false, array_column($checks, 'ok'), true),
         ]);
+    }
+
+    #[Route('/health/symbols/refresh', name: 'health_symbols_refresh', methods: ['POST'])]
+    public function refreshSymbols(Request $request, SymbolAdminManager $symbolAdminManager): Response
+    {
+        if (!$this->isCsrfTokenValid('health-symbols-refresh', (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        $result = $symbolAdminManager->refreshCaches(true);
+        $this->addFlash('success', sprintf('Symbol cache refreshed. Scanned %d module rows and updated %d entries.', $result['scanned'], $result['updated']));
+
+        return $this->redirectToRoute('health');
+    }
+
+    #[Route('/health/symbols/backoff/reset', name: 'health_symbols_backoff_reset', methods: ['POST'])]
+    public function resetBackoff(Request $request, KernelInterface $kernel): Response
+    {
+        if (!$this->isCsrfTokenValid('health-symbols-backoff-reset', (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        $cleared = UploadFailureBackoff::clear($kernel->getProjectDir());
+        $this->addFlash('success', sprintf('Upload failure backoff state cleared for %d module(s).', $cleared));
+
+        return $this->redirectToRoute('health');
+    }
+
+    #[Route('/health/symbols/upload-binary', name: 'health_symbols_upload_binary', methods: ['POST'])]
+    public function uploadBinary(Request $request, KernelInterface $kernel, SymbolAdminManager $symbolAdminManager): Response
+    {
+        if (!$this->isCsrfTokenValid('health-symbols-upload-binary', (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        $file = $request->files->get('binary_file');
+        if (!$file instanceof UploadedFile || !$file->isValid() || $file->getSize() <= 0) {
+            $this->addFlash('danger', 'Select a binary file to upload.');
+
+            return $this->redirectToRoute('health', ['symbols_open' => 1]);
+        }
+
+        try {
+            $result = SymbolBinaryUpload::storeUploadedBinary($kernel->getProjectDir(), $file);
+            UploadFailureBackoff::registerSuccess($kernel->getProjectDir(), $result['module'], $result['identifier']);
+            $symbolAdminManager->refreshCaches(false);
+            $this->addFlash(
+                $result['degraded'] ? 'warning' : 'success',
+                $result['degraded']
+                    ? sprintf('Binary uploaded for %s/%s. Symbols were generated via nm fallback.', $result['module'], $result['identifier'])
+                    : sprintf('Binary uploaded for %s/%s. Breakpad symbols are ready.', $result['module'], $result['identifier'])
+            );
+        } catch (\Throwable $e) {
+            $this->addFlash('danger', 'Binary upload failed: ' . $e->getMessage());
+        }
+
+        return $this->redirectToRoute('health', ['symbols_open' => 1]);
+    }
+
+    #[Route('/health/symbols/export', name: 'health_symbols_export', methods: ['POST'])]
+    public function exportSymbols(Request $request, SymbolAdminManager $symbolAdminManager): Response
+    {
+        if (!$this->isCsrfTokenValid('health-symbols-export', (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        $selected = $request->request->all('selected_symbols');
+        if (!is_array($selected) || $selected === []) {
+            $this->addFlash('danger', 'Select at least one symbol entry to export.');
+
+            return $this->redirectToRoute('health', ['symbols_open' => 1]);
+        }
+
+        $response = $symbolAdminManager->exportSelectedSymbols(array_values(array_filter($selected, 'is_string')));
+        if (!$response instanceof BinaryFileResponse) {
+            $this->addFlash('danger', 'No stored symbols matched the selected entries.');
+
+            return $this->redirectToRoute('health', ['symbols_open' => 1]);
+        }
+
+        return $response;
     }
 
     /**
@@ -245,7 +349,7 @@ class HealthController extends AbstractController
     }
 
     /**
-     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool}
+     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int}
      */
     private function readUploadSettingsFromRequest(Request $request): array
     {
@@ -253,6 +357,9 @@ class HealthController extends AbstractController
             'streaming_symbols_enabled' => $request->request->getBoolean('streaming_symbols_enabled'),
             'upload_memory_limit' => strtoupper(trim((string) $request->request->get('upload_memory_limit', '256M'))),
             'allow_anonymous_minidump_uploads' => $request->request->getBoolean('allow_anonymous_minidump_uploads'),
+            'upload_failure_backoff_enabled' => $request->request->getBoolean('upload_failure_backoff_enabled'),
+            'upload_failure_backoff_threshold' => (int) $request->request->get('upload_failure_backoff_threshold', 3),
+            'upload_failure_backoff_ttl' => (int) $request->request->get('upload_failure_backoff_ttl', 3600),
         ];
     }
 
@@ -264,6 +371,12 @@ class HealthController extends AbstractController
         $errors = [];
         if (!UploadSettings::isValidMemoryLimit((string) ($settings['upload_memory_limit'] ?? ''))) {
             $errors[] = 'Invalid upload memory limit. Use values like 256M, 512M, 1G, or -1.';
+        }
+        if ((int) ($settings['upload_failure_backoff_threshold'] ?? 0) < 1) {
+            $errors[] = 'Upload failure backoff threshold must be 1 or greater.';
+        }
+        if ((int) ($settings['upload_failure_backoff_ttl'] ?? 0) < 60) {
+            $errors[] = 'Upload failure backoff TTL must be at least 60 seconds.';
         }
 
         return $errors;
