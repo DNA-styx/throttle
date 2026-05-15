@@ -3,6 +3,7 @@
 namespace Throttle;
 
 use App\Runtime\SymbolBinaryUpload;
+use App\Runtime\SymbolToolException;
 use App\Runtime\UploadFailureBackoff;
 use Silex\Application;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
@@ -49,17 +50,28 @@ class Binary
             UploadFailureBackoff::registerSuccess($app['root'], $result['module'], $result['identifier']);
             $app['redis']->hIncrBy('throttle:stats', 'binaries:accepted', 1);
 
-            return new Response($result['message'] . ($result['degraded'] ? ' (degraded fallback)' : '') . "\n");
+            $message = $result['message'];
+            if ($result['degraded']) {
+                $message .= !empty($result['warning']) ? ' (' . $result['warning'] . '; public symbols generated via fallback)' : ' (degraded fallback)';
+            }
+
+            return new Response($message . "\n");
         } catch (\Throwable $e) {
+            $context = $e instanceof SymbolToolException ? $e->getContext() : [];
             $app['monolog']->warning('Binary was stored, but symbol generation failed.', [
                 'module' => $moduleHint,
                 'identifier' => $identifierHint,
+                'tool' => $context['tool'] ?? null,
+                'exit_code' => $context['exit_code'] ?? null,
+                'signal' => $context['signal_name'] ?? null,
+                'stderr_tail' => $context['stderr_tail'] ?? null,
+                'summary' => $context['summary'] ?? $e->getMessage(),
                 'exception' => $e,
             ]);
             $app['redis']->hIncrBy('throttle:stats', 'binaries:accepted:no-symbols', 1);
-            UploadFailureBackoff::registerFailure($app['root'], $moduleHint, $identifierHint, 'binary', 400, $e->getMessage());
+            UploadFailureBackoff::registerFailure($app['root'], $moduleHint, $identifierHint, 'binary', 400, $context['summary'] ?? $e->getMessage());
 
-            return new Response('Stored binary, but symbols were not generated: ' . $e->getMessage() . "\n");
+            return new Response('Stored binary, but symbols were not generated: ' . ($context['summary'] ?? $e->getMessage()) . "\n");
         }
     }
 

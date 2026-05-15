@@ -575,6 +575,7 @@ class Crash
         $hasSourcePawnBridge = $hasSourcePawnChain || self::stackHasSourcePawnBridge($stack);
         $hasConsoleBackedBridgeCause = !$hasSourcePawnChain && $consoleBlaming !== null && $hasSourcePawnBridge;
         $hasTerminalConsoleBridgeCause = !$hasSourcePawnChain && $terminalConsoleCause !== null && !empty($terminalConsoleCause['plugin']) && $hasSourcePawnBridge;
+        $stackFirstCandidate = self::topConsistentCrashCandidate($stack);
         $sourcePawnPlugin = $sourcePawnChain !== null ? basename((string) $sourcePawnChain['plugin']) : null;
         if ($sourcePawnChain !== null) {
             self::addCulpritCandidate(
@@ -590,12 +591,12 @@ class Crash
             self::addCulpritCandidate(
                 $candidates,
                 basename($consoleBlaming),
-                $hasSourcePawnChain ? 34 : ($hasSourcePawnBridge ? 180 : 110),
+                $hasSourcePawnChain ? 34 : (($stackFirstCandidate !== null && !$hasTerminalConsoleBridgeCause) ? 28 : ($hasSourcePawnBridge ? 84 : 60)),
                 array_filter(array(
                     'Console log Blaming entry: ' . basename($consoleBlaming),
                     $hasConsoleBackedBridgeCause ? 'SourceMod bridge frames present; plugin debug frames are missing from stackwalk' : null,
                 )),
-                $hasSourcePawnChain ? 'Supporting signal' : 'Likely plugin cause'
+                'Supporting signal'
             );
         }
 
@@ -611,9 +612,28 @@ class Crash
             self::addCulpritCandidate(
                 $candidates,
                 basename((string) $terminalConsoleCause['plugin']),
-                $hasSourcePawnChain ? 42 : ($hasSourcePawnBridge ? 210 : 130),
+                $hasSourcePawnChain ? 42 : ($hasSourcePawnBridge ? 170 : 120),
                 $reasons,
                 $hasSourcePawnChain ? 'Supporting signal' : 'Likely plugin cause'
+            );
+        }
+
+        if (!$hasSourcePawnChain && $stackFirstCandidate !== null) {
+            $score = $stackFirstCandidate['same_prefix_count'] >= 3 ? 164 : 136;
+            if (!$hasTerminalConsoleBridgeCause) {
+                $score += 28;
+            }
+
+            self::addCulpritCandidate(
+                $candidates,
+                $stackFirstCandidate['label'],
+                $score,
+                array_filter(array(
+                    'Frame #' . $stackFirstCandidate['frame'] . ': ' . $stackFirstCandidate['rendered'],
+                    $stackFirstCandidate['same_prefix_count'] >= 3 ? 'Top ' . $stackFirstCandidate['same_prefix_count'] . ' frames resolve to the same crash module' : null,
+                    $hasConsoleBackedBridgeCause ? 'Older SourceMod console exception kept only as supporting signal' : null,
+                )),
+                'Native failure site'
             );
         }
 
@@ -683,6 +703,14 @@ class Crash
             if ($moduleKey !== '' && isset($presentByModule[$moduleKey]) && !$presentByModule[$moduleKey]) {
                 $score -= ($hasSourcePawnChain || $hasConsoleBackedBridgeCause || $hasTerminalConsoleBridgeCause) && self::isServerEngineModule($label) ? 10 : 18;
                 $reasons[] = 'Module has no symbols';
+            }
+
+            if ($stackFirstCandidate !== null && strcasecmp($label, $stackFirstCandidate['label']) === 0 && !$hasSourcePawnChain && !$hasTerminalConsoleBridgeCause) {
+                $score += max(10, 34 - ($index * 6));
+                if ($kind === 'Candidate' || $kind === 'Bridge') {
+                    $kind = 'Native failure site';
+                }
+                $reasons[] = 'Top-of-stack crash module';
             }
 
             self::addCulpritCandidate($candidates, $label, $score, $reasons, $kind);
@@ -769,6 +797,58 @@ class Crash
         }
 
         return false;
+    }
+
+    private static function topConsistentCrashCandidate(array $stack): ?array
+    {
+        $prefix = [];
+        foreach ($stack as $frame) {
+            if (count($prefix) >= 3) {
+                break;
+            }
+
+            $module = (string) ($frame['module'] ?? '');
+            $function = (string) ($frame['function'] ?? '');
+            $rendered = (string) ($frame['rendered'] ?? '');
+            $label = self::candidateLabelFromFrame($module, $function, $rendered);
+            if ($label === null || str_ends_with(strtolower($label), '.smx')) {
+                break;
+            }
+
+            if (self::isSystemRuntimeModule($label) || self::isBootstrapRuntimeModule($label)) {
+                break;
+            }
+
+            $prefix[] = [
+                'label' => $label,
+                'module' => $module,
+                'function' => $function,
+                'rendered' => $rendered,
+                'frame' => $frame['frame'] ?? count($prefix),
+            ];
+        }
+
+        if ($prefix === []) {
+            return null;
+        }
+
+        $firstLabel = $prefix[0]['label'];
+        $samePrefixCount = 0;
+        foreach ($prefix as $item) {
+            if (strcasecmp($item['label'], $firstLabel) !== 0) {
+                break;
+            }
+            $samePrefixCount++;
+        }
+
+        if ($samePrefixCount < 2 && !self::isPluginLikeLabel($firstLabel) && !self::isServerEngineModule($firstLabel)) {
+            return null;
+        }
+
+        $first = $prefix[0];
+        $first['same_prefix_count'] = $samePrefixCount;
+
+        return $first;
     }
 
     private static function detectSourcePawnCauseChain(array $stack, array $metadata, string $sourceLabel): ?array
@@ -887,10 +967,8 @@ class Crash
         array_unshift($symbolStores, $app['root'] . '/cache/symbols');
 
         try {
-            $future = new \ExecFuture('%s %s %Ls', $carburetorPath, $dumpPath, $symbolStores);
-            $future->setTimeout(20);
-            [$stdout,] = $future->resolvex();
-            $data = json_decode($stdout, true);
+            $carburetor = self::runCarburetor($app, $dumpPath, $symbolStores, 20);
+            $data = json_decode($carburetor['stdout'], true);
         } catch (\Throwable) {
             return null;
         }
@@ -910,6 +988,133 @@ class Crash
         }
 
         return $chain;
+    }
+
+    private static function runCarburetor(Application $app, string $dumpPath, array $symbolStores, ?int $timeout = null, array $options = array()): array
+    {
+        $carburetorPath = $app['root'] . '/bin/carburetor';
+        $future = new \ExecFuture('%s %Ls %s %Ls', $carburetorPath, $options, $dumpPath, $symbolStores);
+        if ($timeout !== null) {
+            $future->setTimeout($timeout);
+        }
+
+        try {
+            [$stdout, $stderr] = $future->resolvex();
+            $exitCode = 0;
+        } catch (\CommandException $exception) {
+            $stdout = $exception->getStdout();
+            $stderr = $exception->getStderr();
+            $exitCode = (int) $exception->getCode();
+        }
+
+        return array(
+            'stdout' => $stdout ?? '',
+            'stderr' => $stderr ?? '',
+            'exit_code' => $exitCode ?? 0,
+            'stderr_tail' => self::stderrTail($stderr ?? ''),
+            'error_context' => self::extractCarburetorFailureContext($stderr ?? ''),
+            'error' => $exitCode ? self::carburetorFailureMessage($exitCode, $dumpPath) : null,
+        );
+    }
+
+    private static function carburetorFailureMessage(int $exitCode, string $dumpPath): string
+    {
+        $signal = self::exitCodeToSignalName($exitCode);
+        if ($signal !== null) {
+            return sprintf('carburetor crashed while analyzing %s (%s)', basename($dumpPath), $signal);
+        }
+
+        return sprintf('carburetor failed while analyzing %s (exit code %d)', basename($dumpPath), $exitCode);
+    }
+
+    private static function exitCodeToSignalName(int $exitCode): ?string
+    {
+        return match ($exitCode) {
+            134 => 'SIGABRT',
+            135 => 'SIGBUS',
+            136 => 'SIGFPE',
+            137 => 'SIGKILL',
+            138 => 'SIGUSR1',
+            139 => 'SIGSEGV',
+            140 => 'SIGUSR2',
+            141 => 'SIGPIPE',
+            142 => 'SIGALRM',
+            143 => 'SIGTERM',
+            default => null,
+        };
+    }
+
+    private static function stderrTail(string $stderr, int $maxLines = 20): string
+    {
+        $lines = \phutil_split_lines($stderr, false);
+        if (count($lines) > $maxLines) {
+            $lines = array_slice($lines, -$maxLines);
+        }
+
+        return trim(implode("\n", $lines));
+    }
+
+    private static function extractCarburetorFailureContext(string $stderr): ?array
+    {
+        if ($stderr === '') {
+            return null;
+        }
+
+        $lines = \phutil_split_lines($stderr, false);
+        $currentThread = null;
+        $issues = array();
+
+        foreach ($lines as $line) {
+            if (preg_match('/Looking at thread .*:(\d+\/\d+) id (0x[0-9a-f]+)/i', $line, $matches) === 1) {
+                $currentThread = sprintf('thread %s id %s', $matches[1], strtolower($matches[2]));
+                continue;
+            }
+
+            if (preg_match('/MinidumpMemoryRegion request out of range:\s*(.+)$/', $line, $matches) === 1) {
+                $issues[] = array(
+                    'thread' => $currentThread,
+                    'message' => trim($matches[1]),
+                );
+            }
+        }
+
+        if ($issues === array()) {
+            return null;
+        }
+
+        $rendered = array();
+        foreach (array_slice($issues, 0, 3) as $issue) {
+            $rendered[] = ($issue['thread'] !== null ? $issue['thread'] . ': ' : '') . $issue['message'];
+        }
+
+        return array(
+            'summary' => 'Likely carburetor trigger: out-of-range minidump memory while serializing processed thread state.',
+            'lines' => $rendered,
+        );
+    }
+
+    private static function loadProcessedFallbackStack(Application $app, string $id): ?array
+    {
+        $crash = $app['db']->executeQuery('SELECT thread, processed FROM crash WHERE id = ? LIMIT 1', array($id))->fetch();
+        if (!is_array($crash) || (int) ($crash['processed'] ?? 0) !== 1) {
+            return null;
+        }
+
+        $thread = $crash['thread'] ?? null;
+        if ($thread === null || $thread === false) {
+            return null;
+        }
+
+        if ((int) $thread === -1) {
+            $thread = 0;
+        }
+
+        $stack = $app['db']->executeQuery(
+            'SELECT frame, module, function, rendered, url FROM frame WHERE crash = ? AND thread = ? ORDER BY frame',
+            array($id, $thread)
+        )->fetchAll();
+
+        return $stack !== array() ? $stack : null;
     }
 
     private static function stackRowsFromCarburetorData(array $data): array
@@ -1577,7 +1782,9 @@ class Crash
             unset($crash['metadata']['ExtensionBuild']);
         }
 
-        $terminalConsoleCause = self::loadTerminalSourceModCause($app, $id, (bool) $crash['has_console_log']);
+        $consoleCause = self::loadTerminalSourceModCause($app, $id, (bool) $crash['has_console_log']);
+        $terminalConsoleCause = ($consoleCause['terminal'] ?? false) ? $consoleCause : null;
+        $consoleBlaming = $consoleCause['supporting_blaming'] ?? ($terminalConsoleCause['blaming'] ?? null);
         $crash['dump_available'] = \Filesystem::pathExists($app['root'] . '/dumps/' . substr($id, 0, 2) . '/' . $id . '.dmp');
 
         ksort($crash['metadata']);
@@ -1587,7 +1794,7 @@ class Crash
         $modules = $app['db']->executeQuery('SELECT name, identifier, processed, present, HEX(base) AS base FROM module WHERE crash = ? ORDER BY name', array($id))->fetchAll();
         $modules = self::buildModuleCoverageRows($modules, $app['config']);
         $rawSourcePawnChain = self::loadRawSourcePawnCauseChain($app, $id, $stack, $crash['metadata']);
-        $culpritCandidates = self::buildCulpritCandidates($stack, $modules, $crash['metadata'], $crash['cmdline'], $terminalConsoleCause['blaming'] ?? null, $terminalConsoleCause, $rawSourcePawnChain);
+        $culpritCandidates = self::buildCulpritCandidates($stack, $modules, $crash['metadata'], $crash['cmdline'], $consoleBlaming, $terminalConsoleCause, $rawSourcePawnChain);
         $stats = $app['db']->executeQuery('SELECT COUNT(DISTINCT crash.owner_id) AS owners, COUNT(DISTINCT crash.ip) AS ips, COUNT(*) AS crashes FROM crash, (SELECT owner_id, stackhash FROM crash WHERE id = ?) AS this WHERE this.stackhash = crash.stackhash', [$id])->fetch();
         $signatureNotesPage = self::getSignatureNotesPage($app);
         $signatureNotes = self::loadSignatureNotes($app, $crash['stackhash'] ?? null, $signatureNotesPage);
@@ -1861,7 +2068,7 @@ class Crash
 
     private static function extractTerminalConsoleBlaming(string $contents): ?string
     {
-        return self::extractTerminalSourceModCause($contents)['blaming'] ?? null;
+        return self::extractTerminalSourceModCause($contents)['supporting_blaming'] ?? null;
     }
 
     private static function extractTerminalSourceModCause(string $contents): ?array
@@ -1902,7 +2109,7 @@ class Crash
             return null;
         }
 
-        $best = null;
+        $latest = null;
         $lineCount = count($normalized);
         foreach ($exceptionIndexes as $position => $exceptionIndex) {
             $nextException = $exceptionIndexes[$position + 1] ?? $lineCount;
@@ -1943,20 +2150,57 @@ class Crash
             }
 
             if ($block['plugin'] !== null || $block['blaming'] !== null) {
-                $best = $block;
+                $latest = $block;
             }
         }
 
-        if ($best === null || ($lineCount - 1 - (int) $best['last_relevant']) > 80) {
+        if ($latest === null || ($lineCount - 1 - (int) $latest['last_relevant']) > 80) {
             return null;
         }
 
+        $tailLines = array_slice($normalized, (int) $latest['last_relevant'] + 1);
+        $tailIsTerminal = count($tailLines) <= 3;
+        if ($tailIsTerminal) {
+            foreach ($tailLines as $tailLine) {
+                if (!self::isBenignTerminalTailLine($tailLine)) {
+                    $tailIsTerminal = false;
+                    break;
+                }
+            }
+        }
+
+        $plugin = $latest['plugin'] ?? $latest['blaming'];
+
         return array(
-            'plugin' => $best['plugin'] ?? $best['blaming'],
-            'function' => $best['function'],
-            'exception' => $best['exception'],
-            'blaming' => $best['blaming'],
+            'plugin' => $tailIsTerminal ? $plugin : null,
+            'function' => $tailIsTerminal ? $latest['function'] : null,
+            'exception' => $tailIsTerminal ? $latest['exception'] : null,
+            'blaming' => $tailIsTerminal ? $latest['blaming'] : null,
+            'supporting_blaming' => $latest['blaming'] ?? $plugin,
+            'terminal' => $tailIsTerminal,
         );
+    }
+
+    private static function isBenignTerminalTailLine(string $line): bool
+    {
+        $line = trim($line);
+        if ($line === '') {
+            return true;
+        }
+
+        if (preg_match('/^(?:Segmentation fault|Aborted|Wrote minidump to:|Crash dump|core dumped)/i', $line) === 1) {
+            return true;
+        }
+
+        if (preg_match('/^(?:\/entrypoint\.sh:|container@|quit$|Error log file session closed\.?$)/i', $line) === 1) {
+            return true;
+        }
+
+        if (preg_match('/^\[(?:Pterodactyl Daemon|System Panel)\]/i', $line) === 1) {
+            return true;
+        }
+
+        return preg_match('/Server marked as (?:offline|stopping|crashed state)/i', $line) === 1;
     }
 
     private static function isSourceModExceptionLine(string $line): bool
@@ -2344,14 +2588,47 @@ class Crash
         set_time_limit(120);
 
         try {
-            list($stdout, $stderr) = execx($app['root'].'/bin/carburetor %Ls %s %Ls', $options, $path, $symbol_stores);
+            $carburetor = self::runCarburetor($app, $path, $symbol_stores, 120, $options);
+            $stdout = $carburetor['stdout'];
+            $decoded = json_decode($stdout, true);
+            $hasStructuredData = is_array($decoded);
+            $data = $hasStructuredData ? $decoded : array();
+
+            if ($carburetor['exit_code'] !== 0) {
+                $data['error'] = $carburetor['error'];
+                $data['exit_code'] = $carburetor['exit_code'];
+                $data['stderr_tail'] = $carburetor['stderr_tail'];
+                $data['error_context'] = $carburetor['error_context'];
+                if ($stdout !== '') {
+                    $data['raw_stdout'] = $stdout;
+                }
+            } elseif (!$hasStructuredData) {
+                $data = array(
+                    'error' => 'Carburetor returned invalid data while analyzing this dump.',
+                    'exit_code' => 0,
+                    'stderr_tail' => $carburetor['stderr_tail'],
+                    'error_context' => $carburetor['error_context'],
+                );
+                if ($stdout !== '') {
+                    $data['raw_stdout'] = $stdout;
+                }
+            }
         } catch (\Throwable $exception) {
-            $stdout = json_encode([
+            $data = array(
                 'error' => trim($exception->getMessage()) ?: 'Carburetor failed to analyze the minidump.',
-            ]);
+            );
         }
 
-        return new \Symfony\Component\HttpFoundation\Response($stdout, 200, array(
+        if (isset($data['error'])) {
+            $fallbackStack = self::loadProcessedFallbackStack($app, $id);
+            if ($fallbackStack !== null) {
+                $data['fallback_stack'] = $fallbackStack;
+                $data['problem_stack'] = array_slice($fallbackStack, 0, 8);
+                $data['fallback_source'] = 'processed_stack';
+            }
+        }
+
+        return new \Symfony\Component\HttpFoundation\Response(json_encode($data, JSON_UNESCAPED_SLASHES), 200, array(
             'Content-Type' => 'application/json',
         ));
     }

@@ -10,6 +10,7 @@
 </div>
 <div id="loading" class="progress" style="background-color: #fff; border: 1px solid #ccc; height: 40px;"><div class="progress-bar" style="width: 0%"></div></div>
 <div id="content" class="hidden">
+    <div id="carburetor-error" class="alert alert-danger hidden" style="white-space: pre-wrap;"></div>
     <ul class="nav nav-tabs">
         <li class="active"><a href="#tab-stack" data-toggle="tab">Stack</a></li>
         <li><a href="#tab-memory" data-toggle="tab">Memory</a></li>
@@ -34,6 +35,59 @@ var content = $('#content');
 var tabStack = $('#tab-stack');
 var tabMemory = $('#tab-memory');
 var tabRaw = $('#tab-raw');
+var errorBox = $('#carburetor-error');
+var stackUnavailableMessage = 'Stack unavailable because carburetor crashed.';
+var memoryUnavailableMessage = 'Memory view unavailable because carburetor crashed.';
+
+function showError(message, data) {
+    var lines = [message];
+
+    if (data && typeof data.exit_code !== 'undefined' && data.exit_code !== null) {
+        lines.push('Exit code: ' + data.exit_code);
+    }
+
+    if (data && data.stderr_tail) {
+        lines.push('');
+        lines.push('stderr:');
+        lines.push(data.stderr_tail);
+    }
+
+    errorBox.text(lines.join('\n')).removeClass('hidden');
+}
+
+function renderFallbackStack(rows) {
+    if (!Array.isArray(rows) || !rows.length) {
+        return '';
+    }
+
+    return rows.map(function(row, index) {
+        var frame = (row && typeof row.frame !== 'undefined' && row.frame !== null) ? row.frame : index;
+        var rendered = (row && row.rendered) ? row.rendered : '';
+        var fallback = [row && row.module ? row.module : '', row && row.function ? row.function : '']
+            .filter(Boolean)
+            .join('!');
+        var text = rendered || fallback || '[unknown frame]';
+
+        return '#' + frame + ' ' + text;
+    }).join('\n');
+}
+
+function renderErrorContext(context) {
+    if (!context || (!context.summary && (!Array.isArray(context.lines) || !context.lines.length))) {
+        return '';
+    }
+
+    var parts = [];
+    if (context.summary) {
+        parts.push(context.summary);
+    }
+
+    if (Array.isArray(context.lines) && context.lines.length) {
+        parts.push(context.lines.join('\n'));
+    }
+
+    return parts.join('\n');
+}
 
 var oReq = new XMLHttpRequest();
 oReq.open('GET', '{{ path('carburetor_data', { id: id, scan: scan, symbols: symbols }) | escape('js') }}', true);
@@ -71,7 +125,7 @@ oReq.onload = function(oEvent) {
     loading.remove();
     content.removeClass('hidden');
 
-    $('#content nav-tabs a').click(function(e) {
+    $('#content .nav-tabs a').click(function(e) {
         e.preventDefault();
         $(this).tab('show');
     });
@@ -79,8 +133,26 @@ oReq.onload = function(oEvent) {
     tabRaw.text(JSON.stringify(data, null, 2));
 
     if (data.error) {
-        tabStack.text(data.error);
-        tabMemory.text(data.error);
+        var stackSections = [];
+
+        showError(data.error, data);
+        var renderedContext = renderErrorContext(data.error_context);
+        if (renderedContext) {
+            stackSections.push(renderedContext);
+        }
+
+        if (Array.isArray(data.problem_stack) && data.problem_stack.length) {
+            stackSections.push('Likely crash frames (fallback processed stack):\n' + renderFallbackStack(data.problem_stack));
+        }
+
+        if (Array.isArray(data.fallback_stack) && data.fallback_stack.length) {
+            stackSections.push('Full fallback stack:\n' + renderFallbackStack(data.fallback_stack));
+        } else {
+            stackSections.push(stackUnavailableMessage);
+        }
+
+        tabStack.text(stackSections.join('\n\n'));
+        tabMemory.text(memoryUnavailableMessage);
         return;
     }
 

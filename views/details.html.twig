@@ -573,7 +573,7 @@
 
 {% if culprit_candidates|length > 0 %}
 <h2>Likely Cause</h2>
-<p class="muted">This heuristic prefers raw stack SourcePawn/JIT chains, then stored stack frames, then the terminal SourceMod console exception.</p>
+<p class="muted">This heuristic prefers raw stack SourcePawn/JIT chains, then explicit native/extension crash sites, then tightly-correlated terminal SourceMod console exceptions.</p>
 {% set primary = culprit_candidates[0] %}
 <div class="well">
     <div class="row">

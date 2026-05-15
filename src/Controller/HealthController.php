@@ -5,6 +5,7 @@ namespace App\Controller;
 use App\Entity\User;
 use App\Runtime\SymbolAdminManager;
 use App\Runtime\SymbolBinaryUpload;
+use App\Runtime\SymbolToolException;
 use App\Runtime\UploadFailureBackoff;
 use App\Runtime\UploadSettings;
 use Doctrine\DBAL\Connection;
@@ -198,14 +199,21 @@ class HealthController extends AbstractController
             $result = SymbolBinaryUpload::storeUploadedBinary($kernel->getProjectDir(), $file);
             UploadFailureBackoff::registerSuccess($kernel->getProjectDir(), $result['module'], $result['identifier']);
             $symbolAdminManager->refreshCaches(false);
+            $message = sprintf('Binary uploaded for %s/%s. ', $result['module'], $result['identifier']);
+            if ($result['degraded']) {
+                $message .= isset($result['warning']) && $result['warning'] !== ''
+                    ? $result['warning'] . '; public symbols were generated via fallback.'
+                    : 'Symbols were generated via nm fallback.';
+            } else {
+                $message .= 'Breakpad symbols are ready.';
+            }
             $this->addFlash(
                 $result['degraded'] ? 'warning' : 'success',
-                $result['degraded']
-                    ? sprintf('Binary uploaded for %s/%s. Symbols were generated via nm fallback.', $result['module'], $result['identifier'])
-                    : sprintf('Binary uploaded for %s/%s. Breakpad symbols are ready.', $result['module'], $result['identifier'])
+                $message
             );
         } catch (\Throwable $e) {
-            $this->addFlash('danger', 'Binary upload failed: ' . $e->getMessage());
+            $context = $e instanceof SymbolToolException ? $e->getContext() : [];
+            $this->addFlash('danger', 'Binary upload failed: ' . ($context['summary'] ?? $e->getMessage()));
         }
 
         return $this->redirectToRoute('health', ['symbols_open' => 1]);

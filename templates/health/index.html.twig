@@ -293,15 +293,17 @@
                 </form>
             </div>
 
-            <form method="post" action="{{ path('health_symbols_upload_binary') }}" enctype="multipart/form-data" class="row g-3 align-items-end">
+            <form method="post" action="{{ path('health_symbols_upload_binary') }}" enctype="multipart/form-data" class="row g-3">
                 <input type="hidden" name="_token" value="{{ csrf_token('health-symbols-upload-binary') }}">
                 <div class="col-lg">
                     <label class="form-label" for="binary-file">Upload binary and generate symbols</label>
                     <input id="binary-file" type="file" name="binary_file" class="form-control" required>
-                    <div class="form-text">Uses <code>dump_syms</code> when possible and falls back to <code>nm</code> for degraded public-symbol output.</div>
                 </div>
-                <div class="col-auto">
+                <div class="col-auto d-flex align-items-end">
                     <button type="submit" class="btn btn-success">Upload binary</button>
+                </div>
+                <div class="col-12">
+                    <div class="form-text">Uses <code>dump_syms</code> when possible and falls back to <code>nm</code> for degraded public-symbol output.</div>
                 </div>
             </form>
         </section>
