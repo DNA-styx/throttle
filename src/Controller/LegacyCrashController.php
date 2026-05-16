@@ -3,6 +3,7 @@
 namespace App\Controller;
 
 use App\Legacy\LegacyBridgeFactory;
+use App\Runtime\CrashSourceLookupManager;
 use App\Runtime\UploadSettings;
 use App\Repository\UserRepository;
 use Doctrine\DBAL\Connection;
@@ -111,6 +112,62 @@ class LegacyCrashController extends AbstractController
     public function carburetorData(Request $request, string $id): Response
     {
         return $this->legacyResponse((new \Throttle\Crash())->carburetor_data($this->legacyBridgeFactory->createHttp($request), $id));
+    }
+
+    #[Route('/{id}/carburetor/source-lookup', name: 'carburetor_source_lookup', methods: ['POST'], requirements: ['id' => '[0-9a-zA-Z]{12}'], priority: -10)]
+    public function carburetorSourceLookup(Request $request, string $id, CrashSourceLookupManager $sourceLookupManager): Response
+    {
+        if (!$this->isCsrfTokenValid('carburetor-source-lookup:'.$id, (string) $request->request->get('_token'))) {
+            return $this->json(['status' => 'error', 'reason' => 'Invalid CSRF token.'], Response::HTTP_FORBIDDEN);
+        }
+
+        $app = $this->legacyBridgeFactory->createHttp($request);
+        if ($app['user'] === null) {
+            return $this->json(['status' => 'error', 'reason' => 'Authentication required.'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        $ownerId = $this->connection->fetchOne('SELECT owner_id FROM crash WHERE id = ?', [$id]);
+        if ($ownerId === false) {
+            return $this->json(['status' => 'error', 'reason' => 'Crash not found.'], Response::HTTP_NOT_FOUND);
+        }
+
+        $canManage = $app['user']['admin'] || ($ownerId !== null && in_array((int) $ownerId, $app['user']['owner_ids'], true));
+        if (!$canManage) {
+            return $this->json(['status' => 'error', 'reason' => 'Forbidden.'], Response::HTTP_FORBIDDEN);
+        }
+
+        $action = (string) $request->request->get('action', 'lookup');
+
+        try {
+            $payload = [
+                'module' => $request->request->get('module'),
+                'symbol' => $request->request->get('symbol'),
+                'source_type' => $request->request->get('source_type'),
+                'github_repo_url' => $request->request->get('github_repo_url'),
+                'github_ref' => $request->request->get('github_ref'),
+                'github_pat' => $request->request->get('github_pat'),
+                'local_root' => $request->request->get('local_root'),
+                'reload' => $request->request->getBoolean('reload'),
+            ];
+
+            $result = match ($action) {
+                'load_cached' => $sourceLookupManager->describeForCrash($id, $payload, $app['user']['admin']),
+                'lookup', 'reload' => $sourceLookupManager->lookupForCrash($id, $payload, true, $app['user']['admin']),
+                default => throw new \InvalidArgumentException('Unsupported source lookup action.'),
+            };
+
+            return $this->json($result);
+        } catch (\Throwable $e) {
+            $message = $e->getMessage();
+            if (str_contains(mb_strtolower($message), 'raw.githubusercontent.com') && str_contains(mb_strtolower($message), '404')) {
+                $message = 'Source not found in the selected repository.';
+            }
+
+            return $this->json([
+                'status' => 'error',
+                'reason' => $message,
+            ], $action === 'load_cached' ? Response::HTTP_BAD_REQUEST : Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
     }
 
     #[Route('/{id}/reprocess', name: 'reprocess', methods: ['POST'], requirements: ['id' => '[0-9a-zA-Z]{12}'], priority: -10)]

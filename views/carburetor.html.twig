@@ -8,6 +8,160 @@
     <a class="btn btn-default pull-left" href="{{ path('details', {'id': id}) }}"><i class="icon-chevron-left"></i> Back to Details</a>
     <a class="btn btn-default pull-right" href="{{ path('view', {'id': id}) }}">Even More Raw <i class="icon-chevron-right"></i></a>
 </div>
+<style>
+    .raw-stack-shell { position: relative; }
+    .raw-stack-output { margin-top: 0; padding-right: 72px; }
+    .raw-source-anchor {
+        position: absolute;
+        right: 8px;
+        z-index: 2;
+    }
+    .raw-source-anchor .btn {
+        width: 24px;
+        height: 24px;
+        padding: 0;
+        line-height: 1.2;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .raw-source-anchor .btn.raw-source-button-cached {
+        box-shadow: inset 0 0 0 1px #3abf7a;
+    }
+    .raw-source-panel {
+        position: absolute;
+        z-index: 4;
+        width: min(560px, calc(100% - 64px));
+        padding: 12px;
+        border: 1px solid #303b4a;
+        border-radius: 4px;
+        background: #fff;
+        box-shadow: 0 10px 26px rgba(0, 0, 0, 0.25);
+    }
+    .raw-source-panel .nav-tabs {
+        margin-bottom: 10px;
+    }
+    .raw-source-panel .tab-content {
+        overflow: hidden;
+    }
+    .raw-source-result,
+    .raw-source-state,
+    .raw-source-find-status { margin-top: 10px; }
+    .raw-source-snippet { margin-top: 8px; max-height: 320px; overflow: auto; margin-bottom: 0; }
+    .raw-source-note { margin-bottom: 0; }
+    .raw-source-header { margin-bottom: 10px; }
+    .raw-source-header-top {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 8px;
+    }
+    .raw-source-header code {
+        display: inline-block;
+        max-width: 100%;
+        white-space: normal;
+        word-break: break-word;
+    }
+    .raw-source-meta {
+        margin-top: 8px;
+        margin-bottom: 8px;
+    }
+    .raw-source-fields .form-group { margin-bottom: 10px; }
+    .raw-source-empty {
+        padding: 10px 12px;
+        border: 1px dashed #3a4657;
+        border-radius: 4px;
+    }
+    .raw-source-close-x {
+        border: 0;
+        background: transparent;
+        color: inherit;
+        opacity: 0.7;
+        padding: 0 4px;
+        line-height: 1;
+        font-size: 18px;
+    }
+    .raw-source-close-x:hover,
+    .raw-source-close-x:focus {
+        opacity: 1;
+        text-decoration: none;
+    }
+    .raw-source-loading {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.04);
+    }
+    .raw-source-loading-spinner {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        border: 2px solid rgba(255, 255, 255, 0.2);
+        border-top-color: #55a8ff;
+        animation: raw-source-spin 0.8s linear infinite;
+        flex: 0 0 auto;
+    }
+    .raw-source-snippet-rendered {
+        margin-top: 8px;
+        margin-bottom: 0;
+        padding: 0;
+        border: 1px solid #303b4a;
+        border-radius: 4px;
+        overflow: auto;
+        background: #111821;
+        font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+        font-size: 12px;
+        line-height: 1.5;
+    }
+    .raw-source-snippet-line {
+        white-space: pre;
+        padding: 0 10px;
+    }
+    .raw-source-snippet-line.is-focus {
+        background: rgba(58, 191, 122, 0.24);
+    }
+    .raw-source-diagnostics-toggle {
+        margin-top: 10px;
+    }
+    @keyframes raw-source-spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+    body.theme-dark .raw-source-panel {
+        background: #1a2330;
+        border-color: #303b4a;
+        color: #d7dde6;
+    }
+    body.theme-dark .raw-source-empty {
+        border-color: #415066;
+        background: rgba(255, 255, 255, 0.02);
+    }
+    body.theme-dark .raw-source-loading {
+        background: rgba(255, 255, 255, 0.03);
+    }
+    body.theme-dark .raw-source-panel label,
+    body.theme-dark .raw-source-panel .help-block,
+    body.theme-dark .raw-source-panel .checkbox,
+    body.theme-dark .raw-source-panel .checkbox label {
+        color: #d7dde6;
+    }
+    body.theme-dark .raw-source-panel .nav-tabs > li > a {
+        color: #cbd4de;
+    }
+    body.theme-dark .raw-source-panel .nav-tabs > li.active > a,
+    body.theme-dark .raw-source-panel .nav-tabs > li.active > a:hover,
+    body.theme-dark .raw-source-panel .nav-tabs > li.active > a:focus {
+        background: #101722;
+        color: #fff;
+        border-color: #303b4a #303b4a transparent;
+    }
+    body.theme-dark .raw-source-panel code {
+        background: #0d131a;
+        color: #d8e7ff;
+    }
+</style>
 <div id="loading" class="progress" style="background-color: #fff; border: 1px solid #ccc; height: 40px;"><div class="progress-bar" style="width: 0%"></div></div>
 <div id="content" class="hidden">
     <div id="carburetor-error" class="alert alert-danger hidden" style="white-space: pre-wrap;"></div>
@@ -17,7 +171,11 @@
         <li><a href="#tab-raw" data-toggle="tab">Raw</a></li>
     </ul>
     <div class="tab-content">
-        <pre class="tab-pane active" id="tab-stack"></pre>
+        <div class="tab-pane active" id="tab-stack">
+            <div id="stack-shell" class="raw-stack-shell">
+                <pre id="tab-stack-text" class="raw-stack-output"></pre>
+            </div>
+        </div>
         <pre class="tab-pane" id="tab-memory"></pre>
         <pre class="tab-pane" id="tab-raw"></pre>
     </div>
@@ -25,19 +183,25 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ legacy_app.request.baseUrl }}/js/carburetor-analyze.js"></script>
+<script src="{{ legacy_app.request.baseUrl }}/js/carburetor-analyze.js?v=20260515-source-lookup-cache-v1"></script>
 <script src="{{ legacy_app.request.baseUrl }}/js/carburetor-memory.js"></script>
 <script type="application/javascript">
 var loading = $('#loading');
 var progress = $('#loading .progress-bar');
 var content = $('#content');
 
-var tabStack = $('#tab-stack');
+var tabStack = $('#tab-stack-text');
 var tabMemory = $('#tab-memory');
 var tabRaw = $('#tab-raw');
 var errorBox = $('#carburetor-error');
+var stackShell = $('#stack-shell');
 var stackUnavailableMessage = 'Stack unavailable because carburetor crashed.';
 var memoryUnavailableMessage = 'Memory view unavailable because carburetor crashed.';
+var sourceLookupEnabled = {{ source_lookup_enabled ? 'true' : 'false' }};
+var sourceLookupLocalAllowed = {{ source_lookup_local_allowed ? 'true' : 'false' }};
+var sourceLookupUrl = '{{ path('carburetor_source_lookup', { id: id }) | escape('js') }}';
+var sourceLookupToken = '{{ csrf_token('carburetor-source-lookup:' ~ id) | escape('js') }}';
+var sourceLookupModules = {};
 
 function showError(message, data) {
     var lines = [message];
@@ -89,6 +253,527 @@ function renderErrorContext(context) {
     return parts.join('\n');
 }
 
+function normalizeFrameLabel(frame) {
+    if (frame.rendered) {
+        return frame.rendered;
+    }
+
+    var fallback = [normalizeLookupValue(frame.module), normalizeLookupValue(frame.function)].filter(Boolean).join('!');
+    return fallback || '[unknown frame]';
+}
+
+function lookupModuleKey(value) {
+    value = basenameOnly(value);
+    return value ? value.toLowerCase() : '';
+}
+
+function normalizeLookupValue(value) {
+    if (value === null || typeof value === 'undefined') {
+        return '';
+    }
+
+    if (typeof value === 'string' || typeof value === 'number') {
+        return String(value).trim();
+    }
+
+    if (typeof value === 'object') {
+        var preferred = ['rendered', 'name', 'function', 'code_file', 'debug_file', 'file', 'filename', 'module', 'path'];
+        for (var i = 0; i < preferred.length; ++i) {
+            var candidate = value[preferred[i]];
+            if (typeof candidate === 'string' && candidate.trim() !== '') {
+                return candidate.trim();
+            }
+        }
+    }
+
+    return '';
+}
+
+function basenameOnly(value) {
+    value = normalizeLookupValue(value);
+    if (!value) {
+        return '';
+    }
+
+    return value.split(/[\\/]/).pop();
+}
+
+function parseFrameSymbol(label) {
+    if (!label) {
+        return { module: '', symbol: '' };
+    }
+
+    var bang = label.indexOf('!');
+    if (bang === -1) {
+        return { module: '', symbol: label };
+    }
+
+    return {
+        module: label.substring(0, bang),
+        symbol: label.substring(bang + 1)
+    };
+}
+
+function buildLookupFrames(data) {
+    if (data.error) {
+        var fallback = Array.isArray(data.problem_stack) && data.problem_stack.length ? data.problem_stack : (Array.isArray(data.fallback_stack) ? data.fallback_stack : []);
+        return fallback.map(function(frame, index) {
+            var runtimeModule = normalizeLookupValue(frame.module);
+            var functionName = normalizeLookupValue(frame.function);
+            var label = frame.rendered || [runtimeModule, functionName].filter(Boolean).join('!');
+            var parsed = parseFrameSymbol(label);
+            var moduleBasename = parsed.module ? basenameOnly(parsed.module) : (basenameOnly(runtimeModule) || runtimeModule);
+
+            return {
+                threadIndex: 0,
+                frameIndex: typeof frame.frame !== 'undefined' ? frame.frame : index,
+                label: '#' + (typeof frame.frame !== 'undefined' ? frame.frame : index) + ' ' + label,
+                runtimeModule: runtimeModule || parsed.module || moduleBasename,
+                moduleBasename: moduleBasename,
+                symbol: functionName || parsed.symbol,
+            };
+        });
+    }
+
+    if (!Array.isArray(data.threads) || !data.threads.length) {
+        return [];
+    }
+
+    var threadIndex = (typeof data.requesting_thread !== 'undefined' && data.requesting_thread !== null && data.requesting_thread >= 0)
+        ? data.requesting_thread
+        : 0;
+    var thread = data.threads[threadIndex] || [];
+
+    return thread.map(function(frame, index) {
+        var label = normalizeFrameLabel(frame);
+        var parsed = parseFrameSymbol(label);
+
+        return {
+            threadIndex: threadIndex,
+            frameIndex: index,
+            label: '#' + index + ' ' + label,
+            runtimeModule: normalizeLookupValue(frame.module) || parsed.module || basenameOnly(frame.module),
+            moduleBasename: parsed.module ? basenameOnly(parsed.module) : (basenameOnly(frame.module) || normalizeLookupValue(frame.module)),
+            symbol: normalizeLookupValue(frame.function) || parsed.symbol || label
+        };
+    });
+}
+
+function buildLookupState(frame) {
+    var key = lookupModuleKey(frame.moduleBasename || frame.runtimeModule);
+    var existing = key && sourceLookupModules[key] ? sourceLookupModules[key] : null;
+
+    return $.extend({
+        module_basename: frame.moduleBasename || basenameOnly(frame.runtimeModule),
+        module_identifier: null,
+        has_cache: false,
+        has_mapping: false
+    }, existing || {});
+}
+
+function updateSourceButtonState(button, moduleState) {
+    var hasCache = !!(moduleState && moduleState.has_cache);
+    button.toggleClass('raw-source-button-cached', hasCache);
+    button.attr('title', hasCache ? 'View source' : 'Find source');
+    button.tooltip('fixTitle');
+}
+
+function switchLookupTab(panel, tabName) {
+    panel.find('.raw-source-tab').removeClass('active');
+    panel.find('.raw-source-tab-pane').addClass('hidden');
+    panel.find('.raw-source-tab[data-tab="' + tabName + '"]').addClass('active');
+    panel.find('.raw-source-tab-pane[data-tab="' + tabName + '"]').removeClass('hidden');
+}
+
+function buildLookupPanel(frame, moduleState) {
+    var panel = $('<div class="raw-source-panel hidden"></div>');
+    var header = $('<div class="raw-source-header"></div>').appendTo(panel);
+    var headerTop = $('<div class="raw-source-header-top"></div>').appendTo(header);
+    $('<div></div>').append(
+        document.createTextNode('Source for '),
+        $('<code></code>').text(moduleState.module_basename || frame.moduleBasename || '[unknown module]')
+    ).appendTo(headerTop);
+    $('<button type="button" class="raw-source-close-x" aria-label="Close" title="Close"><i class="icon-remove"></i></button>').appendTo(headerTop);
+    $('<div style="margin-top: 4px;"></div>').append(
+        document.createTextNode('Symbol: '),
+        $('<code></code>').text(frame.symbol || '[unknown symbol]')
+    ).appendTo(header);
+    $('<div class="raw-source-meta text-muted"></div>').appendTo(header);
+
+    var tabs = $('<ul class="nav nav-tabs"></ul>').appendTo(panel);
+    $('<li class="raw-source-tab" data-tab="source"><a href="#">Source</a></li>').appendTo(tabs);
+    $('<li class="raw-source-tab" data-tab="find"><a href="#">Find</a></li>').appendTo(tabs);
+
+    var content = $('<div class="tab-content"></div>').appendTo(panel);
+    $('<div class="raw-source-tab-pane" data-tab="source"><div class="raw-source-state"></div></div>').appendTo(content);
+
+    var findPane = $('<div class="raw-source-tab-pane" data-tab="find"></div>').appendTo(content);
+    var fields = $('<div class="raw-source-fields"></div>').appendTo(findPane);
+    $('<div class="form-group"><label>Source</label></div>').append(
+        $('<select class="form-control input-sm raw-source-mode"></select>')
+            .append('<option value="github">GitHub</option>')
+            .append('<option value="saved">Saved mapping</option>')
+            .append(sourceLookupLocalAllowed ? '<option value="local">Local path</option>' : '')
+    ).appendTo(fields);
+    $('<div class="form-group raw-source-github hidden"><label>GitHub repository</label><input type="text" class="form-control input-sm raw-source-input-repo" placeholder="https://github.com/owner/repo or owner/repo"></div>').appendTo(fields);
+    $('<div class="form-group raw-source-github hidden"><label>Ref</label><input type="text" class="form-control input-sm raw-source-input-ref" placeholder="branch, tag, commit or HEAD"></div>').appendTo(fields);
+    $('<div class="form-group raw-source-github hidden"><label>GitHub PAT</label><input type="password" class="form-control input-sm raw-source-input-pat" placeholder="Optional for private repositories"></div>').appendTo(fields);
+    if (sourceLookupLocalAllowed) {
+        $('<div class="form-group raw-source-local hidden"><label>Local source path</label><input type="text" class="form-control input-sm raw-source-input-local" placeholder="/srv/src/project"></div>').appendTo(fields);
+    }
+    $('<div class="checkbox raw-source-github hidden"><label><input type="checkbox" class="raw-source-input-reload"> Reload source cache</label></div>').appendTo(fields);
+    $('<div class="btn-group btn-group-sm"><button type="button" class="btn btn-primary raw-source-submit">Lookup</button><button type="button" class="btn btn-default raw-source-cancel">Close</button></div>').appendTo(fields);
+    $('<div class="raw-source-find-status hidden"></div>').appendTo(findPane);
+
+    panel.find('.raw-source-tab a').on('click', function(e) {
+        e.preventDefault();
+        switchLookupTab(panel, $(this).parent().data('tab'));
+    });
+
+    switchLookupTab(panel, moduleState.has_cache ? 'source' : 'find');
+
+    return panel;
+}
+
+function updateLookupMode(panel) {
+    var mode = panel.find('.raw-source-mode').val();
+    panel.find('.raw-source-github').toggleClass('hidden', mode !== 'github');
+    panel.find('.raw-source-local').toggleClass('hidden', mode !== 'local');
+}
+
+function renderLookupState(panel, result) {
+    var sourceState = panel.find('.raw-source-state');
+    var findStatus = panel.find('.raw-source-find-status');
+    var meta = panel.find('.raw-source-meta');
+    sourceState.empty();
+    findStatus.empty().addClass('hidden');
+    meta.empty();
+
+    if (result.module_identifier) {
+        $('<div></div>').text('Identifier: ' + result.module_identifier).appendTo(meta);
+    }
+
+    if (result.resolved_repo || result.resolved_ref) {
+        $('<div></div>').text('Lookup target: ' + (result.resolved_repo || '[not set]') + ' @ ' + (result.resolved_ref || 'master')).appendTo(meta);
+    }
+    if (typeof result.cache_hit !== 'undefined') {
+        $('<div></div>').text('Cache: ' + (result.cache_hit ? 'hit' : 'miss')).appendTo(meta);
+    }
+
+    var lastLookupRequest = panel.data('lastLookupRequest') || {};
+    panel.find('.raw-source-mode').val(result.input_source_type || (result.mapping && result.mapping.source_type) || lastLookupRequest.source_type || 'github');
+    panel.find('.raw-source-input-repo').val(result.input_repo || (result.mapping && result.mapping.github_repo_url) || result.resolved_repo || lastLookupRequest.github_repo_url || '');
+    panel.find('.raw-source-input-ref').val(result.input_ref || (result.mapping && result.mapping.github_ref) || result.resolved_ref || lastLookupRequest.github_ref || '');
+    panel.find('.raw-source-input-local').val(result.input_local_root || (result.mapping && result.mapping.local_root) || lastLookupRequest.local_root || '');
+    updateLookupMode(panel);
+
+    if (result.cache_hit && result.file) {
+        var header = $('<p class="raw-source-note"></p>').appendTo(sourceState);
+        var qualityLabel = 'Approximate';
+        var qualityClass = 'label-warning';
+        var matchQuality = result.match_quality || 'approximate';
+        if (matchQuality === 'verified') {
+            qualityLabel = 'Verified';
+            qualityClass = 'label-success';
+        } else if (matchQuality === 'declaration') {
+            qualityLabel = 'Declaration only';
+            qualityClass = 'label-warning';
+        }
+
+        $('<span class="label"></span>')
+            .addClass(qualityClass)
+            .text(qualityLabel)
+            .appendTo(header);
+        header.append(' ');
+        $('<code></code>').text(result.file + ':' + result.line_start).appendTo(header);
+        if (result.github_url) {
+            header.append(' ');
+            $('<a target="_blank" rel="noopener noreferrer"></a>').attr('href', result.github_url).text('Open on GitHub').appendTo(header);
+        }
+
+        if (result.warning) {
+            $('<div class="alert alert-warning" style="margin-top: 8px; margin-bottom: 8px;"></div>').text(result.warning).appendTo(sourceState);
+        }
+
+        if (result.snippet) {
+            renderSnippet(sourceState, result.snippet);
+        }
+
+        renderLookupDiagnostics(sourceState, result, true);
+    } else {
+        var empty = $('<div class="raw-source-empty"></div>').appendTo(sourceState);
+        $('<p class="raw-source-note"></p>').text('No cached source result exists for this module identifier yet.').appendTo(empty);
+        if (result.summary_reason || result.reason) {
+            $('<p class="help-block" style="margin-top: 8px; margin-bottom: 0;"></p>').text(result.summary_reason || result.reason).appendTo(empty);
+        }
+        renderLookupDiagnostics(empty, result, false);
+    }
+
+    if (result.status === 'no_match' || result.status === 'error') {
+        $('<div class="alert alert-danger raw-source-note"></div>').text(result.summary_reason || result.reason || 'Source lookup failed.').appendTo(findStatus);
+        renderLookupDiagnostics(findStatus, result, false);
+        findStatus.removeClass('hidden');
+    } else if (result.status === 'ok' && result.mapping_saved) {
+        $('<div class="alert alert-success raw-source-note"></div>').text('Source mapping and cached result were updated.').appendTo(findStatus);
+        renderLookupDiagnostics(findStatus, result, false);
+        findStatus.removeClass('hidden');
+    }
+}
+
+function renderLookupDiagnostics(container, result, compact) {
+    var diagnostics = [];
+    if (result.reason && result.summary_reason && result.reason !== result.summary_reason) {
+        diagnostics.push('Details:\n' + result.reason);
+    }
+    if (Array.isArray(result.provider_trace) && result.provider_trace.length) {
+        diagnostics.push('Provider trace:\n- ' + result.provider_trace.join('\n- '));
+    }
+    if (Array.isArray(result.rejection_reasons) && result.rejection_reasons.length) {
+        diagnostics.push('Rejected candidates:\n- ' + result.rejection_reasons.join('\n- '));
+    }
+    if (Array.isArray(result.candidate_paths) && result.candidate_paths.length) {
+        diagnostics.push('Top candidates:\n- ' + result.candidate_paths.slice(0, 10).join('\n- '));
+    }
+
+    if (!diagnostics.length) {
+        return;
+    }
+
+    var wrapper = $('<details class="raw-source-diagnostics-toggle"></details>');
+    $('<summary></summary>').text('Diagnostics').appendTo(wrapper);
+    $('<pre class="raw-source-snippet" style="margin-top: 10px;"></pre>')
+        .text(diagnostics.join('\n\n'))
+        .appendTo(wrapper);
+    container.append(wrapper);
+}
+
+function renderSnippet(container, snippet) {
+    var wrapper = $('<div class="raw-source-snippet raw-source-snippet-rendered"></div>');
+    var focusIndex = -1;
+    var currentIndex = 0;
+    String(snippet || '').split('\n').forEach(function(line) {
+        var focus = false;
+        if (line.indexOf('> ') === 0) {
+            focus = true;
+            line = '  ' + line.substring(2);
+            focusIndex = currentIndex;
+        }
+
+        $('<div class="raw-source-snippet-line"></div>')
+            .toggleClass('is-focus', focus)
+            .text(line)
+            .appendTo(wrapper);
+        currentIndex += 1;
+    });
+    container.append(wrapper);
+    var focusLine = wrapper.find('.raw-source-snippet-line.is-focus').first();
+    if (focusLine.length && focusIndex >= 0) {
+        window.requestAnimationFrame(function() {
+            var lineHeight = focusLine.outerHeight() || 0;
+            var topLineOffset = Math.max(0, focusIndex - 2);
+            wrapper.scrollTop(topLineOffset * lineHeight);
+        });
+    }
+}
+
+function buildLookupError(xhr, fallbackStatus) {
+    var result = null;
+    if (xhr && xhr.responseJSON && typeof xhr.responseJSON === 'object') {
+        result = xhr.responseJSON;
+    }
+    try {
+        if (result === null && xhr && typeof xhr.responseText === 'string' && xhr.responseText !== '') {
+            result = JSON.parse(xhr.responseText);
+        }
+    } catch (e) {}
+
+    if (result !== null) {
+        return result;
+    }
+
+    var fallbackMessage = 'Source lookup request failed.';
+    if (xhr && xhr.status) {
+        fallbackMessage += ' HTTP ' + xhr.status + '.';
+    }
+    if (xhr && typeof xhr.responseText === 'string' && xhr.responseText.trim() !== '') {
+        var compact = xhr.responseText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        if (compact !== '') {
+            if (compact.toLowerCase().indexOf('raw.githubusercontent.com') !== -1 && compact.indexOf('404') !== -1) {
+                compact = 'Source not found in the selected repository.';
+            }
+            fallbackMessage += ' ' + compact.substring(0, 280);
+        }
+    }
+
+    return { status: fallbackStatus || 'error', reason: fallbackMessage };
+}
+
+function sendLookupRequest(frame, panel, action, onSuccess) {
+    var mode = panel.find('.raw-source-mode').val();
+    var currentLookupRequest = {
+        source_type: mode,
+        github_repo_url: panel.find('.raw-source-input-repo').val() || '',
+        github_ref: panel.find('.raw-source-input-ref').val() || '',
+        local_root: panel.find('.raw-source-input-local').val() || ''
+    };
+    panel.data('lastLookupRequest', currentLookupRequest);
+    var payload = new FormData();
+    payload.append('_token', sourceLookupToken);
+    payload.append('action', action);
+    payload.append('module', frame.runtimeModule || frame.moduleBasename || '');
+    payload.append('symbol', frame.symbol || frame.label || '');
+    payload.append('source_type', mode);
+    payload.append('github_repo_url', currentLookupRequest.github_repo_url);
+    payload.append('github_ref', currentLookupRequest.github_ref);
+    payload.append('github_pat', panel.find('.raw-source-input-pat').val() || '');
+    payload.append('local_root', currentLookupRequest.local_root);
+    payload.append('reload', panel.find('.raw-source-input-reload').is(':checked') ? '1' : '0');
+
+    if (action === 'lookup') {
+        var findStatus = panel.find('.raw-source-find-status');
+        findStatus.removeClass('hidden').html('<div class="raw-source-loading"><span class="raw-source-loading-spinner"></span><span>Looking up source...</span></div>');
+    } else {
+        panel.find('.raw-source-state').html('<div class="raw-source-loading"><span class="raw-source-loading-spinner"></span><span>Loading cached source result...</span></div>');
+    }
+
+    $.ajax({
+        url: sourceLookupUrl,
+        method: 'POST',
+        data: payload,
+        processData: false,
+        contentType: false
+    }).done(function(result) {
+        onSuccess(result);
+    }).fail(function(xhr) {
+        onSuccess(buildLookupError(xhr, action === 'load_cached' ? 'empty' : 'error'));
+    });
+}
+
+function updateModuleStateFromResult(frame, button, result) {
+    var key = lookupModuleKey(result.module_basename || frame.moduleBasename || frame.runtimeModule);
+    if (!key) {
+        return buildLookupState(frame);
+    }
+
+    sourceLookupModules[key] = $.extend({}, sourceLookupModules[key] || {}, {
+        module_basename: result.module_basename || frame.moduleBasename || basenameOnly(frame.runtimeModule),
+        module_identifier: typeof result.module_identifier !== 'undefined' ? result.module_identifier : (sourceLookupModules[key] ? sourceLookupModules[key].module_identifier : null),
+        has_cache: !!result.cache_hit,
+        has_mapping: !!result.has_mapping
+    });
+
+    updateSourceButtonState(button, sourceLookupModules[key]);
+
+    return $.extend({}, sourceLookupModules[key]);
+}
+
+function renderSourceLookupAnchors(frames) {
+    stackShell.find('.raw-source-anchor, .raw-source-panel').remove();
+    if (!sourceLookupEnabled || !Array.isArray(frames) || !frames.length) {
+        return;
+    }
+
+    var lineHeight = parseFloat(tabStack.css('line-height'));
+    if (!lineHeight || isNaN(lineHeight)) {
+        lineHeight = 20;
+    }
+
+    frames.forEach(function(frame) {
+        if (!frame.moduleBasename && !frame.symbol) {
+            return;
+        }
+
+        var top = parseFloat(tabStack.css('padding-top') || '0') + (frame.startLine * lineHeight);
+        var anchor = $('<div class="raw-source-anchor"></div>').css('top', top + 'px').appendTo(stackShell);
+        var moduleState = buildLookupState(frame);
+        var button = $('<button type="button" class="btn btn-default btn-xs" title="Find source" data-toggle="tooltip" data-container="body"><i class="icon-code"></i></button>').appendTo(anchor);
+        updateSourceButtonState(button, moduleState);
+        var panel = buildLookupPanel(frame, moduleState).appendTo(stackShell);
+        panel.find('.raw-source-mode').val(moduleState.has_mapping ? 'saved' : 'github');
+        updateLookupMode(panel);
+
+        button.on('click', function(e) {
+            e.preventDefault();
+            moduleState = buildLookupState(frame);
+            updateSourceButtonState(button, moduleState);
+            stackShell.find('.raw-source-panel').not(panel).addClass('hidden');
+            var anchorTop = anchor.position().top || top;
+            var anchorLeft = anchor.position().left || 0;
+            var panelWidth = panel.outerWidth() || 560;
+            var left = Math.max(12, Math.min(anchorLeft - panelWidth + 24, stackShell.width() - panelWidth - 8));
+            panel.css({
+                top: Math.max(0, anchorTop - 2) + 'px',
+                left: left + 'px'
+            }).removeClass('hidden');
+            switchLookupTab(panel, moduleState.has_cache ? 'source' : 'find');
+            updateLookupMode(panel);
+            sendLookupRequest(frame, panel, 'load_cached', function(result) {
+                renderLookupState(panel, result);
+                moduleState = updateModuleStateFromResult(frame, button, result);
+                switchLookupTab(panel, result.cache_hit ? 'source' : 'find');
+            });
+        });
+
+        panel.find('.raw-source-mode').on('change', function() {
+            updateLookupMode(panel);
+        });
+
+        panel.find('.raw-source-cancel').on('click', function() {
+            panel.addClass('hidden');
+        });
+
+        panel.find('.raw-source-close-x').on('click', function() {
+            panel.addClass('hidden');
+        });
+
+        panel.find('.raw-source-submit').on('click', function() {
+            sendLookupRequest(frame, panel, 'lookup', function(result) {
+                renderLookupState(panel, result);
+                moduleState = updateModuleStateFromResult(frame, button, result);
+                if (result.status === 'ok' && result.cache_hit) {
+                    switchLookupTab(panel, 'source');
+                } else {
+                    switchLookupTab(panel, 'find');
+                }
+            });
+        });
+    });
+
+    stackShell.find('.raw-source-anchor [data-toggle="tooltip"]').tooltip();
+}
+
+function renderStackWithCompatibility(data) {
+    if (typeof analyzeToText === 'function') {
+        var rendered = analyzeToText(data);
+        tabStack.text(rendered.text);
+        return rendered.frames.map(function(frame) {
+            var runtimeModule = normalizeLookupValue(frame.module) || parseFrameSymbol(frame.label).module || '';
+            var moduleBasename = basenameOnly(runtimeModule) || runtimeModule;
+            return {
+                threadIndex: frame.threadIndex,
+                frameIndex: frame.frameIndex,
+                startLine: frame.startLine,
+                label: '#' + frame.frameIndex + ' ' + frame.label,
+                runtimeModule: runtimeModule,
+                moduleBasename: moduleBasename,
+                symbol: normalizeLookupValue(frame.function) || parseFrameSymbol(frame.label).symbol || frame.label
+            };
+        });
+    }
+
+    var lines = [];
+    console.log = function(s) {
+        lines.push(String(s));
+    };
+    analyze(data);
+    tabStack.text(lines.join('\n'));
+
+    return buildLookupFrames(data).map(function(frame) {
+        frame.startLine = frame.frameIndex * 20;
+        return frame;
+    });
+}
+
 var oReq = new XMLHttpRequest();
 oReq.open('GET', '{{ path('carburetor_data', { id: id, scan: scan, symbols: symbols }) | escape('js') }}', true);
 
@@ -124,6 +809,9 @@ oReq.onload = function(oEvent) {
 
     loading.remove();
     content.removeClass('hidden');
+    sourceLookupModules = (data && typeof data.source_lookup_modules === 'object' && data.source_lookup_modules !== null)
+        ? data.source_lookup_modules
+        : {};
 
     $('#content .nav-tabs a').click(function(e) {
         e.preventDefault();
@@ -158,10 +846,8 @@ oReq.onload = function(oEvent) {
 
     const original = console.log;
     try {
-        console.log = function(s) {
-            tabStack.append(document.createTextNode(s + '\n'));
-        };
-        analyze(data);
+        var sourceFrames = renderStackWithCompatibility(data);
+        renderSourceLookupAnchors(sourceFrames);
 
         console.log = function(s) {
             tabMemory.append(document.createTextNode(s + '\n'));
@@ -178,4 +864,3 @@ oReq.onload = function(oEvent) {
 oReq.send(null);
 </script>
 {% endblock %}
-

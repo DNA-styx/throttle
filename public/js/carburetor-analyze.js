@@ -44,7 +44,29 @@ const FRAME_TRUST = [
 	'instruction pointer in context',
 ];
 
-function print_registers(indent, registers) {
+function normalize_frame_value(value) {
+	if (value === null || value === undefined) {
+		return '';
+	}
+
+	if (typeof value === 'string' || typeof value === 'number') {
+		return String(value).trim();
+	}
+
+	if (typeof value === 'object') {
+		const preferred = ['rendered', 'name', 'function', 'code_file', 'debug_file', 'file', 'filename', 'module', 'path'];
+		for (let i = 0; i < preferred.length; ++i) {
+			const candidate = value[preferred[i]];
+			if (typeof candidate === 'string' && candidate.trim() !== '') {
+				return candidate.trim();
+			}
+		}
+	}
+
+	return '';
+}
+
+function collect_register_lines(indent, registers) {
 	let order = [
 		"eip", "esp", "ebp", "ebx",
 		"esi", "edi", "eax", "ecx",
@@ -60,6 +82,7 @@ function print_registers(indent, registers) {
 	let printed = {};
 	let register_count = 0;
 	let line = indent;
+	let lines = [];
 
 	for (let i = 0; i < 2; ++i) {
 		for (let register in source) {
@@ -78,7 +101,7 @@ function print_registers(indent, registers) {
 			if (register_count < 4) {
 				line += '  ';
 			} else {
-				console.log(line);
+				lines.push(line);
 
 				register_count = 0;
 				line = indent;
@@ -91,16 +114,25 @@ function print_registers(indent, registers) {
 	}
 
 	if (register_count > 0) {
-		console.log(line);
+		lines.push(line);
 	}
+
+	return lines;
 }
 
-function print_stack(indent, base, memory) {
+function print_registers(indent, registers) {
+	collect_register_lines(indent, registers).forEach(function(line) {
+		console.log(line);
+	});
+}
+
+function collect_stack_lines(indent, base, memory) {
 	const kAddressBytes = 4;
 	const kHeader = false;
 	const kRowBytes = 16;
 	const kChunkBytes = 8;
 	const kChunkText = false;
+	let lines = [];
 
 	if (kHeader) {
 		let line = indent + ' '.repeat(kAddressBytes * 2) + '  ';
@@ -118,7 +150,7 @@ function print_stack(indent, base, memory) {
 			}
 		}
 		line += '  ' + string + ' ';
-		console.log(line);
+		lines.push(line);
 	}
 
 	for (let offset = 0; offset < memory.length;) {
@@ -147,13 +179,22 @@ function print_stack(indent, base, memory) {
 
 		line += ' ' + string;
 
-		console.log(line);
+		lines.push(line);
 	}
+
+	return lines;
 }
 
-function print_instructions(indent, ip, instructions) {
+function print_stack(indent, base, memory) {
+	collect_stack_lines(indent, base, memory).forEach(function(line) {
+		console.log(line);
+	});
+}
+
+function collect_instruction_lines(indent, ip, instructions) {
 	let bytes_per_line = 0;
 	let crash_opcode = -1;
+	let lines = [];
 
 	for (let i = 0; i < instructions.length; ++i) {
 		if (ip >= instructions[i].offset && (i === (instructions.length - 1) || ip < instructions[i + 1].offset)) {
@@ -202,18 +243,27 @@ function print_instructions(indent, ip, instructions) {
 		line += '  ';
 		line += instructions[i].mnemonic;
 
-		console.log(line);
+		lines.push(line);
 	}
+
+	return lines;
 }
 
-function print_thread(i, crashed, thread) {
+function print_instructions(indent, ip, instructions) {
+	collect_instruction_lines(indent, ip, instructions).forEach(function(line) {
+		console.log(line);
+	});
+}
+
+function collect_thread_render(i, crashed, thread) {
 	let title = 'Thread ' + i;
 	if (crashed) {
 		title += ' (crashed)';
 	}
 	title += ':';
 
-	console.log(title);
+	let lines = [title, ''];
+	let frames = [];
 
 	let num_frames = thread.length;
 	/*if (num_frames > 10) {
@@ -225,36 +275,92 @@ function print_thread(i, crashed, thread) {
 
 		const prefix = i.toString().padStart((num_frames - 1).toString().length, ' ') + ': ';
 		const indent = '  ' + ' '.repeat(prefix.length);
+		const startLine = lines.length;
+		const label = '  ' + prefix + frame.rendered;
 
-		console.log('  ' + prefix + frame.rendered);
+		lines.push(label);
+		frames.push({
+			threadIndex: i,
+			frameIndex: i,
+			startLine: startLine,
+			label: frame.rendered,
+			module: normalize_frame_value(frame.module),
+			function: normalize_frame_value(frame.function)
+		});
 
 		if (frame.url) {
-			console.log(indent + frame.url);
+			lines.push(indent + frame.url);
 		}
 
 		if (frame.registers) {
-			//console.log(indent + 'Registers');
-			print_registers(indent, frame.registers);
-			console.log('');
+			lines = lines.concat(collect_register_lines(indent, frame.registers));
+			lines.push('');
 		}
 
 		if (frame.instructions) {
-			//console.log(indent + 'Disassembly');
-			print_instructions(indent, frame.instruction, frame.instructions);
-			console.log('');
+			lines = lines.concat(collect_instruction_lines(indent, frame.instruction, frame.instructions));
+			lines.push('');
 		}
 
 		if (frame.stack) {
-			//console.log(indent + 'Stack Memory');
-			print_stack(indent, frame.registers && frame.registers.esp, base64ToUint8Array(frame.stack));
-			console.log('');
+			lines = lines.concat(collect_stack_lines(indent, frame.registers && frame.registers.esp, base64ToUint8Array(frame.stack)));
+			lines.push('');
 		}
 
-		console.log(indent + 'Found via ' + (FRAME_TRUST[frame.trust] || FRAME_TRUST[0]));
-		console.log('');
-
-		console.log('');
+		lines.push(indent + 'Found via ' + (FRAME_TRUST[frame.trust] || FRAME_TRUST[0]));
+		lines.push('');
+		lines.push('');
 	}
+
+	return { lines: lines, frames: frames };
+}
+
+function print_thread(i, crashed, thread) {
+	const rendered = collect_thread_render(i, crashed, thread);
+	rendered.lines.forEach(function(line) {
+		console.log(line);
+	});
+}
+
+function analyzeToText(data) {
+	let lines = [];
+	let frames = [];
+
+	if (data.crashed) {
+		lines.push(data.crash_reason + ' accessing 0x' + data.crash_address.toString(16));
+		lines.push('');
+	}
+
+	if (typeof data.requesting_thread !== 'undefined' && data.requesting_thread >= 0) {
+		const thread = data.threads[data.requesting_thread];
+		const rendered = collect_thread_render(data.requesting_thread, true, thread);
+		const lineOffset = lines.length;
+		lines = lines.concat(rendered.lines);
+		frames = frames.concat(rendered.frames.map(function(frame) {
+			return {
+				threadIndex: data.requesting_thread,
+				frameIndex: frame.frameIndex,
+				startLine: frame.startLine + lineOffset,
+				label: frame.label,
+				module: frame.module,
+				function: frame.function
+			};
+		}));
+	}
+
+	for (let i = 0; i < data.threads.length; ++i) {
+		if (i === data.requesting_thread) {
+			continue;
+		}
+
+		const thread = data.threads[i];
+		lines = lines.concat(collect_thread_render(i, false, thread).lines);
+	}
+
+	return {
+		text: lines.join('\n'),
+		frames: frames
+	};
 }
 
 function base64ToUint8Array(base64) {
@@ -268,22 +374,7 @@ function base64ToUint8Array(base64) {
 }
 
 function analyze(data) {
-	if (data.crashed) {
-		console.log(data.crash_reason + ' accessing 0x' + data.crash_address.toString(16));
-		console.log('');
-	}
-
-	if (typeof data.requesting_thread !== 'undefined' && data.requesting_thread >= 0) {
-		const thread = data.threads[data.requesting_thread];
-		print_thread(data.requesting_thread, true, thread);
-	}
-
-	for (let i = 0; i < data.threads.length; ++i) {
-		if (i === data.requesting_thread) {
-			continue;
-		}
-
-		const thread = data.threads[i];
-		print_thread(i, false, thread);
-	}
+	analyzeToText(data).text.split('\n').forEach(function(line) {
+		console.log(line);
+	});
 }

@@ -7,7 +7,7 @@ final class UploadSettings
     public const PATH = '/var/upload-settings.json';
 
     /**
-     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int}
+     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int, crash_source_lookup_enabled: bool}
      */
     public static function defaults(): array
     {
@@ -18,11 +18,12 @@ final class UploadSettings
             'upload_failure_backoff_enabled' => true,
             'upload_failure_backoff_threshold' => 3,
             'upload_failure_backoff_ttl' => 3600,
+            'crash_source_lookup_enabled' => false,
         ];
     }
 
     /**
-     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int}
+     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int, crash_source_lookup_enabled: bool}
      */
     public static function load(string $root): array
     {
@@ -69,7 +70,7 @@ final class UploadSettings
     }
 
     /**
-     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int}
+     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int, crash_source_lookup_enabled: bool}
      */
     public static function normalize(array $settings): array
     {
@@ -109,6 +110,9 @@ final class UploadSettings
                 : $defaults['upload_failure_backoff_enabled'],
             'upload_failure_backoff_threshold' => $backoffThreshold,
             'upload_failure_backoff_ttl' => $backoffTtl,
+            'crash_source_lookup_enabled' => array_key_exists('crash_source_lookup_enabled', $settings)
+                ? filter_var($settings['crash_source_lookup_enabled'], FILTER_VALIDATE_BOOL)
+                : $defaults['crash_source_lookup_enabled'],
         ];
     }
 

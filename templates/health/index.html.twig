@@ -68,7 +68,7 @@
             <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
                 <div>
                     <h2 class="h5 mb-1">Upload processing settings</h2>
-                    <div class="text-muted">Runtime settings used only by symbol and binary upload endpoints.</div>
+                    <div class="text-muted">Runtime settings used by symbol uploads, binary uploads, and optional raw source lookup.</div>
                 </div>
                 <span class="badge text-bg-secondary">{{ uploadSettingsSource }}</span>
             </div>
@@ -97,6 +97,11 @@
                         <label class="form-check-label" for="allow-anonymous-minidumps">Allow minidump uploads without a token</label>
                     </div>
                     <div class="form-text">Only controls crash dump uploads sent to <code>MinidumpUrl</code> (<code>/submit</code>). Symbol and binary uploads already require tokens.</div>
+                    <div class="form-check form-switch mt-3">
+                        <input class="form-check-input" type="checkbox" role="switch" id="crash-source-lookup-enabled" name="crash_source_lookup_enabled" value="1"{% if uploadSettings.crash_source_lookup_enabled %} checked{% endif %}>
+                        <label class="form-check-label" for="crash-source-lookup-enabled">Enable native source lookup on Raw crash pages (Experimental)</label>
+                    </div>
+                    <div class="form-text">Adds per-frame source lookup for native stack frames using GitHub code search and targeted file fetches or admin-approved local source roots.</div>
                 </div>
                 <div class="mb-3">
                     <label class="form-label" for="upload-memory-limit">Upload memory limit</label>

@@ -1117,6 +1117,65 @@ class Crash
         return $stack !== array() ? $stack : null;
     }
 
+    /**
+     * @return array<string, array{module_basename: string, module_identifier: ?string, has_cache: bool, has_mapping: bool}>
+     */
+    private static function loadSourceLookupModuleState(Application $app, string $id): array
+    {
+        if (($app['config']['upload-settings']['crash_source_lookup_enabled'] ?? false) !== true) {
+            return array();
+        }
+
+        $rows = $app['db']->executeQuery(
+            'SELECT name, identifier FROM module WHERE crash = ? ORDER BY name',
+            array($id)
+        )->fetchAll();
+
+        if (!is_array($rows) || $rows === array()) {
+            return array();
+        }
+
+        $state = array();
+        $invalidIdentifier = '000000000000000000000000000000000';
+
+        foreach ($rows as $row) {
+            $name = isset($row['name']) ? (string) $row['name'] : '';
+            $identifier = isset($row['identifier']) ? (string) $row['identifier'] : '';
+            $basename = self::getSymbolModuleName($name);
+            if ($basename === '') {
+                continue;
+            }
+
+            $identifier = ($identifier !== '' && $identifier !== $invalidIdentifier) ? $identifier : null;
+            $key = mb_strtolower($basename);
+            if (isset($state[$key]) && $state[$key]['module_identifier'] !== null) {
+                continue;
+            }
+
+            $hasMapping = false;
+            $hasCache = false;
+            if ($identifier !== null) {
+                $hasMapping = (bool) $app['db']->executeQuery(
+                    'SELECT 1 FROM source_lookup_mapping WHERE module_basename = ? AND module_identifier = ? LIMIT 1',
+                    array($basename, $identifier)
+                )->fetchColumn(0);
+                $hasCache = (bool) $app['db']->executeQuery(
+                    'SELECT 1 FROM source_lookup_cache WHERE module_basename = ? AND module_identifier = ? LIMIT 1',
+                    array($basename, $identifier)
+                )->fetchColumn(0);
+            }
+
+            $state[$key] = array(
+                'module_basename' => $basename,
+                'module_identifier' => $identifier,
+                'has_cache' => $hasCache,
+                'has_mapping' => $hasMapping,
+            );
+        }
+
+        return $state;
+    }
+
     private static function stackRowsFromCarburetorData(array $data): array
     {
         $threadIndex = isset($data['requesting_thread']) ? (int) $data['requesting_thread'] : 0;
@@ -2543,6 +2602,8 @@ class Crash
             'id' => $id,
             'scan' => $app['request']->get('scan', null),
             'symbols' => $app['request']->get('symbols', null),
+            'source_lookup_enabled' => (($app['config']['upload-settings']['crash_source_lookup_enabled'] ?? false) === true),
+            'source_lookup_local_allowed' => (($app['user']['admin'] ?? false) === true),
         ));
     }
 
@@ -2627,6 +2688,8 @@ class Crash
                 $data['fallback_source'] = 'processed_stack';
             }
         }
+
+        $data['source_lookup_modules'] = self::loadSourceLookupModuleState($app, $id);
 
         return new \Symfony\Component\HttpFoundation\Response(json_encode($data, JSON_UNESCAPED_SLASHES), 200, array(
             'Content-Type' => 'application/json',

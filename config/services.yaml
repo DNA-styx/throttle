@@ -98,3 +98,7 @@ services:
     App\Runtime\SymbolAdminManager:
         arguments:
             $projectDir: '%kernel.project_dir%'
+
+    App\Runtime\CrashSourceLookupManager:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
