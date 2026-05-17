@@ -1,6 +1,8 @@
 # Throttle
 <img width="1901" height="908" alt="image" src="https://github.com/user-attachments/assets/b8676856-ba23-4291-85b7-4d3fa64f8094" />
 
+More screenshots: [docs/screenshots](docs/screenshots/)
+
 ## English
 
 ### What This Is
@@ -40,7 +42,7 @@ Required PHP extensions include `ctype`, `iconv`, `intl`, `pdo_mysql`, `bcmath`,
 Start from a clean clone:
 
 ```bash
-git clone <repo-url> throttle
+git clone https://github.com/MrPanica/throttle throttle
 cd throttle
 cp .env.prod.docker.example .env.prod.docker
 ```
@@ -72,11 +74,13 @@ Open `http://SERVER_IP:18080/` or put Nginx/Traefik/Caddy in front of the contai
 
 ### Manual Ubuntu/Nginx/PHP-FPM Install
 
-Install PHP 8.4, MariaDB, Redis, Nginx, Composer, Node.js, and npm. Then deploy the source:
+Install PHP 8.4, MariaDB, Redis, Nginx, Composer, Node.js, and npm. Then deploy the source.
+
+On Ubuntu 24.04, the stock archive does not provide PHP 8.4. Add a PHP 8.4 package source first, for example `ppa:ondrej/php`, or use an OS/repository that already ships PHP 8.4.
 
 ```bash
 cd /var/www/throttle
-php8.4 $(which composer) install --no-dev --optimize-autoloader
+APP_ENV=prod APP_DEBUG=0 php8.4 $(which composer) install --no-dev --optimize-autoloader
 npm ci
 npm run build
 ```
@@ -219,7 +223,7 @@ In a crash report, **Processing Runs** are Throttle processor records: status, d
 - `bin/carburetor`, `bin/minidump_stackwalk`, `bin/dump_syms`, `bin/breakpad_moduleid`, and `bin/nm` must be executable.
 - `var/`, `cache/`, `dumps/`, and `symbols/` must be writable by the PHP-FPM user. Back up `var/symbol-request-policy.json`, `var/upload-settings.json`, and `var/upload-failure-backoff.json` if you use custom `/health` rules.
 - If templates fail with missing Encore entrypoints, run `npm ci && npm run build` and verify `public/build/entrypoints.json` exists.
-- If Composer uses PHP 8.1 on a PHP 8.4 project, run Composer through PHP 8.4: `php8.4 $(which composer) install --no-dev --optimize-autoloader`.
+- If Composer uses PHP 8.1 on a PHP 8.4 project, run Composer through PHP 8.4 and force the production environment during install: `APP_ENV=prod APP_DEBUG=0 php8.4 $(which composer) install --no-dev --optimize-autoloader`.
 - If PHP-FPM logs duplicate or missing extensions, fix `/etc/php/8.4/fpm/php.ini` and use package-managed `conf.d` extension files.
 
 ### Security Notes
@@ -266,7 +270,7 @@ Throttle - сервис на Symfony/Silex для приема и анализа
 Начните с чистого клона:
 
 ```bash
-git clone <repo-url> throttle
+git clone https://github.com/MrPanica/throttle throttle
 cd throttle
 cp .env.prod.docker.example .env.prod.docker
 ```
@@ -299,7 +303,7 @@ docker compose --env-file .env.prod.docker -f compose.prod.yaml exec app php bin
 
 ```bash
 cd /var/www/throttle
-php8.4 $(which composer) install --no-dev --optimize-autoloader
+APP_ENV=prod APP_DEBUG=0 php8.4 $(which composer) install --no-dev --optimize-autoloader
 npm ci
 npm run build
 ```
@@ -437,7 +441,7 @@ sudo -u www-data php8.4 /var/www/throttle/bin/console crash:process --env=prod -
 - `bin/carburetor`, `bin/minidump_stackwalk`, `bin/dump_syms`, `bin/breakpad_moduleid` и `bin/nm` должны быть executable.
 - `var/`, `cache/`, `dumps/` и `symbols/` должны быть writable для пользователя PHP-FPM.
 - Если ошибка говорит про missing Encore entrypoints, выполните `npm ci && npm run build` и проверьте `public/build/entrypoints.json`.
-- Если Composer запускается через PHP 8.1 в проекте PHP 8.4, используйте `php8.4 $(which composer) install --no-dev --optimize-autoloader`.
+- Если Composer запускается через PHP 8.1 в проекте PHP 8.4, используйте `APP_ENV=prod APP_DEBUG=0 php8.4 $(which composer) install --no-dev --optimize-autoloader`.
 - Если PHP-FPM пишет про duplicate или missing extensions, исправьте `/etc/php/8.4/fpm/php.ini` и используйте package-managed `conf.d` файлы.
 
 ### Заметки По Безопасности
@@ -446,3 +450,4 @@ sudo -u www-data php8.4 /var/www/throttle/bin/console crash:process --env=prod -
 - `APP_SECRET`, `DATABASE_URL`, `STEAM_API_KEY`, `SYMBOL_UPLOAD_TOKEN` и OAuth secrets должны быть только в environment/server files.
 - В production используйте HTTPS.
 - Обновляйте PHP, Composer dependencies, Node dependencies, Breakpad tools и SourceMod Accelerator.
+

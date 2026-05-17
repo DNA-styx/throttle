@@ -1,9 +1,11 @@
+x-prod-build: &prod-build
+  context: .
+  dockerfile: docker/php/Dockerfile
+  target: prod
+
 services:
   app:
-    build:
-      context: .
-      dockerfile: docker/php/Dockerfile
-      target: prod
+    build: *prod-build
     image: throttle-prod
     depends_on:
       - db
@@ -45,6 +47,7 @@ services:
       - symbols_data:/app/symbols
 
   processor:
+    build: *prod-build
     image: throttle-prod
     depends_on:
       - app

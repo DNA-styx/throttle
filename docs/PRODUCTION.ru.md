@@ -3,7 +3,7 @@
 ## Docker Compose
 
 ```bash
-git clone <repo-url> throttle
+git clone https://github.com/MrPanica/throttle throttle
 cd throttle
 cp .env.prod.docker.example .env.prod.docker
 ```
@@ -42,9 +42,11 @@ docker compose --env-file .env.prod.docker -f compose.prod.yaml exec app php bin
 
 Нужны PHP 8.4 CLI/FPM, MariaDB 10.11+, Redis, Composer, Node.js, npm и Nginx. PHP extensions: `ctype`, `iconv`, `intl`, `pdo_mysql`, `bcmath`, `xsl`, `zip`.
 
+На Ubuntu 24.04 стандартный репозиторий не содержит PHP 8.4. Сначала подключите источник пакетов с PHP 8.4, например ppa:ondrej/php, либо используйте ��/репозиторий, где PHP 8.4 уже есть.
+
 ```bash
 cd /var/www/throttle
-php8.4 $(which composer) install --no-dev --optimize-autoloader
+APP_ENV=prod APP_DEBUG=0 php8.4 $(which composer) install --no-dev --optimize-autoloader
 npm ci
 npm run build
 ```
@@ -151,3 +153,4 @@ APP_ADMINS="steam:STEAMID64,user:1"
 - Переключатель темы Light/Dark/System доступен ещё до входа и по умолчанию использует системную тему.
 - Настройки upload в `/health` могут отключать анонимные `/submit` minidump uploads; тогда `/submit` требует profile upload token или `SYMBOL_UPLOAD_TOKEN`.
 - `APP_ADMINS` принимает значения, разделённые запятой, пробелом или `;`: `user:<id>`, SteamID64 или `steam:<SteamID64>`. Администраторы получают доступ к `/health`, глобальным dashboard/audit данным, управлению crash reports, действиям reprocess/delete и удалению любых signature notes.
+
