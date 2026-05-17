@@ -175,6 +175,148 @@
     border-color: #303b4a;
     pointer-events: none;
 }
+
+.stack-frame-indicators {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: 8px;
+}
+
+.stack-frame-indicators .btn-link {
+    padding: 0;
+    border: 0;
+    text-decoration: none;
+    box-shadow: none;
+}
+.stack-source-shell {
+    position: relative;
+}
+
+.raw-source-panel {
+    position: absolute;
+    z-index: 1060;
+    width: min(560px, calc(100vw - 64px));
+    padding: 12px;
+    border: 1px solid #303b4a;
+    border-radius: 4px;
+    background: #fff;
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.25);
+}
+
+.raw-source-panel .nav-tabs {
+    margin-bottom: 10px;
+}
+
+.raw-source-header {
+    margin-bottom: 10px;
+}
+
+.raw-source-header-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.raw-source-header code {
+    display: inline-block;
+    max-width: 100%;
+    white-space: normal;
+    word-break: break-word;
+}
+
+.raw-source-meta {
+    margin-top: 8px;
+    margin-bottom: 8px;
+}
+
+.raw-source-note {
+    margin-bottom: 0;
+}
+
+.raw-source-close-x {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    opacity: 0.7;
+    padding: 0 4px;
+    line-height: 1;
+    font-size: 18px;
+}
+
+.raw-source-close-x:hover,
+.raw-source-close-x:focus {
+    opacity: 1;
+    text-decoration: none;
+}
+
+.raw-source-snippet {
+    margin-top: 8px;
+    max-height: 320px;
+    overflow: auto;
+    margin-bottom: 0;
+}
+
+.raw-source-snippet-rendered {
+    margin-top: 8px;
+    margin-bottom: 0;
+    padding: 0;
+    border: 1px solid #303b4a;
+    border-radius: 4px;
+    overflow: auto;
+    background: #111821;
+    font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.raw-source-snippet-line {
+    white-space: pre;
+    padding: 0 10px;
+}
+
+.raw-source-snippet-line.is-focus {
+    background: rgba(58, 191, 122, 0.24);
+}
+
+.raw-source-empty {
+    padding: 10px 12px;
+    border: 1px dashed #3a4657;
+    border-radius: 4px;
+}
+
+.raw-source-diagnostics-toggle {
+    margin-top: 10px;
+}
+
+body.theme-dark .raw-source-panel {
+    background: #1a2330;
+    border-color: #303b4a;
+    color: #d7dde6;
+}
+
+body.theme-dark .raw-source-empty {
+    border-color: #415066;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+body.theme-dark .raw-source-panel .nav-tabs > li > a {
+    color: #cbd4de;
+}
+
+body.theme-dark .raw-source-panel .nav-tabs > li.active > a,
+body.theme-dark .raw-source-panel .nav-tabs > li.active > a:hover,
+body.theme-dark .raw-source-panel .nav-tabs > li.active > a:focus {
+    background: #101722;
+    color: #fff;
+    border-color: #303b4a #303b4a transparent;
+}
+
+body.theme-dark .raw-source-panel code {
+    background: #0d131a;
+    color: #d8e7ff;
+}
 </style>
 {% endblock %}
 
@@ -416,7 +558,7 @@
     <div class="well muted">No notes for this crash signature yet.</div>
 {% endif %}
 </div>
-{% if legacy_app.user and can_create_signature_note %}
+{% if crash.stackhash and legacy_app.user and can_create_signature_note %}
 <div id="signature-note-form" class="collapse{% if note_errors|length > 0 %} in{% endif %}">
     <div class="well">
         <h3 style="margin-top: 0;">Write a Signature Note</h3>
@@ -539,7 +681,7 @@
         <i class="icon-copy"></i>
     </button>
 </div>
-<div class="well well-tight">
+<div id="details-stack-shell" class="well well-tight stack-source-shell">
     <table class="table table-stacktrace table-shown">
         <thead>
             <tr>
@@ -556,8 +698,16 @@
 {% if frame.url %}
                   <a href="{{ frame.url }}"><i class="icon-external-link"></i></a>
 {% endif %}
+{% set cached_source = attribute(verified_source_lookup_frames, frame.frame)|default(null) %}
+{% if cached_source or '__SourceHook_' in frame.rendered %}
+                  <span class="pull-right stack-frame-indicators">
+{% if cached_source %}
+                    <button type="button" class="btn btn-link btn-mini stack-source-button" data-stack-source-frame="{{ frame.frame }}" title="View cached source (full lookup in View Raw)" data-toggle="tooltip" data-container="body" data-placement="bottom"><i class="icon-code"></i></button>
+{% endif %}
 {% if '__SourceHook_' in frame.rendered %}
-                  <span class="pull-right" data-toggle="tooltip" data-container="body" data-placement="bottom" title="This frame is from a function hook and is most likely unrelated to the cause of the crash."><i class="icon-anchor"></i></span>
+                    <span data-toggle="tooltip" data-container="body" data-placement="bottom" title="This frame is from a function hook and is most likely unrelated to the cause of the crash."><i class="icon-anchor"></i></span>
+{% endif %}
+                  </span>
 {% endif %}
                 </td>
             </tr>
@@ -569,6 +719,24 @@
             </tr>
         </tfoot>
     </table>
+{% if source_lookup_enabled and verified_source_lookup_frames|length > 0 %}
+    <div id="verified-source-lookup-data" class="hidden" data-payload="{{ verified_source_lookup_frames|json_encode|e('html_attr') }}"></div>
+    <div id="details-stack-source-panel" class="raw-source-panel hidden" aria-hidden="true">
+        <div class="raw-source-header">
+            <div class="raw-source-header-top">
+                <div>Source for <code class="details-source-module">[unknown module]</code></div>
+                <button type="button" class="raw-source-close-x details-source-close" aria-label="Close" title="Close"><i class="icon-remove"></i></button>
+            </div>
+            <div style="margin-top: 4px;">Symbol: <code class="details-source-symbol">[unknown symbol]</code></div>
+            <div class="raw-source-meta text-muted"></div>
+        </div>
+        <ul class="nav nav-tabs">
+            <li class="active"><a href="#" class="details-source-source-tab">Source</a></li>
+            <li><a href="{{ path('carburetor', {'id': crash.id}) }}">Find</a></li>
+        </ul>
+        <div class="raw-source-state"></div>
+    </div>
+{% endif %}
 </div>
 
 {% if culprit_candidates|length > 0 %}
@@ -965,6 +1133,201 @@
             }
         });
     });
+
+{% if source_lookup_enabled and verified_source_lookup_frames|length > 0 %}
+    var verifiedSourceLookupFrames = {};
+    var verifiedSourceLookupNode = document.getElementById('verified-source-lookup-data');
+    var verifiedSourceLookupPayload = verifiedSourceLookupNode ? verifiedSourceLookupNode.getAttribute('data-payload') : '';
+    if (verifiedSourceLookupPayload) {
+        try {
+            verifiedSourceLookupFrames = JSON.parse(verifiedSourceLookupPayload);
+        } catch (e) {
+            verifiedSourceLookupFrames = {};
+        }
+    }
+    var detailsStackShell = $('#details-stack-shell');
+    var detailsStackSourcePanel = $('#details-stack-source-panel');
+    if (detailsStackSourcePanel.length) {
+        detailsStackSourcePanel.appendTo(document.body);
+    }
+    var detailsStackSourceState = detailsStackSourcePanel.find('.raw-source-state');
+    var detailsStackSourceMeta = detailsStackSourcePanel.find('.raw-source-meta');
+    var detailsStackSourceModule = detailsStackSourcePanel.find('.details-source-module');
+    var detailsStackSourceSymbol = detailsStackSourcePanel.find('.details-source-symbol');
+
+    function parseStackRenderedLabel(label) {
+        var normalized = String(label || '').trim();
+        var bang = normalized.indexOf('!');
+        if (bang === -1) {
+            return { module: '', symbol: normalized };
+        }
+
+        return {
+            module: normalized.substring(0, bang),
+            symbol: normalized.substring(bang + 1)
+        };
+    }
+
+    function renderStackSourceDiagnostics(container, payload) {
+        var diagnostics = [];
+        if (payload.warning) {
+            diagnostics.push(String(payload.warning));
+        }
+        if (!diagnostics.length) {
+            return;
+        }
+
+        var wrapper = $('<details class="raw-source-diagnostics-toggle"></details>');
+        $('<summary></summary>').text('Diagnostics').appendTo(wrapper);
+        $('<pre class="raw-source-snippet" style="margin-top: 10px;"></pre>')
+            .text(diagnostics.join('\n\n'))
+            .appendTo(wrapper);
+        container.append(wrapper);
+    }
+
+    function renderStackSourceSnippet(container, snippet) {
+        var wrapper = $('<div class="raw-source-snippet raw-source-snippet-rendered"></div>');
+        var focusIndex = -1;
+        var currentIndex = 0;
+        String(snippet || '').split('\n').forEach(function(line) {
+            var focus = false;
+            if (line.indexOf('> ') === 0) {
+                focus = true;
+                line = '  ' + line.substring(2);
+                focusIndex = currentIndex;
+            }
+
+            $('<div class="raw-source-snippet-line"></div>')
+                .toggleClass('is-focus', focus)
+                .text(line)
+                .appendTo(wrapper);
+            currentIndex += 1;
+        });
+        container.append(wrapper);
+
+        var focusLine = wrapper.find('.raw-source-snippet-line.is-focus').first();
+        if (focusLine.length && focusIndex >= 0) {
+            window.requestAnimationFrame(function() {
+                var lineHeight = focusLine.outerHeight() || 0;
+                var topLineOffset = Math.max(0, focusIndex - 2);
+                wrapper.scrollTop(topLineOffset * lineHeight);
+            });
+        }
+    }
+
+    function renderStackSourceState(payload) {
+        detailsStackSourceState.empty();
+        detailsStackSourceMeta.empty();
+
+        if (payload.module_identifier) {
+            $('<div></div>').text('Identifier: ' + payload.module_identifier).appendTo(detailsStackSourceMeta);
+        }
+
+        $('<div></div>').append(
+            document.createTextNode('Cache: hit')
+        ).appendTo(detailsStackSourceMeta);
+
+        var header = $('<p class="raw-source-note"></p>').appendTo(detailsStackSourceState);
+        $('<span class="label label-success">Verified</span>').appendTo(header);
+        header.append(' ');
+        $('<code></code>').text((payload.file || '[unknown file]') + ':' + (payload.line_start || 0)).appendTo(header);
+        if (payload.github_url) {
+            header.append(' ');
+            $('<a target="_blank" rel="noopener noreferrer"></a>')
+                .attr('href', payload.github_url)
+                .text('Open on GitHub')
+                .appendTo(header);
+        }
+
+        $('<p class="help-block" style="margin-top: 8px; margin-bottom: 0;"></p>')
+            .html('Full source lookup is available in <a href="{{ path('carburetor', {'id': crash.id}) }}">View Raw</a>.')
+            .appendTo(detailsStackSourceState);
+
+        if (payload.snippet) {
+            renderStackSourceSnippet(detailsStackSourceState, payload.snippet);
+        } else {
+            $('<div class="raw-source-empty" style="margin-top: 8px;"></div>')
+                .text('No cached snippet is available for this source match.')
+                .appendTo(detailsStackSourceState);
+        }
+
+        renderStackSourceDiagnostics(detailsStackSourceState, payload);
+    }
+
+    function hideStackSourcePanel() {
+        detailsStackSourcePanel.addClass('hidden').attr('aria-hidden', 'true');
+    }
+
+    function openStackSourcePanel(button, payload) {
+        var row = button.closest('tr');
+        var parsed = parseStackRenderedLabel(row.data('stack-rendered'));
+        var buttonRect = button.length ? button[0].getBoundingClientRect() : { top: 0, left: 0, width: 24 };
+        var scrollTop = $(window).scrollTop() || 0;
+        var scrollLeft = $(window).scrollLeft() || 0;
+        var buttonWidth = button.outerWidth() || buttonRect.width || 24;
+
+        detailsStackSourceModule.text(payload.module_basename || parsed.module || '[unknown module]');
+        detailsStackSourceSymbol.text(parsed.symbol || row.data('stack-rendered') || '[unknown symbol]');
+        renderStackSourceState(payload);
+
+        detailsStackSourcePanel.removeClass('hidden').attr('aria-hidden', 'false');
+
+        var panelWidth = detailsStackSourcePanel.outerWidth() || 560;
+        var viewportWidth = window.innerWidth || panelWidth;
+        var viewportHeight = window.innerHeight || 0;
+        var top = Math.max(12 + scrollTop, buttonRect.top + scrollTop - 2);
+        var left = Math.max(12 + scrollLeft, Math.min(buttonRect.left + scrollLeft - panelWidth + buttonWidth, scrollLeft + viewportWidth - panelWidth - 8));
+        var panelHeight = detailsStackSourcePanel.outerHeight() || 0;
+
+        if (viewportHeight > 0 && panelHeight > 0 && (top + panelHeight) > (scrollTop + viewportHeight - 12)) {
+            top = Math.max(12 + scrollTop, scrollTop + viewportHeight - panelHeight - 12);
+        }
+
+        detailsStackSourcePanel.css({
+            top: top + 'px',
+            left: left + 'px'
+        });
+    }
+
+    detailsStackSourcePanel.find('.details-source-close').on('click', function() {
+        hideStackSourcePanel();
+    });
+
+    detailsStackSourcePanel.find('.details-source-source-tab').on('click', function(event) {
+        event.preventDefault();
+    });
+
+    $(document).on('mousedown', function(event) {
+        if (detailsStackSourcePanel.hasClass('hidden')) {
+            return;
+        }
+
+        var target = $(event.target);
+        if (target.closest('#details-stack-source-panel').length || target.closest('.stack-source-button').length) {
+            return;
+        }
+
+        hideStackSourcePanel();
+    });
+
+    $(document).on('keydown', function(event) {
+        if (event.key === 'Escape') {
+            hideStackSourcePanel();
+        }
+    });
+
+    $('.stack-source-button').on('click', function(event) {
+        event.preventDefault();
+        var button = $(this);
+        var frameId = String(button.data('stack-source-frame'));
+        var payload = verifiedSourceLookupFrames && verifiedSourceLookupFrames[frameId] ? verifiedSourceLookupFrames[frameId] : null;
+        if (!payload) {
+            return;
+        }
+
+        openStackSourcePanel(button, payload);
+    });
+{% endif %}
 
 {% if has_error_string %}
     $.getJSON('{{ path('error', {id: crash.id}) }}', function(data) {

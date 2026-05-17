@@ -24,8 +24,24 @@ class Sharing
             $app->abort(401);
         }
 
-        $sharing = $app['db']->executeQuery('SELECT share.user AS id, server_owner.name, NULL AS avatar, accepted FROM share LEFT JOIN server_owner ON share.user = server_owner.id WHERE share.owner = ? ORDER BY accepted IS NULL DESC, accepted DESC', array($app['user']['id']))->fetchAll();
-        $shared = $app['db']->executeQuery('SELECT share.owner AS id, server_owner.name, NULL AS avatar, accepted FROM share LEFT JOIN server_owner ON share.owner = server_owner.id WHERE share.user = ? ORDER BY accepted IS NULL DESC, accepted DESC', array($app['user']['id']))->fetchAll();
+        $sharing = $app['db']->executeQuery(
+            'SELECT share.user AS id, server_owner.name, NULL AS avatar, steam.identifier AS steam_id, accepted
+             FROM share
+             LEFT JOIN server_owner ON share.user = server_owner.id
+             LEFT JOIN external_account AS steam ON steam.user_id = share.user AND steam.kind = ?
+             WHERE share.owner = ?
+             ORDER BY accepted IS NULL DESC, accepted DESC',
+            array('steam', $app['user']['id'])
+        )->fetchAll();
+        $shared = $app['db']->executeQuery(
+            'SELECT share.owner AS id, server_owner.name, NULL AS avatar, steam.identifier AS steam_id, accepted
+             FROM share
+             LEFT JOIN server_owner ON share.owner = server_owner.id
+             LEFT JOIN external_account AS steam ON steam.user_id = share.owner AND steam.kind = ?
+             WHERE share.user = ?
+             ORDER BY accepted IS NULL DESC, accepted DESC',
+            array('steam', $app['user']['id'])
+        )->fetchAll();
 
         return $app['twig']->render('share.html.twig', [
             'sharing' => $sharing,

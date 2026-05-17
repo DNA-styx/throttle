@@ -120,6 +120,77 @@ final class CrashSourceLookupManager
     }
 
     /**
+     * @param list<array<string, mixed>> $frames
+     * @return array<string, array<string, mixed>>
+     */
+    public function describeVerifiedFrameCachesForCrash(string $crashId, array $frames): array
+    {
+        if (!$this->isEnabled() || $frames === []) {
+            return [];
+        }
+
+        $identifiersByModule = [];
+        foreach ($this->loadCrashModules($crashId) as $row) {
+            $name = (string) ($row['name'] ?? '');
+            $identifier = (string) ($row['identifier'] ?? '');
+            if ($name === '' || $identifier === '' || $identifier === self::INVALID_IDENTIFIER) {
+                continue;
+            }
+
+            $basename = $this->normalizeModuleBasename($name);
+            $key = mb_strtolower($basename);
+            if (!isset($identifiersByModule[$key])) {
+                $identifiersByModule[$key] = $identifier;
+            }
+        }
+
+        if ($identifiersByModule === []) {
+            return [];
+        }
+
+        $results = [];
+        foreach ($frames as $frame) {
+            $frameNumber = isset($frame['frame']) ? (string) (int) $frame['frame'] : null;
+            $runtimeModule = (string) ($frame['module'] ?? '');
+            $rendered = (string) ($frame['rendered'] ?? '');
+            $symbol = (string) ($frame['function'] ?? '');
+            $moduleBasename = $this->extractModuleBasename($runtimeModule, $rendered !== '' ? $rendered : $symbol);
+            if ($frameNumber === null || $moduleBasename === '') {
+                continue;
+            }
+
+            $identifier = $identifiersByModule[mb_strtolower($moduleBasename)] ?? null;
+            if (!is_string($identifier) || $identifier === '') {
+                continue;
+            }
+
+            $cache = $this->getCachedResult($moduleBasename, $identifier);
+            if ($cache === null || ($cache['match_quality'] ?? null) !== 'verified') {
+                continue;
+            }
+
+            if (!$this->cachedResultMatchesFrame($cache, $runtimeModule, $symbol, $rendered)) {
+                continue;
+            }
+
+            $results[$frameNumber] = [
+                'frame' => (int) $frameNumber,
+                'module_basename' => $moduleBasename,
+                'module_identifier' => $identifier,
+                'file' => (string) ($cache['resolved_file'] ?? ''),
+                'line_start' => (int) ($cache['line_start'] ?? 0),
+                'line_end' => (int) ($cache['line_end'] ?? 0),
+                'snippet' => (string) ($cache['snippet'] ?? ''),
+                'github_url' => $cache['github_url'] ?? null,
+                'match_quality' => 'verified',
+                'warning' => $cache['warning'] ?? null,
+            ];
+        }
+
+        return $results;
+    }
+
+    /**
      * @param array<string, mixed> $input
      * @return array<string, mixed>
      */
@@ -1238,6 +1309,20 @@ final class CrashSourceLookupManager
                 $score += 4;
             }
 
+            if ($this->isSourceModLogicModule($moduleBasename)) {
+                if (str_contains($pathLower, '/core/logic/')) {
+                    $score += 28;
+                }
+
+                if (preg_match('~(?:^|/)core/logic/smn_[^/]+\.(?:cpp|cc|cxx|c)$~i', $path) === 1) {
+                    $score += 24;
+                }
+
+                if ($this->isLikelySourceModNativeHelper($symbol) && str_ends_with($pathLower, '/smn_core.cpp')) {
+                    $score += 60;
+                }
+            }
+
             if ($score <= 0) {
                 continue;
             }
@@ -1591,6 +1676,9 @@ final class CrashSourceLookupManager
         if ($bestLineLooksLikeDeclaration) {
             $quality = 'declaration';
             $warning = 'Only a declaration was found, not the implementation.';
+        } elseif ($isDefinitionMatch && $class === null && $symbol['namespaces'] === [] && $bestLineScore >= 60) {
+            $quality = 'verified';
+            $warning = null;
         } elseif ($isDefinitionMatch && $bestLineScore >= 120 && ($class !== null || count($symbol['namespaces']) >= 1)) {
             $quality = 'verified';
             $warning = null;
@@ -1784,8 +1872,9 @@ final class CrashSourceLookupManager
      */
     private function buildCandidateRelativePaths(array $symbol, string $moduleBasename = ''): array
     {
+        $moduleSpecificPaths = $this->buildModuleSpecificRelativePaths($symbol, $moduleBasename);
         if ($symbol['class'] === null && $symbol['namespaces'] === []) {
-            return [];
+            return $moduleSpecificPaths;
         }
 
         $directories = array_map([$this, 'normalizeFilenameToken'], array_slice($symbol['namespaces'], 0, -1));
@@ -1819,7 +1908,31 @@ final class CrashSourceLookupManager
             }
         }
 
-        return array_values(array_unique($candidates));
+        return array_values(array_unique(array_merge($moduleSpecificPaths, $candidates)));
+    }
+
+    /**
+     * @param array{module: string, signature: string, method: string, class: ?string, namespaces: list<string>, offset: ?string} $symbol
+     * @return list<string>
+     */
+    private function buildModuleSpecificRelativePaths(array $symbol, string $moduleBasename): array
+    {
+        if (!$this->isSourceModLogicModule($moduleBasename)) {
+            return [];
+        }
+
+        $paths = [
+            'core/logic/smn_core.cpp',
+        ];
+
+        if ($symbol['class'] === null && $symbol['namespaces'] === [] && $this->isLikelySourceModNativeHelper($symbol)) {
+            $paths[] = 'core/logic/smn_string.cpp';
+            $paths[] = 'core/logic/smn_console.cpp';
+            $paths[] = 'core/logic/smn_filesystem.cpp';
+            $paths[] = 'core/logic/smn_entities.cpp';
+        }
+
+        return array_values(array_unique($paths));
     }
 
     /**
@@ -1857,6 +1970,28 @@ final class CrashSourceLookupManager
         $value = trim(mb_strtolower($value), '_');
 
         return $value;
+    }
+
+    private function isSourceModLogicModule(string $moduleBasename): bool
+    {
+        $moduleBase = preg_replace('/\.[^.]+$/', '', $moduleBasename) ?? $moduleBasename;
+        $normalized = $this->normalizeFilenameToken($moduleBase);
+
+        return $normalized === 'sourcemod_logic'
+            || str_contains($normalized, 'sourcemod_logic');
+    }
+
+    /**
+     * @param array{module: string, signature: string, method: string, class: ?string, namespaces: list<string>, offset: ?string} $symbol
+     */
+    private function isLikelySourceModNativeHelper(array $symbol): bool
+    {
+        $method = mb_strtolower(ltrim($symbol['method'], '_'));
+
+        return str_starts_with($method, 'loadfromaddress')
+            || str_starts_with($method, 'storetoaddress')
+            || str_starts_with($method, 'getfromaddress')
+            || str_starts_with($method, 'settoaddress');
     }
 
     /**
@@ -2227,6 +2362,43 @@ final class CrashSourceLookupManager
         }
 
         return ['quality' => $quality, 'warning' => $warning];
+    }
+
+    /**
+     * @param array<string, mixed> $cache
+     */
+    private function cachedResultMatchesFrame(array $cache, string $runtimeModule, string $symbol, string $rendered): bool
+    {
+        if (($cache['match_quality'] ?? null) !== 'verified') {
+            return false;
+        }
+
+        $signature = trim($rendered !== '' ? $rendered : $symbol);
+        $snippet = (string) ($cache['snippet'] ?? '');
+        if ($signature === '' || $snippet === '') {
+            return false;
+        }
+
+        $parsed = $this->parseSymbol($runtimeModule, $signature);
+        if (($parsed['method'] ?? '') === '') {
+            return false;
+        }
+
+        $methodPattern = sprintf('/\b%s\s*\(/', preg_quote((string) $parsed['method'], '/'));
+        if (preg_match($methodPattern, $snippet) !== 1) {
+            return false;
+        }
+
+        if (($parsed['class'] ?? null) !== null) {
+            $classPattern = sprintf('/\b%s\s*::\s*%s\s*\(/', preg_quote((string) $parsed['class'], '/'), preg_quote((string) $parsed['method'], '/'));
+            if (preg_match($classPattern, $snippet) === 1) {
+                return true;
+            }
+
+            return preg_match(sprintf('/\b%s\b/', preg_quote((string) $parsed['class'], '/')), $snippet) === 1;
+        }
+
+        return true;
     }
 
     private function extractFocusedSnippetLine(string $snippet): ?string

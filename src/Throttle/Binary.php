@@ -46,6 +46,7 @@ class Binary
 
         try {
             $result = SymbolBinaryUpload::storeUploadedBinary($app['root'], $file, $moduleHint, $identifierHint);
+            $this->setUploadInfo($app, $result['module'], $result['identifier'], (int) $file->getSize());
             $this->markModuleSymbolsPresent($app, $result['module'], $result['identifier']);
             UploadFailureBackoff::registerSuccess($app['root'], $result['module'], $result['identifier']);
             $app['redis']->hIncrBy('throttle:stats', 'binaries:accepted', 1);
@@ -108,6 +109,15 @@ class Binary
         $value = $app['request']->get($field);
 
         return is_string($value) && $value !== '' ? $value : null;
+    }
+
+    private function setUploadInfo(Application $app, string $module, string $identifier, int $bytes): void
+    {
+        $info = ['module' => $module, 'identifier' => $identifier, 'bytes' => $bytes];
+        if (isset($app['base_request'])) {
+            $app['base_request']->attributes->set('_symbol_upload_info', $info);
+        }
+        $app['request']->attributes->set('_symbol_upload_info', $info);
     }
 
 }

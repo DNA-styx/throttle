@@ -38,6 +38,11 @@ class LegacyDbalConnection
         return $this->connection->transactional(fn () => $callback($this));
     }
 
+    public function getWrappedConnection(): Connection
+    {
+        return $this->connection;
+    }
+
     /**
      * @param array<int, mixed> $types
      *

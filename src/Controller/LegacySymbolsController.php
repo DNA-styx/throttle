@@ -162,8 +162,18 @@ class LegacySymbolsController extends AbstractController
                 }
             }
         } else {
+            $uploadInfo = $request->attributes->get('_symbol_upload_info');
+            if (is_array($uploadInfo)) {
+                $module = isset($uploadInfo['module']) ? (string) $uploadInfo['module'] : null;
+                $identifier = isset($uploadInfo['identifier']) ? (string) $uploadInfo['identifier'] : null;
+                $bytes = isset($uploadInfo['bytes']) ? (int) $uploadInfo['bytes'] : 0;
+            }
+
             $file = $this->findUploadedBinaryFile($request);
-            if ($file instanceof UploadedFile) {
+            if ($bytes === 0 && $file instanceof UploadedFile) {
+                $bytes = (int) $file->getSize();
+            }
+            if ($module === null && $file instanceof UploadedFile) {
                 $bytes = (int) $file->getSize();
                 $module = basename(str_replace('\\', '/', (string) (
                     $request->request->get('debug_file_path')
@@ -171,8 +181,10 @@ class LegacySymbolsController extends AbstractController
                     ?: $file->getClientOriginalName()
                 )));
             }
-            $rawIdentifier = $request->request->get('debug_identifier') ?: $request->request->get('code_identifier');
-            $identifier = is_string($rawIdentifier) ? $rawIdentifier : null;
+            if ($identifier === null) {
+                $rawIdentifier = $request->request->get('debug_identifier') ?: $request->request->get('code_identifier');
+                $identifier = is_string($rawIdentifier) ? $rawIdentifier : null;
+            }
         }
 
         $result = $response->getStatusCode() >= 400 ? 'rejected' : 'accepted';

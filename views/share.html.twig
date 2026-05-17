@@ -24,9 +24,13 @@
 {% for user in sharing %}
                     <tr {% if user.accepted == null %}class="warning"{% endif %}>
                         <td>
-                            <a href="http://steamcommunity.com/profiles/{{ user.id }}">
+{% if user.steam_id %}
+                            <a href="https://steamcommunity.com/profiles/{{ user.steam_id }}" rel="noopener noreferrer">
                                 <img class="column-identicon" alt="{{ user.name ?? user.id }}'s avatar" src="{{ user.avatar ?? 'https://steamcdn-a.akamaihd.net/steamcommunity/public/images/avatars/fe/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_full.jpg' }}" width="20" height="20">
                             </a>
+{% else %}
+                            <img class="column-identicon" alt="{{ user.name ?? user.id }}'s avatar" src="{{ user.avatar ?? 'https://steamcdn-a.akamaihd.net/steamcommunity/public/images/avatars/fe/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_full.jpg' }}" width="20" height="20">
+{% endif %}
                         </td>
                         <td>
                             {{ user.name ?? user.id }}
@@ -72,9 +76,13 @@
 {% for user in shared %}
                     <tr {% if user.accepted == null %}class="warning"{% endif %}>
                         <td>
-                            <a href="http://steamcommunity.com/profiles/{{ user.id }}">
+{% if user.steam_id %}
+                            <a href="https://steamcommunity.com/profiles/{{ user.steam_id }}" rel="noopener noreferrer">
                                 <img class="column-identicon" alt="{{ user.name ?? user.id }}'s avatar" src="{{ user.avatar ?? 'https://steamcdn-a.akamaihd.net/steamcommunity/public/images/avatars/fe/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_full.jpg' }}" width="20" height="20">
                             </a>
+{% else %}
+                            <img class="column-identicon" alt="{{ user.name ?? user.id }}'s avatar" src="{{ user.avatar ?? 'https://steamcdn-a.akamaihd.net/steamcommunity/public/images/avatars/fe/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_full.jpg' }}" width="20" height="20">
+{% endif %}
                         </td>
                         <td>
                             {{ user.name ?? user.id }}

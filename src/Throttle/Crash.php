@@ -2,8 +2,11 @@
 
 namespace Throttle;
 
+use App\Runtime\CrashSourceLookupManager;
 use App\Runtime\UploadFailureBackoff;
+use App\Legacy\LegacyDbalConnection;
 use Silex\Application;
+use Symfony\Component\HttpClient\HttpClient;
 
 class Crash
 {
@@ -571,10 +574,13 @@ class Crash
         }
 
         $sourcePawnChain = $rawSourcePawnChain ?? self::detectSourcePawnCauseChain($stack, $metadata, 'Stack');
+        $sourcePawnNativeHelperChain = $sourcePawnChain === null ? self::detectSourcePawnNativeHelperChain($stack, $metadata, 'Stack') : null;
         $hasSourcePawnChain = $sourcePawnChain !== null;
-        $hasSourcePawnBridge = $hasSourcePawnChain || self::stackHasSourcePawnBridge($stack);
-        $hasConsoleBackedBridgeCause = !$hasSourcePawnChain && $consoleBlaming !== null && $hasSourcePawnBridge;
-        $hasTerminalConsoleBridgeCause = !$hasSourcePawnChain && $terminalConsoleCause !== null && !empty($terminalConsoleCause['plugin']) && $hasSourcePawnBridge;
+        $hasSourcePawnNativeHelperChain = $sourcePawnNativeHelperChain !== null;
+        $hasStrongSourcePawnCause = $hasSourcePawnChain || $hasSourcePawnNativeHelperChain;
+        $hasSourcePawnBridge = $hasStrongSourcePawnCause || self::stackHasSourcePawnBridge($stack);
+        $hasConsoleBackedBridgeCause = !$hasStrongSourcePawnCause && $consoleBlaming !== null && $hasSourcePawnBridge;
+        $hasTerminalConsoleBridgeCause = !$hasStrongSourcePawnCause && $terminalConsoleCause !== null && !empty($terminalConsoleCause['plugin']) && $hasSourcePawnBridge;
         $stackFirstCandidate = self::topConsistentCrashCandidate($stack);
         $sourcePawnPlugin = $sourcePawnChain !== null ? basename((string) $sourcePawnChain['plugin']) : null;
         if ($sourcePawnChain !== null) {
@@ -586,12 +592,21 @@ class Crash
                 'Likely plugin cause'
             );
         }
+        if ($sourcePawnNativeHelperChain !== null) {
+            self::addCulpritCandidate(
+                $candidates,
+                $sourcePawnNativeHelperChain['label'],
+                $sourcePawnNativeHelperChain['score'],
+                $sourcePawnNativeHelperChain['reasons'],
+                'Bridge'
+            );
+        }
 
         if ($consoleBlaming !== null && ($sourcePawnPlugin === null || strcasecmp(basename($consoleBlaming), $sourcePawnPlugin) === 0)) {
             self::addCulpritCandidate(
                 $candidates,
                 basename($consoleBlaming),
-                $hasSourcePawnChain ? 34 : (($stackFirstCandidate !== null && !$hasTerminalConsoleBridgeCause) ? 28 : ($hasSourcePawnBridge ? 84 : 60)),
+                $hasStrongSourcePawnCause ? 34 : (($stackFirstCandidate !== null && !$hasTerminalConsoleBridgeCause) ? 28 : ($hasSourcePawnBridge ? 84 : 60)),
                 array_filter(array(
                     'Console log Blaming entry: ' . basename($consoleBlaming),
                     $hasConsoleBackedBridgeCause ? 'SourceMod bridge frames present; plugin debug frames are missing from stackwalk' : null,
@@ -612,13 +627,13 @@ class Crash
             self::addCulpritCandidate(
                 $candidates,
                 basename((string) $terminalConsoleCause['plugin']),
-                $hasSourcePawnChain ? 42 : ($hasSourcePawnBridge ? 170 : 120),
+                $hasStrongSourcePawnCause ? 42 : ($hasSourcePawnBridge ? 170 : 120),
                 $reasons,
-                $hasSourcePawnChain ? 'Supporting signal' : 'Likely plugin cause'
+                $hasStrongSourcePawnCause ? 'Supporting signal' : 'Likely plugin cause'
             );
         }
 
-        if (!$hasSourcePawnChain && $stackFirstCandidate !== null) {
+        if (!$hasStrongSourcePawnCause && $stackFirstCandidate !== null) {
             $score = $stackFirstCandidate['same_prefix_count'] >= 3 ? 164 : 136;
             if (!$hasTerminalConsoleBridgeCause) {
                 $score += 28;
@@ -652,12 +667,13 @@ class Crash
             $reasons = array('Frame #' . ($frame['frame'] ?? $index) . ': ' . $rendered);
             $isSmxLabel = str_ends_with(strtolower($label), '.smx');
             $isBridgeFrame = self::isBridgeFrame($module, $function, $rendered, $label);
+            $isNativeHelperFrame = self::isSourcePawnNativeHelperFrame($module, $function, $rendered, $label);
 
             if ($index === 0) {
-                if (($hasSourcePawnChain || $hasConsoleBackedBridgeCause || $hasTerminalConsoleBridgeCause) && self::isServerEngineModule($label)) {
+                if (($hasStrongSourcePawnCause || $hasConsoleBackedBridgeCause || $hasTerminalConsoleBridgeCause) && self::isServerEngineModule($label)) {
                     $score += 8;
                     $kind = 'Native failure site';
-                    $reasons[] = $hasSourcePawnChain ? 'Native crash site reached from SourcePawn/JIT chain' : 'Native crash site reached from SourceMod evidence';
+                    $reasons[] = $hasStrongSourcePawnCause ? 'Native crash site reached from SourcePawn/JIT chain' : 'Native crash site reached from SourceMod evidence';
                 } else {
                     $score += 28;
                 }
@@ -673,6 +689,10 @@ class Crash
                     $kind = $isSmxLabel ? 'Likely plugin cause' : 'Bridge';
                     $reasons[] = $isSmxLabel ? 'SourceMod plugin frame' : 'SourceMod extension module';
                 }
+            } elseif ($isNativeHelperFrame && $hasSourcePawnNativeHelperChain) {
+                $score += 36;
+                $kind = 'Bridge';
+                $reasons[] = 'SourceMod native memory helper frame';
             } elseif ($isBridgeFrame) {
                 $score -= 24;
                 $kind = 'Bridge';
@@ -680,7 +700,7 @@ class Crash
             }
 
             if (self::isServerEngineModule($label)) {
-                $score += ($hasSourcePawnChain || $hasConsoleBackedBridgeCause || $hasTerminalConsoleBridgeCause) ? 4 : 14;
+                $score += ($hasStrongSourcePawnCause || $hasConsoleBackedBridgeCause || $hasTerminalConsoleBridgeCause) ? 4 : 14;
                 if ($kind === 'Candidate') {
                     $kind = $index === 0 ? 'Native failure site' : 'Native module';
                 }
@@ -701,11 +721,11 @@ class Crash
 
             $moduleKey = $module !== '' && isset($presentByModule[$module]) ? $module : basename(str_replace('\\', '/', $module));
             if ($moduleKey !== '' && isset($presentByModule[$moduleKey]) && !$presentByModule[$moduleKey]) {
-                $score -= ($hasSourcePawnChain || $hasConsoleBackedBridgeCause || $hasTerminalConsoleBridgeCause) && self::isServerEngineModule($label) ? 10 : 18;
+                $score -= ($hasStrongSourcePawnCause || $hasConsoleBackedBridgeCause || $hasTerminalConsoleBridgeCause) && self::isServerEngineModule($label) ? 10 : 18;
                 $reasons[] = 'Module has no symbols';
             }
 
-            if ($stackFirstCandidate !== null && strcasecmp($label, $stackFirstCandidate['label']) === 0 && !$hasSourcePawnChain && !$hasTerminalConsoleBridgeCause) {
+            if ($stackFirstCandidate !== null && strcasecmp($label, $stackFirstCandidate['label']) === 0 && !$hasStrongSourcePawnCause && !$hasTerminalConsoleBridgeCause) {
                 $score += max(10, 34 - ($index * 6));
                 if ($kind === 'Candidate' || $kind === 'Bridge') {
                     $kind = 'Native failure site';
@@ -935,6 +955,94 @@ class Crash
 
         return array(
             'plugin' => $callsite['plugin'],
+            'score' => $score,
+            'reasons' => $reasons,
+        );
+    }
+
+    private static function detectSourcePawnNativeHelperChain(array $stack, array $metadata, string $sourceLabel): ?array
+    {
+        $helperFrames = array();
+        $invocationFrames = array();
+        $startupFrames = array();
+
+        foreach ($stack as $index => $frame) {
+            $module = (string) ($frame['module'] ?? '');
+            $function = (string) ($frame['function'] ?? '');
+            $rendered = (string) ($frame['rendered'] ?? '');
+            $label = self::candidateLabelFromFrame($module, $function, $rendered) ?? '';
+
+            if (self::isSourcePawnNativeHelperFrame($module, $function, $rendered, $label)) {
+                $helperFrames[] = array(
+                    'index' => $index,
+                    'frame' => $frame['frame'] ?? $index,
+                    'module' => $module,
+                    'function' => $function,
+                    'rendered' => $rendered,
+                    'label' => $label,
+                );
+            }
+
+            if (self::isSourcePawnNativeInvocationFrame($module, $function, $rendered, $label)) {
+                $invocationFrames[] = array(
+                    'index' => $index,
+                    'frame' => $frame['frame'] ?? $index,
+                    'rendered' => $rendered,
+                );
+            }
+
+            if (self::isSourcePawnStartupBridgeFrame($module, $function, $rendered, $label)) {
+                $startupFrames[] = array(
+                    'index' => $index,
+                    'frame' => $frame['frame'] ?? $index,
+                    'rendered' => $rendered,
+                );
+            }
+        }
+
+        if ($helperFrames === [] || $invocationFrames === []) {
+            return null;
+        }
+
+        $anchor = $helperFrames[0];
+        $label = $anchor['label'] !== '' ? basename((string) $anchor['label']) : basename((string) $anchor['module']);
+        if ($label === '') {
+            $label = 'sourcemod.logic.so';
+        }
+
+        $reasons = array();
+        if ((int) $anchor['index'] === 0) {
+            $reasons[] = 'Top frame is SourceMod native memory helper';
+        } else {
+            $reasons[] = $sourceLabel . ' helper frame #' . $anchor['frame'] . ': ' . ($anchor['rendered'] !== '' ? $anchor['rendered'] : $label);
+        }
+
+        $reasons[] = 'SourcePawn/SourceMod native invocation chain present';
+
+        if ($startupFrames !== []) {
+            $reasons[] = $sourceLabel . ' startup frame #' . $startupFrames[0]['frame'] . ': ' . $startupFrames[0]['rendered'];
+        }
+
+        $engineAfterHelper = false;
+        foreach ($stack as $frame) {
+            $frameLabel = self::candidateLabelFromFrame((string) ($frame['module'] ?? ''), (string) ($frame['function'] ?? ''), (string) ($frame['rendered'] ?? ''));
+            if ($frameLabel !== null && self::isServerEngineModule($frameLabel)) {
+                $engineAfterHelper = true;
+                break;
+            }
+        }
+        if ($engineAfterHelper) {
+            $reasons[] = 'Engine frames appear only after plugin/native bridge execution';
+        }
+
+        $score = 188;
+        if (self::metadataIndicatesInvalidPointer($metadata)) {
+            $score += 12;
+            $reasons[] = 'Invalid low-address pointer access';
+        }
+
+        return array(
+            'label' => $label,
             'score' => $score,
             'reasons' => $reasons,
         );
@@ -1176,6 +1284,60 @@ class Crash
         return $state;
     }
 
+    /**
+     * @param list<array<string, mixed>> $stack
+     * @return array<string, array<string, mixed>>
+     */
+    private static function loadVerifiedSourceLookupFrameState(Application $app, string $id, array $stack): array
+    {
+        if (($app['config']['upload-settings']['crash_source_lookup_enabled'] ?? false) !== true || $stack === array()) {
+            return array();
+        }
+
+        try {
+            $connection = $app['db'] instanceof LegacyDbalConnection ? $app['db']->getWrappedConnection() : $app['db'];
+            if (!$connection instanceof \Doctrine\DBAL\Connection) {
+                return array();
+            }
+
+            $manager = new CrashSourceLookupManager($connection, HttpClient::create(), $app['root']);
+
+            return $manager->describeVerifiedFrameCachesForCrash($id, $stack);
+        } catch (\Throwable) {
+            return array();
+        }
+    }
+
+    /**
+     * @param list<array<string, mixed>> $stack
+     * @return array<string, mixed>|null
+     */
+    private static function buildLoadFromAddressNotice(array $stack): ?array
+    {
+        if (!isset($stack[0]) || !is_array($stack[0])) {
+            return null;
+        }
+
+        $frame = $stack[0];
+        $module = self::getSymbolModuleName((string) ($frame['module'] ?? ''));
+        $rendered = (string) ($frame['rendered'] ?? '');
+        $function = (string) ($frame['function'] ?? '');
+        $signature = trim($rendered !== '' ? $rendered : $function);
+
+        if ($module !== 'sourcemod.logic.so') {
+            return null;
+        }
+
+        if (!str_contains($signature, 'LoadFromAddress(SourcePawn::IPluginContext*, int const*)')) {
+            return null;
+        }
+
+        return array(
+            'severity' => 'warning',
+            'text' => 'LoadFromAddress crash. Likely causes: invalid or stale memory address passed into <code>LoadFromAddress</code>; outdated gamedata or offsets after a game or extension update; plugin bug in manual memory reads or address arithmetic.',
+        );
+    }
+
     private static function stackRowsFromCarburetorData(array $data): array
     {
         $threadIndex = isset($data['requesting_thread']) ? (int) $data['requesting_thread'] : 0;
@@ -1251,6 +1413,41 @@ class Crash
             || str_contains($haystack, 'bintools.ext')
             || str_contains($haystack, 'sdktools.ext')
             || str_contains($haystack, 'sourcemod.');
+    }
+
+    private static function isSourcePawnNativeHelperFrame(string $module, string $function, string $rendered, string $label): bool
+    {
+        $haystack = strtolower($module . ' ' . $function . ' ' . $rendered . ' ' . $label);
+
+        return str_contains($haystack, 'loadfromaddress(')
+            || str_contains($haystack, 'storetoaddress(')
+            || str_contains($haystack, 'copyfromaddress(')
+            || str_contains($haystack, 'copytoaddress(')
+            || str_contains($haystack, 'fakenativerouter(');
+    }
+
+    private static function isSourcePawnNativeInvocationFrame(string $module, string $function, string $rendered, string $label): bool
+    {
+        $haystack = strtolower($module . ' ' . $function . ' ' . $rendered . ' ' . $label);
+
+        return str_contains($haystack, 'fakenativerouter(')
+            || str_contains($haystack, 'interpreter::invokenative')
+            || str_contains($haystack, 'interpreter::visitsysreq_n')
+            || str_contains($haystack, 'scriptedinvoker::invoke')
+            || str_contains($haystack, 'scriptedinvoker::execute')
+            || str_contains($haystack, 'plugincontext::invoke')
+            || str_contains($haystack, 'environment::invoke')
+            || str_contains($haystack, 'loadfromaddress(')
+            || str_contains($haystack, 'storetoaddress(');
+    }
+
+    private static function isSourcePawnStartupBridgeFrame(string $module, string $function, string $rendered, string $label): bool
+    {
+        $haystack = strtolower($module . ' ' . $function . ' ' . $rendered . ' ' . $label);
+
+        return str_contains($haystack, 'cpluginmanager::allpluginsloaded')
+            || str_contains($haystack, 'doglobalpluginloads')
+            || str_contains($haystack, 'levelinit(');
     }
 
     private static function topNativeFailureSite(array $stack): ?string
@@ -1852,6 +2049,11 @@ class Crash
         $stack = $app['db']->executeQuery('SELECT frame, module, function, rendered, url FROM frame WHERE crash = ? AND thread = ? ORDER BY frame', array($id, $crash['thread']))->fetchAll();
         $modules = $app['db']->executeQuery('SELECT name, identifier, processed, present, HEX(base) AS base FROM module WHERE crash = ? ORDER BY name', array($id))->fetchAll();
         $modules = self::buildModuleCoverageRows($modules, $app['config']);
+        $loadFromAddressNotice = self::buildLoadFromAddressNotice($stack);
+        if ($loadFromAddressNotice !== null) {
+            array_unshift($notices, $loadFromAddressNotice);
+        }
+        $verifiedSourceLookupFrames = self::loadVerifiedSourceLookupFrameState($app, $id, $stack);
         $rawSourcePawnChain = self::loadRawSourcePawnCauseChain($app, $id, $stack, $crash['metadata']);
         $culpritCandidates = self::buildCulpritCandidates($stack, $modules, $crash['metadata'], $crash['cmdline'], $consoleBlaming, $terminalConsoleCause, $rawSourcePawnChain);
         $stats = $app['db']->executeQuery('SELECT COUNT(DISTINCT crash.owner_id) AS owners, COUNT(DISTINCT crash.ip) AS ips, COUNT(*) AS crashes FROM crash, (SELECT owner_id, stackhash FROM crash WHERE id = ?) AS this WHERE this.stackhash = crash.stackhash', [$id])->fetch();
@@ -1913,6 +2115,8 @@ class Crash
             'processing_log' => $processing_log,
             'sourcemod_snapshots' => $snapshots,
             'symbol_upload_log' => self::loadSymbolUploadLog($app, $modules),
+            'verified_source_lookup_frames' => $verifiedSourceLookupFrames,
+            'source_lookup_enabled' => (($app['config']['upload-settings']['crash_source_lookup_enabled'] ?? false) === true),
         ));
     }
 
