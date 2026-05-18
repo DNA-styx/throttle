@@ -394,19 +394,30 @@ class Crash
         return array($title, $body);
     }
 
-    private static function renderMarkdown(string $markdown): string
+    public static function renderMarkdownHtml(string $markdown): string
+    {
+        return self::renderMarkdown($markdown);
+    }
+
+    public static function renderAiMarkdownHtml(string $markdown): string
+    {
+        return self::renderMarkdown(self::normalizeAiMarkdown($markdown), false);
+    }
+
+    private static function renderMarkdown(string $markdown, bool $preserveSoftBreaks = true): string
     {
         $lines = preg_split('/\R/', trim(str_replace("\r\n", "\n", $markdown))) ?: array();
         $html = array();
         $list = null;
         $paragraph = array();
 
-        $flushParagraph = static function () use (&$html, &$paragraph): void {
+        $flushParagraph = static function () use (&$html, &$paragraph, $preserveSoftBreaks): void {
             if (empty($paragraph)) {
                 return;
             }
 
-            $html[] = '<p>' . implode('<br>', array_map([self::class, 'renderMarkdownInline'], $paragraph)) . '</p>';
+            $separator = $preserveSoftBreaks ? '<br>' : ' ';
+            $html[] = '<p>' . implode($separator, array_map([self::class, 'renderMarkdownInline'], $paragraph)) . '</p>';
             $paragraph = array();
         };
         $closeList = static function () use (&$html, &$list): void {
@@ -479,6 +490,56 @@ class Crash
         $closeList();
 
         return implode("\n", $html);
+    }
+
+    private static function normalizeAiMarkdown(string $markdown): string
+    {
+        $markdown = str_replace("\r\n", "\n", $markdown);
+        $markdown = str_replace("\r", "\n", $markdown);
+        $markdown = preg_replace('/\x{FFFD}\s*/u', "\u{0445}", $markdown) ?? $markdown;
+        $markdown = str_replace("\u{FFFD}", "\u{0445}", $markdown);
+        $markdown = str_replace(["\u{00AD}", "\u{200B}", "\u{200C}", "\u{200D}", "\u{FEFF}"], '', $markdown);
+
+        $lines = explode("\n", $markdown);
+        $normalized = array();
+        $buffer = '';
+
+        $flushBuffer = static function () use (&$normalized, &$buffer): void {
+            if ($buffer === '') {
+                return;
+            }
+
+            $normalized[] = trim($buffer);
+            $buffer = '';
+        };
+
+        foreach ($lines as $line) {
+            $line = rtrim($line);
+            $trimmed = ltrim($line);
+            $isStructured = $trimmed !== '' && preg_match('/^(#{1,3}\s|>\s|-\s\[(?: |x|X)\]\s|[-*]\s|\d+\.\s)/u', $trimmed) === 1;
+
+            if ($trimmed === '') {
+                $flushBuffer();
+                $normalized[] = '';
+                continue;
+            }
+
+            if ($isStructured) {
+                $flushBuffer();
+                $normalized[] = $line;
+                continue;
+            }
+
+            if ($buffer !== '' && preg_match('/[\p{L}\p{N})\]`.,:;!?-]$/u', $buffer) === 1) {
+                $buffer .= ' ';
+            }
+
+            $buffer .= $trimmed;
+        }
+
+        $flushBuffer();
+
+        return trim(implode("\n", $normalized));
     }
 
     private static function renderMarkdownInline(string $text): string
@@ -582,7 +643,12 @@ class Crash
         $hasConsoleBackedBridgeCause = !$hasStrongSourcePawnCause && $consoleBlaming !== null && $hasSourcePawnBridge;
         $hasTerminalConsoleBridgeCause = !$hasStrongSourcePawnCause && $terminalConsoleCause !== null && !empty($terminalConsoleCause['plugin']) && $hasSourcePawnBridge;
         $stackFirstCandidate = self::topConsistentCrashCandidate($stack);
+        $stackFirstIsDetourBridge = $stackFirstCandidate !== null
+            && self::isPluginLikeLabel((string) $stackFirstCandidate['label'])
+            && !str_ends_with(strtolower((string) $stackFirstCandidate['label']), '.smx')
+            && self::isDetourCrashFrame((string) ($stackFirstCandidate['function'] ?? ''), (string) ($stackFirstCandidate['rendered'] ?? ''));
         $sourcePawnPlugin = $sourcePawnChain !== null ? basename((string) $sourcePawnChain['plugin']) : null;
+        $consoleBlamingInStack = $consoleBlaming !== null && self::stackContainsLabel($stack, basename($consoleBlaming));
         if ($sourcePawnChain !== null) {
             self::addCulpritCandidate(
                 $candidates,
@@ -608,11 +674,16 @@ class Crash
             self::addCulpritCandidate(
                 $candidates,
                 basename($consoleBlaming),
-                $hasStrongSourcePawnCause ? 38 : (($stackFirstCandidate !== null && !$hasTerminalConsoleBridgeCause) ? 32 : ($hasSourcePawnBridge ? 92 : 72)),
+                $hasStrongSourcePawnCause
+                    ? 38
+                    : ($consoleBlamingInStack
+                        ? ($hasSourcePawnBridge ? 78 : 64)
+                        : ($stackFirstIsDetourBridge ? 12 : (($stackFirstCandidate !== null && !$hasTerminalConsoleBridgeCause) ? 20 : ($hasSourcePawnBridge ? 54 : 44)))),
                 4,
                 array_filter(array(
                     'Console log Blaming entry: ' . basename($consoleBlaming),
                     $hasConsoleBackedBridgeCause ? 'SourceMod bridge frames present; plugin debug frames are missing from stackwalk' : null,
+                    !$consoleBlamingInStack ? 'Blamed plugin is not present in the native stack and is treated only as indirect evidence' : null,
                 )),
                 'Supporting signal'
             );
@@ -645,6 +716,9 @@ class Crash
                 (string) ($stackFirstCandidate['rendered'] ?? ''),
                 (string) $stackFirstCandidate['label']
             ) ? 52 : 26;
+            if ($stackFirstIsDetourBridge) {
+                $rootScore = max($rootScore, 124);
+            }
             if (!$hasTerminalConsoleBridgeCause) {
                 $rootScore += 8;
             }
@@ -712,6 +786,11 @@ class Crash
                     $rootScore += $isSmxLabel ? 88 : 44;
                     $kind = $isSmxLabel ? 'Likely plugin cause' : 'Bridge';
                     $reasons[] = $isSmxLabel ? 'SourceMod plugin frame' : 'SourceMod extension module';
+                    if (!$isSmxLabel && self::isDetourCrashFrame($function, $rendered) && $index <= 1) {
+                        $rootScore += 96;
+                        $failureScore += 18;
+                        $reasons[] = 'Top-of-stack native extension detour/callback frame';
+                    }
                 }
             } elseif ($isNativeHelperFrame && $hasSourcePawnNativeHelperChain) {
                 $rootScore += 64;
@@ -889,6 +968,23 @@ class Crash
             $label = self::candidateLabelFromFrame($module, $function, $rendered) ?? '';
 
             if (self::isBridgeFrame($module, $function, $rendered, $label)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static function stackContainsLabel(array $stack, string $label): bool
+    {
+        foreach ($stack as $frame) {
+            $frameLabel = self::candidateLabelFromFrame(
+                (string) ($frame['module'] ?? ''),
+                (string) ($frame['function'] ?? ''),
+                (string) ($frame['rendered'] ?? '')
+            );
+
+            if ($frameLabel !== null && strcasecmp(basename($frameLabel), basename($label)) === 0) {
                 return true;
             }
         }
@@ -1490,6 +1586,11 @@ class Crash
             || str_contains($haystack, 'bintools.ext')
             || str_contains($haystack, 'sdktools.ext')
             || str_contains($haystack, 'sourcemod.');
+    }
+
+    private static function isDetourCrashFrame(string $function, string $rendered): bool
+    {
+        return preg_match('/Detour_|callback\(|callback$|Hook_|__SourceHook_/i', $function . ' ' . $rendered) === 1;
     }
 
     private static function isSourcePawnNativeHelperFrame(string $module, string $function, string $rendered, string $label): bool

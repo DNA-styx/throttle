@@ -3,6 +3,7 @@
 namespace App\Runtime;
 
 use App\Entity\User;
+use Throttle\Crash;
 use Doctrine\DBAL\Connection;
 use Silex\Application;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
@@ -129,6 +130,7 @@ final class CrashAiAnalysisManager
                 'prompt' => (string) ($row['prompt'] ?? ''),
                 'request_sections' => is_array($sections) ? $sections : [],
                 'response_text' => (string) ($row['response_text'] ?? ''),
+                'response_html' => Crash::renderAiMarkdownHtml((string) ($row['response_text'] ?? '')),
                 'usage' => is_array($usage) ? $usage : null,
                 'usage_summary' => self::summarizeUsage(is_array($usage) ? $usage : null),
                 'is_public' => (int) ($row['is_public'] ?? 0) === 1,
@@ -199,8 +201,8 @@ final class CrashAiAnalysisManager
             'timeout' => 120,
         ]);
 
-        $payload = $response->toArray(false);
-        $text = trim((string) ($payload['output_text'] ?? ''));
+        $payload = $this->decodeJsonPayload($response->getContent(false));
+        $text = trim($this->normalizeModelText((string) ($payload['output_text'] ?? '')));
         if ($text === '' && isset($payload['output']) && is_array($payload['output'])) {
             $parts = [];
             foreach ($payload['output'] as $item) {
@@ -209,7 +211,7 @@ final class CrashAiAnalysisManager
                 }
                 foreach ($item['content'] as $content) {
                     if (is_array($content) && isset($content['text']) && is_string($content['text'])) {
-                        $parts[] = $content['text'];
+                        $parts[] = $this->normalizeModelText($content['text']);
                     }
                 }
             }
@@ -244,11 +246,11 @@ final class CrashAiAnalysisManager
             'timeout' => 120,
         ]);
 
-        $payload = $response->toArray(false);
+        $payload = $this->decodeJsonPayload($response->getContent(false));
         $parts = [];
         foreach (($payload['content'] ?? []) as $content) {
             if (is_array($content) && ($content['type'] ?? null) === 'text' && isset($content['text']) && is_string($content['text'])) {
-                $parts[] = $content['text'];
+                $parts[] = $this->normalizeModelText($content['text']);
             }
         }
         $text = trim(implode("\n\n", $parts));
@@ -286,7 +288,7 @@ final class CrashAiAnalysisManager
             'timeout' => 120,
         ]);
 
-        $payload = $response->toArray(false);
+        $payload = $this->decodeJsonPayload($response->getContent(false));
         $parts = [];
         foreach (($payload['candidates'] ?? []) as $candidate) {
             $contentParts = $candidate['content']['parts'] ?? null;
@@ -295,7 +297,7 @@ final class CrashAiAnalysisManager
             }
             foreach ($contentParts as $part) {
                 if (is_array($part) && isset($part['text']) && is_string($part['text'])) {
-                    $parts[] = $part['text'];
+                    $parts[] = $this->normalizeModelText($part['text']);
                 }
             }
         }
@@ -337,8 +339,8 @@ final class CrashAiAnalysisManager
             'timeout' => 120,
         ]);
 
-        $payload = $response->toArray(false);
-        $text = trim((string) ($payload['choices'][0]['message']['content'] ?? ''));
+        $payload = $this->decodeJsonPayload($response->getContent(false));
+        $text = trim($this->normalizeModelText((string) ($payload['choices'][0]['message']['content'] ?? '')));
         if ($text === '') {
             throw new \RuntimeException('The selected provider returned an empty analysis.');
         }
@@ -404,6 +406,56 @@ final class CrashAiAnalysisManager
         $merged = array_replace_recursive($extra, $basePayload);
 
         return is_array($merged) ? $merged : $basePayload;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function decodeJsonPayload(string $body): array
+    {
+        $payload = json_decode($body, true);
+        if (is_array($payload)) {
+            return $payload;
+        }
+
+        foreach ([
+            @mb_convert_encoding($body, 'UTF-8', 'Windows-1251'),
+            @mb_convert_encoding($body, 'UTF-8', 'ISO-8859-1'),
+        ] as $candidate) {
+            if (!is_string($candidate) || $candidate === '') {
+                continue;
+            }
+
+            $payload = json_decode($candidate, true);
+            if (is_array($payload)) {
+                return $payload;
+            }
+        }
+
+        throw new \RuntimeException('Provider returned invalid JSON.');
+    }
+
+    private function normalizeModelText(string $text): string
+    {
+        if ($text === '') {
+            return '';
+        }
+
+        if (!mb_check_encoding($text, 'UTF-8')) {
+            foreach (['Windows-1251', 'ISO-8859-1'] as $encoding) {
+                $candidate = @mb_convert_encoding($text, 'UTF-8', $encoding);
+                if (is_string($candidate) && $candidate !== '' && mb_check_encoding($candidate, 'UTF-8')) {
+                    $text = $candidate;
+                    break;
+                }
+            }
+        }
+
+        $text = preg_replace('/\x{FFFD}\s*/u', "\u{0445}", $text) ?? $text;
+        $text = str_replace("\u{FFFD}", "\u{0445}", $text);
+        $text = str_replace(["\u{00AD}", "\u{200B}", "\u{200C}", "\u{200D}", "\u{FEFF}"], '', $text);
+
+        return str_replace(["\r\n", "\r"], "\n", $text);
     }
 
     /**

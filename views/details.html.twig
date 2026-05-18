@@ -294,11 +294,18 @@
     position: absolute;
     z-index: 1061;
     width: min(620px, calc(100vw - 64px));
+    max-width: calc(100vw - 40px);
+    height: 360px;
+    min-height: 320px;
+    display: flex;
+    flex-direction: column;
     padding: 12px;
     border: 1px solid #303b4a;
     border-radius: 4px;
     background: #fff;
     box-shadow: 0 10px 26px rgba(0, 0, 0, 0.25);
+    resize: both;
+    overflow: auto;
 }
 
 .crash-ai-panel .form-group {
@@ -314,11 +321,24 @@
     margin-right: 12px;
 }
 
+.crash-ai-panel .details-ai-tab-panel:not(.hidden),
+.crash-ai-panel .raw-ai-tab-panel:not(.hidden) {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    flex-direction: column;
+}
+
 .crash-ai-result {
     margin-top: 10px;
-    max-height: 340px;
+    flex: 1 1 auto;
+    min-height: 220px;
+    max-height: none;
     overflow: auto;
-    white-space: pre-wrap;
+    padding: 10px 12px;
+    border: 1px solid #303b4a;
+    border-radius: 4px;
+    background: #111821;
 }
 
 .crash-ai-tabs {
@@ -351,14 +371,91 @@
 
 .crash-ai-history-response,
 .crash-ai-history-prompt {
-    white-space: pre-wrap;
-    max-height: 220px;
+    flex: 1 1 auto;
+    min-height: 140px;
+    max-height: none;
     overflow: auto;
     margin-top: 8px;
 }
 
+.crash-ai-history-response {
+    padding: 10px 12px;
+    border: 1px solid #303b4a;
+    border-radius: 4px;
+    background: #111821;
+}
+
+.crash-ai-history-toggle {
+    cursor: pointer;
+    list-style: none;
+}
+
+.crash-ai-history-toggle::-webkit-details-marker {
+    display: none;
+}
+
+.crash-ai-history-toggle::marker {
+    display: none;
+}
+
+.crash-ai-history-body {
+    padding-top: 8px;
+}
+
+.crash-ai-history-tabs {
+    display: inline-flex;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.crash-ai-history-tab {
+    border: 1px solid rgba(120, 136, 156, 0.35);
+    background: transparent;
+    color: inherit;
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 12px;
+    line-height: 1.2;
+}
+
+.crash-ai-history-tab.active {
+    background: rgba(63, 136, 248, 0.18);
+    border-color: rgba(63, 136, 248, 0.5);
+}
+
+.crash-ai-history-panel.hidden {
+    display: none;
+}
+
+.crash-ai-markdown-output {
+    white-space: normal;
+    line-height: 1.5;
+    word-break: normal;
+    overflow-wrap: break-word;
+    hyphens: none;
+}
+
+.crash-ai-markdown-output code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.crash-ai-markdown-output p:last-child,
+.crash-ai-markdown-output ul:last-child,
+.crash-ai-markdown-output ol:last-child,
+.crash-ai-markdown-output blockquote:last-child {
+    margin-bottom: 0;
+}
+
 .crash-ai-history-empty {
     margin-top: 8px;
+}
+
+.details-ai-history-list,
+.raw-ai-history-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
 }
 
 .crash-ai-inline-spinner {
@@ -865,6 +962,7 @@ body.theme-dark .crash-ai-panel code {
          data-visibility-url-template="{{ path('crash_ai_history_visibility', {'id': crash.id, 'historyId': 0})|replace({'/0/': '/__HISTORY__/'} ) }}"
          data-token="{{ csrf_token('crash-ai-analyze:' ~ crash.id) }}"
          data-configs="{{ legacy_app.user.ai_configs|default([])|json_encode|e('html_attr') }}"
+         data-history-items="{{ ai_history_items|default([])|json_encode|e('html_attr') }}"
          data-can-ask="{{ legacy_app.user and can_manage ? '1' : '0' }}">
     </div>
     <div id="details-ai-analysis-panel" class="crash-ai-panel hidden" aria-hidden="true">
@@ -909,7 +1007,7 @@ body.theme-dark .crash-ai-panel code {
                 <button type="button" class="btn btn-default details-ai-cancel">Close</button>
             </div>
             <div class="details-ai-status" style="margin-top: 10px;"></div>
-            <pre class="crash-ai-result hidden"></pre>
+            <div class="crash-ai-result crash-ai-markdown-output hidden"></div>
         </div>
 {% endif %}
         <div class="details-ai-tab-panel details-ai-tab-history{% if legacy_app.user and can_manage %} hidden{% endif %}">
@@ -1594,23 +1692,19 @@ body.theme-dark .crash-ai-panel code {
         if (tab === 'history') {
             detailsAiLoadHistory(false);
         }
+        detailsAiSyncPanelHeights();
     }
 
     function detailsAiShowPanel() {
         detailsAiRenderConfigs();
         detailsAiStatus.empty();
-        detailsAiResult.addClass('hidden').text('');
+        detailsAiResult.addClass('hidden').empty();
+        detailsAiAdjustPanelWidth('');
 
         detailsAiPanel.removeClass('hidden').attr('aria-hidden', 'false');
-        var buttonRect = detailsAiButton[0].getBoundingClientRect();
-        var panelWidth = detailsAiPanel.outerWidth() || 620;
-        var scrollTop = $(window).scrollTop() || 0;
-        var scrollLeft = $(window).scrollLeft() || 0;
-        var viewportWidth = window.innerWidth || panelWidth;
-        var left = Math.max(12 + scrollLeft, Math.min(buttonRect.left + scrollLeft - panelWidth + detailsAiButton.outerWidth(), scrollLeft + viewportWidth - panelWidth - 12));
-        var top = Math.max(12 + scrollTop, buttonRect.top + scrollTop + detailsAiButton.outerHeight() + 6);
-        detailsAiPanel.css({ top: top + 'px', left: left + 'px' });
+        detailsAiPositionPanel();
         detailsAiShowTab(detailsAiCanAsk ? 'ask' : 'history');
+        detailsAiSyncPanelHeights();
     }
 
     function detailsAiHidePanel() {
@@ -1641,6 +1735,95 @@ body.theme-dark .crash-ai-panel code {
         return labels.join(', ');
     }
 
+    function detailsAiRenderResponse(container, html, text) {
+        var sanitizedHtml = detailsAiSanitizeDisplay(html || '');
+        var sanitizedText = detailsAiSanitizeDisplay(text || '');
+        if (html) {
+            container.html(sanitizedHtml);
+            return;
+        }
+
+        container.empty().append($('<pre></pre>').text(sanitizedText));
+    }
+
+    function detailsAiSanitizeDisplay(value) {
+        var text = String(value || '');
+        text = text.replace(/\uFFFD/g, '\uE000');
+        text = text.replace(/([ИиЫы])\uE000\s+(?=[А-Яа-яЁё])/g, function(match, letter) {
+            return letter + '\u0445 ';
+        });
+        text = text.replace(/\uE000\s+(?=[A-Za-zА-Яа-яЁё])/g, '\u0445');
+        text = text.replace(/\uE000\s+(?=[.,:;!?)\]<]|$)/g, '\u0445');
+        text = text.replace(/\uE000(?=\s*[.,:;!?)\]<]|$)/g, '\u0445');
+        text = text.replace(/\uE000/g, '\u0445');
+
+        return text;
+    }
+
+    function detailsAiAdjustPanelWidth(text) {
+        detailsAiPanel.css('width', '');
+        detailsAiPositionPanel();
+    }
+
+    function detailsAiPositionPanel() {
+        if (detailsAiPanel.hasClass('hidden') || !detailsAiButton.length) {
+            return;
+        }
+
+        var buttonRect = detailsAiButton[0].getBoundingClientRect();
+        var panelWidth = detailsAiPanel.outerWidth() || 620;
+        var scrollTop = $(window).scrollTop() || 0;
+        var scrollLeft = $(window).scrollLeft() || 0;
+        var viewportWidth = window.innerWidth || panelWidth;
+        var left = Math.max(12 + scrollLeft, Math.min(buttonRect.left + scrollLeft - panelWidth + detailsAiButton.outerWidth(), scrollLeft + viewportWidth - panelWidth - 12));
+        var top = Math.max(12 + scrollTop, buttonRect.top + scrollTop + detailsAiButton.outerHeight() + 6);
+        detailsAiPanel.css({ top: top + 'px', left: left + 'px' });
+    }
+
+    function detailsAiSyncPanelHeights() {
+        if (detailsAiPanel.hasClass('hidden')) {
+            return;
+        }
+
+        var panelHeight = detailsAiPanel.innerHeight() || 0;
+        if (panelHeight <= 0) {
+            return;
+        }
+
+        var headerHeight = detailsAiPanel.find('.raw-source-header').outerHeight(true) || 0;
+        var tabsHeight = detailsAiPanel.find('.crash-ai-tabs').outerHeight(true) || 0;
+        var available = Math.max(180, panelHeight - headerHeight - tabsHeight - 30);
+
+        if (detailsAiPanel.find('.details-ai-tab-ask').is(':visible')) {
+            var askPanel = detailsAiPanel.find('.details-ai-tab-ask');
+            var fixed = 0;
+            askPanel.children().not('.crash-ai-result').each(function() {
+                fixed += $(this).outerHeight(true) || 0;
+            });
+            detailsAiResult.css('height', Math.max(160, available - fixed) + 'px');
+        }
+
+        if (detailsAiPanel.find('.details-ai-tab-history').is(':visible')) {
+            var historyPanel = detailsAiPanel.find('.details-ai-tab-history');
+            var historyFixed = 0;
+            historyPanel.children().not('.details-ai-history-list').each(function() {
+                historyFixed += $(this).outerHeight(true) || 0;
+            });
+            detailsAiHistoryList.css('height', Math.max(160, available - historyFixed) + 'px');
+        }
+    }
+
+    function detailsAiBindHistoryTabs(item) {
+        item.find('.crash-ai-history-tab').on('click', function() {
+            var button = $(this);
+            var tab = String(button.data('tab') || 'output');
+            item.find('.crash-ai-history-tab').removeClass('active');
+            button.addClass('active');
+            item.find('.crash-ai-history-panel').addClass('hidden');
+            item.find('.crash-ai-history-panel-' + tab).removeClass('hidden');
+        });
+    }
+
     function detailsAiRenderHistory(items) {
         detailsAiHistoryList.empty();
         if (!items || !items.length) {
@@ -1648,12 +1831,16 @@ body.theme-dark .crash-ai-panel code {
             return;
         }
 
-        items.forEach(function(entry) {
-            var item = $('<div class="crash-ai-history-entry"></div>');
-            var head = $('<div class="crash-ai-history-head"></div>').appendTo(item);
+        items.forEach(function(entry, index) {
+            var item = $('<details class="crash-ai-history-entry"></details>');
+            if (index === 0) {
+                item.attr('open', 'open');
+            }
+
+            var head = $('<summary class="crash-ai-history-head crash-ai-history-toggle"></summary>').appendTo(item);
             var metaBox = $('<div></div>').appendTo(head);
-            $('<div class="fw-semibold"></div>').text((entry.user_name || ('User #' + entry.user_id)) + ' В· ' + entry.provider_label + ' / ' + entry.model).appendTo(metaBox);
-            $('<div class="crash-ai-history-meta"></div>').text(entry.created_at + ' В· ' + entry.context + ' В· ' + detailsAiHistorySections(entry)).appendTo(metaBox);
+            $('<div class="fw-semibold"></div>').text((entry.user_name || ('User #' + entry.user_id)) + ' - ' + entry.provider_label + ' / ' + entry.model).appendTo(metaBox);
+            $('<div class="crash-ai-history-meta"></div>').text(entry.created_at + ' - ' + entry.context + ' - ' + detailsAiHistorySections(entry)).appendTo(metaBox);
 
             var actions = $('<div class="text-right"></div>').appendTo(head);
             $('<span class="label ' + (entry.is_public ? 'label-success' : 'label-default') + '"></span>')
@@ -1691,12 +1878,22 @@ body.theme-dark .crash-ai-panel code {
                     .appendTo(actions);
             }
 
-            var promptDetails = $('<details></details>').appendTo(item);
-            $('<summary></summary>').text('Prompt').appendTo(promptDetails);
-            $('<pre class="crash-ai-history-prompt"></pre>').text(entry.prompt || '').appendTo(promptDetails);
-            $('<pre class="crash-ai-history-response"></pre>').text(entry.response_text || '').appendTo(item);
+            var body = $('<div class="crash-ai-history-body"></div>').appendTo(item);
+            var tabs = $('<div class="crash-ai-history-tabs" role="tablist" aria-label="AI history entry tabs"></div>').appendTo(body);
+            $('<button type="button" class="crash-ai-history-tab active" data-tab="output">Output</button>').appendTo(tabs);
+            $('<button type="button" class="crash-ai-history-tab" data-tab="prompt">Prompt</button>').appendTo(tabs);
+
+            var outputPanel = $('<div class="crash-ai-history-panel crash-ai-history-panel-output"></div>').appendTo(body);
+            detailsAiRenderResponse($('<div class="crash-ai-history-response crash-ai-markdown-output"></div>').appendTo(outputPanel), entry.response_html || '', entry.response_text || '');
+
+            var promptPanel = $('<div class="crash-ai-history-panel crash-ai-history-panel-prompt hidden"></div>').appendTo(body);
+            $('<pre class="crash-ai-history-prompt"></pre>').text(entry.prompt || '').appendTo(promptPanel);
+
+            detailsAiBindHistoryTabs(item);
             detailsAiHistoryList.append(item);
         });
+
+        detailsAiAdjustPanelWidth((items[0] && items[0].response_text) ? items[0].response_text : '');
     }
 
     function detailsAiLoadHistory(forceReload) {
@@ -1755,6 +1952,12 @@ body.theme-dark .crash-ai-panel code {
         detailsAiHidePanel();
     });
 
+    if (window.ResizeObserver && detailsAiPanel.length) {
+        new ResizeObserver(function() {
+            detailsAiSyncPanelHeights();
+        }).observe(detailsAiPanel[0]);
+    }
+
     detailsAiPanel.find('.details-ai-submit').on('click', function() {
         if (!detailsAiCanAsk) {
             return;
@@ -1766,7 +1969,7 @@ body.theme-dark .crash-ai-panel code {
         }
 
         detailsAiSetStatus('info', 'Analyzing crash with AI...', true);
-        detailsAiResult.addClass('hidden').text('');
+        detailsAiResult.addClass('hidden').empty();
 
         $.ajax({
             url: detailsAiUrl,
@@ -1788,8 +1991,9 @@ body.theme-dark .crash-ai-panel code {
                 detailsAiSetStatus('danger', result && result.reason ? result.reason : 'AI analysis failed.');
                 return;
             }
-            detailsAiSetStatus('success', result.provider_label + ' / ' + result.model + ' пїЅ ' + result.duration_ms + ' ms');
-            detailsAiResult.removeClass('hidden').text(result.response_text || '');
+            detailsAiSetStatus('success', result.provider_label + ' / ' + result.model + ' - ' + result.duration_ms + ' ms');
+            detailsAiRenderResponse(detailsAiResult.removeClass('hidden'), result.response_html || '', result.response_text || '');
+            detailsAiAdjustPanelWidth(result.response_text || '');
             detailsAiHistoryLoaded = false;
         }).fail(function(xhr) {
             var message = 'AI analysis failed.';

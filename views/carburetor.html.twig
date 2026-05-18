@@ -131,25 +131,62 @@
     .crash-ai-panel {
         position: absolute;
         z-index: 5;
-        width: min(620px, calc(100% - 64px));
+        width: min(620px, calc(100vw - 64px));
+        max-width: calc(100vw - 40px);
+        height: 360px;
+        min-height: 320px;
+        display: flex;
+        flex-direction: column;
         padding: 12px;
         border: 1px solid #303b4a;
         border-radius: 4px;
         background: #fff;
         box-shadow: 0 10px 26px rgba(0, 0, 0, 0.25);
+        resize: both;
+        overflow: auto;
     }
     .crash-ai-panel .form-group { margin-bottom: 10px; }
     .crash-ai-panel .checkbox { margin-top: 0; margin-bottom: 8px; }
     .crash-ai-panel .checkbox.inline { margin-right: 12px; }
-    .crash-ai-result { margin-top: 10px; max-height: 340px; overflow: auto; white-space: pre-wrap; }
+    .crash-ai-panel .details-ai-tab-panel:not(.hidden),
+    .crash-ai-panel .raw-ai-tab-panel:not(.hidden) { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; }
+    .crash-ai-result { margin-top: 10px; flex: 1 1 auto; min-height: 220px; max-height: none; overflow: auto; padding: 10px 12px; border: 1px solid #303b4a; border-radius: 4px; background: #111821; }
     .crash-ai-tabs { margin-bottom: 10px; }
     .crash-ai-history-entry { border-top: 1px solid rgba(120, 136, 156, 0.25); padding: 10px 0; }
     .crash-ai-history-entry:first-child { border-top: 0; padding-top: 0; }
     .crash-ai-history-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
     .crash-ai-history-meta { color: #8a97a6; font-size: 12px; line-height: 1.4; }
     .crash-ai-history-response,
-    .crash-ai-history-prompt { white-space: pre-wrap; max-height: 220px; overflow: auto; margin-top: 8px; }
+    .crash-ai-history-prompt { flex: 1 1 auto; min-height: 140px; max-height: none; overflow: auto; margin-top: 8px; }
+    .crash-ai-history-response { padding: 10px 12px; border: 1px solid #303b4a; border-radius: 4px; background: #111821; }
     .crash-ai-history-empty { margin-top: 8px; }
+    .details-ai-history-list,
+    .raw-ai-history-list { flex: 1 1 auto; min-height: 0; overflow: auto; }
+    .crash-ai-history-toggle { cursor: pointer; list-style: none; }
+    .crash-ai-history-toggle::-webkit-details-marker { display: none; }
+    .crash-ai-history-toggle::marker { display: none; }
+    .crash-ai-history-body { padding-top: 8px; }
+    .crash-ai-history-tabs { display: inline-flex; gap: 6px; margin-bottom: 8px; }
+    .crash-ai-history-tab {
+        border: 1px solid rgba(120, 136, 156, 0.35);
+        background: transparent;
+        color: inherit;
+        border-radius: 4px;
+        padding: 4px 10px;
+        font-size: 12px;
+        line-height: 1.2;
+    }
+    .crash-ai-history-tab.active {
+        background: rgba(63, 136, 248, 0.18);
+        border-color: rgba(63, 136, 248, 0.5);
+    }
+    .crash-ai-history-panel.hidden { display: none; }
+    .crash-ai-markdown-output { white-space: normal; line-height: 1.5; word-break: normal; overflow-wrap: break-word; hyphens: none; }
+    .crash-ai-markdown-output code { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .crash-ai-markdown-output p:last-child,
+    .crash-ai-markdown-output ul:last-child,
+    .crash-ai-markdown-output ol:last-child,
+    .crash-ai-markdown-output blockquote:last-child { margin-bottom: 0; }
     .crash-ai-inline-spinner {
         display: inline-block;
         width: 12px;
@@ -242,7 +279,8 @@
      data-history-url="{{ path('crash_ai_history', {'id': id}) }}"
      data-visibility-url-template="{{ path('crash_ai_history_visibility', {'id': id, 'historyId': 0})|replace({'/0/': '/__HISTORY__/'} ) }}"
      data-token="{{ csrf_token('crash-ai-analyze:' ~ id) }}"
-     data-configs="{{ legacy_app.user.ai_configs|default([])|json_encode|e('html_attr') }}">
+     data-configs="{{ legacy_app.user.ai_configs|default([])|json_encode|e('html_attr') }}"
+     data-history-items="{{ ai_history_items|default([])|json_encode|e('html_attr') }}">
 </div>
 <div id="raw-ai-analysis-panel" class="crash-ai-panel hidden" aria-hidden="true">
     <div class="raw-source-header">
@@ -281,7 +319,7 @@
             <button type="button" class="btn btn-default raw-ai-cancel">Close</button>
         </div>
         <div class="raw-ai-status" style="margin-top: 10px;"></div>
-        <pre class="crash-ai-result hidden"></pre>
+        <div class="crash-ai-result crash-ai-markdown-output hidden"></div>
     </div>
     <div class="raw-ai-tab-panel raw-ai-tab-history hidden">
         <div class="raw-ai-history-status"></div>
@@ -395,6 +433,7 @@ function rawAiShowTab(tab) {
     if (tab === 'history') {
         rawAiLoadHistory(false);
     }
+    rawAiSyncPanelHeights();
 }
 
 function rawAiHistorySections(entry) {
@@ -408,6 +447,95 @@ function rawAiHistorySections(entry) {
     return labels.join(', ');
 }
 
+function rawAiRenderResponse(container, html, text) {
+    var sanitizedHtml = rawAiSanitizeDisplay(html || '');
+    var sanitizedText = rawAiSanitizeDisplay(text || '');
+    if (html) {
+        container.html(sanitizedHtml);
+        return;
+    }
+
+    container.empty().append($('<pre></pre>').text(sanitizedText));
+}
+
+function rawAiSanitizeDisplay(value) {
+    var text = String(value || '');
+    text = text.replace(/\uFFFD/g, '\uE000');
+    text = text.replace(/([ИиЫы])\uE000\s+(?=[А-Яа-яЁё])/g, function(match, letter) {
+        return letter + '\u0445 ';
+    });
+    text = text.replace(/\uE000\s+(?=[A-Za-zА-Яа-яЁё])/g, '\u0445');
+    text = text.replace(/\uE000\s+(?=[.,:;!?)\]<]|$)/g, '\u0445');
+    text = text.replace(/\uE000(?=\s*[.,:;!?)\]<]|$)/g, '\u0445');
+    text = text.replace(/\uE000/g, '\u0445');
+
+    return text;
+}
+
+function rawAiAdjustPanelWidth(text) {
+    rawAiPanel.css('width', '');
+    rawAiPositionPanel();
+}
+
+function rawAiPositionPanel() {
+    if (rawAiPanel.hasClass('hidden') || !rawAiButton.length) {
+        return;
+    }
+
+    var buttonRect = rawAiButton[0].getBoundingClientRect();
+    var panelWidth = rawAiPanel.outerWidth() || 620;
+    var scrollTop = $(window).scrollTop() || 0;
+    var scrollLeft = $(window).scrollLeft() || 0;
+    var viewportWidth = window.innerWidth || panelWidth;
+    var left = Math.max(12 + scrollLeft, Math.min(buttonRect.left + scrollLeft - panelWidth + rawAiButton.outerWidth(), scrollLeft + viewportWidth - panelWidth - 12));
+    var top = Math.max(12 + scrollTop, buttonRect.top + scrollTop + rawAiButton.outerHeight() + 6);
+    rawAiPanel.css({ top: top + 'px', left: left + 'px' });
+}
+
+function rawAiSyncPanelHeights() {
+    if (rawAiPanel.hasClass('hidden')) {
+        return;
+    }
+
+    var panelHeight = rawAiPanel.innerHeight() || 0;
+    if (panelHeight <= 0) {
+        return;
+    }
+
+    var headerHeight = rawAiPanel.find('.raw-source-header').outerHeight(true) || 0;
+    var tabsHeight = rawAiPanel.find('.crash-ai-tabs').outerHeight(true) || 0;
+    var available = Math.max(180, panelHeight - headerHeight - tabsHeight - 30);
+
+    if (rawAiPanel.find('.raw-ai-tab-ask').is(':visible')) {
+        var askPanel = rawAiPanel.find('.raw-ai-tab-ask');
+        var fixed = 0;
+        askPanel.children().not('.crash-ai-result').each(function() {
+            fixed += $(this).outerHeight(true) || 0;
+        });
+        rawAiResult.css('height', Math.max(160, available - fixed) + 'px');
+    }
+
+    if (rawAiPanel.find('.raw-ai-tab-history').is(':visible')) {
+        var historyPanel = rawAiPanel.find('.raw-ai-tab-history');
+        var historyFixed = 0;
+        historyPanel.children().not('.raw-ai-history-list').each(function() {
+            historyFixed += $(this).outerHeight(true) || 0;
+        });
+        rawAiHistoryList.css('height', Math.max(160, available - historyFixed) + 'px');
+    }
+}
+
+function rawAiBindHistoryTabs(item) {
+    item.find('.crash-ai-history-tab').on('click', function() {
+        var button = $(this);
+        var tab = String(button.data('tab') || 'output');
+        item.find('.crash-ai-history-tab').removeClass('active');
+        button.addClass('active');
+        item.find('.crash-ai-history-panel').addClass('hidden');
+        item.find('.crash-ai-history-panel-' + tab).removeClass('hidden');
+    });
+}
+
 function rawAiRenderHistory(items) {
     rawAiHistoryList.empty();
     if (!items || !items.length) {
@@ -415,12 +543,16 @@ function rawAiRenderHistory(items) {
         return;
     }
 
-    items.forEach(function(entry) {
-        var item = $('<div class="crash-ai-history-entry"></div>');
-        var head = $('<div class="crash-ai-history-head"></div>').appendTo(item);
+    items.forEach(function(entry, index) {
+        var item = $('<details class="crash-ai-history-entry"></details>');
+        if (index === 0) {
+            item.attr('open', 'open');
+        }
+
+        var head = $('<summary class="crash-ai-history-head crash-ai-history-toggle"></summary>').appendTo(item);
         var metaBox = $('<div></div>').appendTo(head);
-        $('<div class="fw-semibold"></div>').text((entry.user_name || ('User #' + entry.user_id)) + ' В· ' + entry.provider_label + ' / ' + entry.model).appendTo(metaBox);
-        $('<div class="crash-ai-history-meta"></div>').text(entry.created_at + ' В· ' + entry.context + ' В· ' + rawAiHistorySections(entry)).appendTo(metaBox);
+        $('<div class="fw-semibold"></div>').text((entry.user_name || ('User #' + entry.user_id)) + ' - ' + entry.provider_label + ' / ' + entry.model).appendTo(metaBox);
+        $('<div class="crash-ai-history-meta"></div>').text(entry.created_at + ' - ' + entry.context + ' - ' + rawAiHistorySections(entry)).appendTo(metaBox);
 
         var actions = $('<div class="text-right"></div>').appendTo(head);
         $('<span class="label ' + (entry.is_public ? 'label-success' : 'label-default') + '"></span>')
@@ -458,12 +590,22 @@ function rawAiRenderHistory(items) {
                 .appendTo(actions);
         }
 
-        var promptDetails = $('<details></details>').appendTo(item);
-        $('<summary></summary>').text('Prompt').appendTo(promptDetails);
-        $('<pre class="crash-ai-history-prompt"></pre>').text(entry.prompt || '').appendTo(promptDetails);
-        $('<pre class="crash-ai-history-response"></pre>').text(entry.response_text || '').appendTo(item);
+        var body = $('<div class="crash-ai-history-body"></div>').appendTo(item);
+        var tabs = $('<div class="crash-ai-history-tabs" role="tablist" aria-label="AI history entry tabs"></div>').appendTo(body);
+        $('<button type="button" class="crash-ai-history-tab active" data-tab="output">Output</button>').appendTo(tabs);
+        $('<button type="button" class="crash-ai-history-tab" data-tab="prompt">Prompt</button>').appendTo(tabs);
+
+        var outputPanel = $('<div class="crash-ai-history-panel crash-ai-history-panel-output"></div>').appendTo(body);
+        rawAiRenderResponse($('<div class="crash-ai-history-response crash-ai-markdown-output"></div>').appendTo(outputPanel), entry.response_html || '', entry.response_text || '');
+
+        var promptPanel = $('<div class="crash-ai-history-panel crash-ai-history-panel-prompt hidden"></div>').appendTo(body);
+        $('<pre class="crash-ai-history-prompt"></pre>').text(entry.prompt || '').appendTo(promptPanel);
+
+        rawAiBindHistoryTabs(item);
         rawAiHistoryList.append(item);
     });
+
+    rawAiAdjustPanelWidth((items[0] && items[0].response_text) ? items[0].response_text : '');
 }
 
 function rawAiLoadHistory(forceReload) {
@@ -491,17 +633,12 @@ function rawAiLoadHistory(forceReload) {
 function rawAiShowPanel() {
     rawAiRenderConfigs();
     rawAiStatus.empty();
-    rawAiResult.addClass('hidden').text('');
+    rawAiResult.addClass('hidden').empty();
+    rawAiAdjustPanelWidth('');
     rawAiPanel.removeClass('hidden').attr('aria-hidden', 'false');
-    var buttonRect = rawAiButton[0].getBoundingClientRect();
-    var panelWidth = rawAiPanel.outerWidth() || 620;
-    var scrollTop = $(window).scrollTop() || 0;
-    var scrollLeft = $(window).scrollLeft() || 0;
-    var viewportWidth = window.innerWidth || panelWidth;
-    var left = Math.max(12 + scrollLeft, Math.min(buttonRect.left + scrollLeft - panelWidth + rawAiButton.outerWidth(), scrollLeft + viewportWidth - panelWidth - 12));
-    var top = Math.max(12 + scrollTop, buttonRect.top + scrollTop + rawAiButton.outerHeight() + 6);
-    rawAiPanel.css({ top: top + 'px', left: left + 'px' });
+    rawAiPositionPanel();
     rawAiShowTab('ask');
+    rawAiSyncPanelHeights();
 }
 
 function rawAiHidePanel() {
@@ -512,6 +649,12 @@ rawAiButton.on('click', function(event) {
     event.preventDefault();
     rawAiShowPanel();
 });
+
+if (window.ResizeObserver && rawAiPanel.length) {
+    new ResizeObserver(function() {
+        rawAiSyncPanelHeights();
+    }).observe(rawAiPanel[0]);
+}
 
 rawAiSelect.on('change', function() {
     var selected = rawAiSelectedConfig();
@@ -571,7 +714,8 @@ rawAiPanel.find('.raw-ai-submit').on('click', function() {
             return;
         }
         rawAiSetStatus('success', result.provider_label + ' / ' + result.model + ' · ' + result.duration_ms + ' ms');
-        rawAiResult.removeClass('hidden').text(result.response_text || '');
+        rawAiRenderResponse(rawAiResult.removeClass('hidden'), result.response_html || '', result.response_text || '');
+        rawAiAdjustPanelWidth(result.response_text || '');
         rawAiHistoryLoaded = false;
     }).fail(function(xhr) {
         var message = 'AI analysis failed.';

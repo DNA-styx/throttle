@@ -10,6 +10,7 @@ use App\Repository\UserRepository;
 use Doctrine\DBAL\Connection;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
+use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\KernelInterface;
@@ -178,35 +179,36 @@ class LegacyCrashController extends AbstractController
     public function aiAnalyze(Request $request, string $id, CrashAiAnalysisManager $crashAiAnalysisManager): Response
     {
         if (!$this->isCsrfTokenValid('crash-ai-analyze:'.$id, (string) $request->request->get('_token'))) {
-            return $this->json(['status' => 'error', 'reason' => 'Invalid CSRF token.'], Response::HTTP_FORBIDDEN);
+            return $this->jsonUtf8(['status' => 'error', 'reason' => 'Invalid CSRF token.'], Response::HTTP_FORBIDDEN);
         }
 
         if ((UploadSettings::load($this->projectDir)['crash_ai_analysis_enabled'] ?? false) !== true) {
-            return $this->json(['status' => 'error', 'reason' => 'AI crash analysis is disabled by the administrator.'], Response::HTTP_FORBIDDEN);
+            return $this->jsonUtf8(['status' => 'error', 'reason' => 'AI crash analysis is disabled by the administrator.'], Response::HTTP_FORBIDDEN);
         }
 
         $app = $this->legacyBridgeFactory->createHttp($request);
         $user = $this->getUser();
         if (!$user instanceof \App\Entity\User || $app['user'] === null) {
-            return $this->json(['status' => 'error', 'reason' => 'Authentication required.'], Response::HTTP_UNAUTHORIZED);
+            return $this->jsonUtf8(['status' => 'error', 'reason' => 'Authentication required.'], Response::HTTP_UNAUTHORIZED);
         }
 
         $ownerId = $this->connection->fetchOne('SELECT owner_id FROM crash WHERE id = ?', [$id]);
         if ($ownerId === false) {
-            return $this->json(['status' => 'error', 'reason' => 'Crash not found.'], Response::HTTP_NOT_FOUND);
+            return $this->jsonUtf8(['status' => 'error', 'reason' => 'Crash not found.'], Response::HTTP_NOT_FOUND);
         }
 
         $canManage = $app['user']['admin'] || ($ownerId !== null && in_array((int) $ownerId, $app['user']['owner_ids'], true));
         if (!$canManage) {
-            return $this->json(['status' => 'error', 'reason' => 'Forbidden.'], Response::HTTP_FORBIDDEN);
+            return $this->jsonUtf8(['status' => 'error', 'reason' => 'Forbidden.'], Response::HTTP_FORBIDDEN);
         }
 
         try {
             $result = $crashAiAnalysisManager->analyze($user, $app, $id, $request->request->all());
+            $result['response_html'] = \Throttle\Crash::renderAiMarkdownHtml((string) ($result['response_text'] ?? ''));
 
-            return $this->json($result);
+            return $this->jsonUtf8($result);
         } catch (\Throwable $e) {
-            return $this->json([
+            return $this->jsonUtf8([
                 'status' => 'error',
                 'reason' => $e->getMessage(),
             ], Response::HTTP_BAD_REQUEST);
@@ -217,26 +219,26 @@ class LegacyCrashController extends AbstractController
     public function aiHistory(Request $request, string $id, CrashAiAnalysisManager $crashAiAnalysisManager): Response
     {
         if ((UploadSettings::load($this->projectDir)['crash_ai_analysis_enabled'] ?? false) !== true) {
-            return $this->json(['status' => 'error', 'reason' => 'AI crash analysis is disabled by the administrator.'], Response::HTTP_FORBIDDEN);
+            return $this->jsonUtf8(['status' => 'error', 'reason' => 'AI crash analysis is disabled by the administrator.'], Response::HTTP_FORBIDDEN);
         }
 
         $app = $this->legacyBridgeFactory->createHttp($request);
         $ownerId = $this->connection->fetchOne('SELECT owner_id FROM crash WHERE id = ?', [$id]);
         if ($ownerId === false) {
-            return $this->json(['status' => 'error', 'reason' => 'Crash not found.'], Response::HTTP_NOT_FOUND);
+            return $this->jsonUtf8(['status' => 'error', 'reason' => 'Crash not found.'], Response::HTTP_NOT_FOUND);
         }
 
         $user = $this->getUser();
         $canManage = $app['user'] !== null && ($app['user']['admin'] || ($ownerId !== null && in_array((int) $ownerId, $app['user']['owner_ids'], true)));
 
         try {
-            return $this->json([
+            return $this->jsonUtf8([
                 'status' => 'ok',
                 'items' => $crashAiAnalysisManager->listHistoryForCrash($id, $user instanceof \App\Entity\User ? $user : null, $canManage),
                 'can_ask' => $user instanceof \App\Entity\User && $canManage,
             ]);
         } catch (\Throwable $e) {
-            return $this->json([
+            return $this->jsonUtf8([
                 'status' => 'error',
                 'reason' => $e->getMessage(),
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
@@ -247,31 +249,39 @@ class LegacyCrashController extends AbstractController
     public function aiHistoryVisibility(Request $request, string $id, int $historyId, CrashAiAnalysisManager $crashAiAnalysisManager): Response
     {
         if (!$this->isCsrfTokenValid('crash-ai-analyze:'.$id, (string) $request->request->get('_token'))) {
-            return $this->json(['status' => 'error', 'reason' => 'Invalid CSRF token.'], Response::HTTP_FORBIDDEN);
+            return $this->jsonUtf8(['status' => 'error', 'reason' => 'Invalid CSRF token.'], Response::HTTP_FORBIDDEN);
         }
 
         if ((UploadSettings::load($this->projectDir)['crash_ai_analysis_enabled'] ?? false) !== true) {
-            return $this->json(['status' => 'error', 'reason' => 'AI crash analysis is disabled by the administrator.'], Response::HTTP_FORBIDDEN);
+            return $this->jsonUtf8(['status' => 'error', 'reason' => 'AI crash analysis is disabled by the administrator.'], Response::HTTP_FORBIDDEN);
         }
 
         $user = $this->getUser();
         if (!$user instanceof \App\Entity\User) {
-            return $this->json(['status' => 'error', 'reason' => 'Authentication required.'], Response::HTTP_UNAUTHORIZED);
+            return $this->jsonUtf8(['status' => 'error', 'reason' => 'Authentication required.'], Response::HTTP_UNAUTHORIZED);
         }
 
         try {
             $item = $crashAiAnalysisManager->updateHistoryVisibility($user, $id, $historyId, !empty($request->request->get('is_public')));
 
-            return $this->json([
+            return $this->jsonUtf8([
                 'status' => 'ok',
                 'item' => $item,
             ]);
         } catch (\Throwable $e) {
-            return $this->json([
+            return $this->jsonUtf8([
                 'status' => 'error',
                 'reason' => $e->getMessage(),
             ], Response::HTTP_BAD_REQUEST);
         }
+    }
+
+    private function jsonUtf8(array $data, int $status = Response::HTTP_OK): JsonResponse
+    {
+        $response = new JsonResponse($data, $status);
+        $response->setEncodingOptions($response->getEncodingOptions() | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        return $response;
     }
 
     #[Route('/{id}/reprocess', name: 'reprocess', methods: ['POST'], requirements: ['id' => '[0-9a-zA-Z]{12}'], priority: -10)]
