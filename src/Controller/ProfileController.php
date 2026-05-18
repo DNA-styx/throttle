@@ -4,11 +4,15 @@ namespace App\Controller;
 
 use App\Entity\ExternalAccount;
 use App\Entity\User;
+use App\Runtime\CrashAiProviderCatalog;
+use App\Runtime\UploadSettings;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
+use App\Runtime\UserAiConfigManager;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 
@@ -18,7 +22,7 @@ class ProfileController extends AbstractController
     private const TOKEN_ACTIVITY_PAGE_SIZE = 50;
 
     #[Route('/profile', name: 'profile', methods: ['GET'])]
-    public function show(Request $request, EntityManagerInterface $entityManager, Connection $connection): Response
+    public function show(Request $request, EntityManagerInterface $entityManager, Connection $connection, UserAiConfigManager $aiConfigManager, KernelInterface $kernel): Response
     {
         $user = $this->currentUser();
         if ($user->getUploadToken() === '') {
@@ -47,6 +51,10 @@ class ProfileController extends AbstractController
             'coreConfigBaseUrl' => $baseUrl,
             'tokenStats' => $this->loadTokenStats($connection, $user),
             'recentServers' => $this->loadRecentServers($connection, $user, 5),
+            'aiConfigs' => $aiConfigManager->listConfigsForUser($user->getId()),
+            'aiProviderTemplates' => $aiConfigManager->providerTemplates(),
+            'defaultAiPrompt' => CrashAiProviderCatalog::DEFAULT_PROMPT,
+            'aiAnalysisEnabled' => UploadSettings::load($kernel->getProjectDir())['crash_ai_analysis_enabled'],
         ]);
     }
 
@@ -101,6 +109,47 @@ class ProfileController extends AbstractController
         $entityManager->flush();
 
         $this->addFlash('success', 'Theme preference saved.');
+
+        return $this->redirectToRoute('profile', [], Response::HTTP_SEE_OTHER);
+    }
+
+    #[Route('/profile/ai-config/save', name: 'profile_ai_config_save', methods: ['POST'])]
+    public function saveAiConfig(Request $request, UserAiConfigManager $aiConfigManager): Response
+    {
+        if (!$this->isCsrfTokenValid('profile-ai-config-save', (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        try {
+            $config = $aiConfigManager->saveConfig($this->currentUser(), $request->request->all());
+            $this->addFlash('success', sprintf('AI config "%s" saved.', $config['display_name']));
+        } catch (\Throwable $e) {
+            $this->addFlash('danger', $e->getMessage());
+        }
+
+        return $this->redirectToRoute('profile', [], Response::HTTP_SEE_OTHER);
+    }
+
+    #[Route('/profile/ai-config/delete', name: 'profile_ai_config_delete', methods: ['POST'])]
+    public function deleteAiConfig(Request $request, UserAiConfigManager $aiConfigManager): Response
+    {
+        if (!$this->isCsrfTokenValid('profile-ai-config-delete', (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        $configId = (int) $request->request->get('config_id', 0);
+        if ($configId < 1) {
+            $this->addFlash('danger', 'Select an AI config to delete.');
+
+            return $this->redirectToRoute('profile', [], Response::HTTP_SEE_OTHER);
+        }
+
+        try {
+            $aiConfigManager->deleteConfig($this->currentUser(), $configId);
+            $this->addFlash('success', 'AI config deleted.');
+        } catch (\Throwable $e) {
+            $this->addFlash('danger', $e->getMessage());
+        }
 
         return $this->redirectToRoute('profile', [], Response::HTTP_SEE_OTHER);
     }

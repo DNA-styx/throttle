@@ -3,6 +3,7 @@
 namespace App\Controller;
 
 use App\Legacy\LegacyBridgeFactory;
+use App\Runtime\CrashAiAnalysisManager;
 use App\Runtime\CrashSourceLookupManager;
 use App\Runtime\UploadSettings;
 use App\Repository\UserRepository;
@@ -103,9 +104,12 @@ class LegacyCrashController extends AbstractController
     }
 
     #[Route('/{id}/carburetor', name: 'carburetor', methods: ['GET'], requirements: ['id' => '[0-9a-zA-Z]{12}'], priority: -10)]
-    public function carburetor(Request $request, string $id): Response
+    public function carburetor(Request $request, string $id, CrashAiAnalysisManager $crashAiAnalysisManager): Response
     {
-        return $this->legacyResponse((new \Throttle\Crash())->carburetor($this->legacyBridgeFactory->createHttp($request), $id));
+        $app = $this->legacyBridgeFactory->createHttp($request);
+        $this->attachAiHistoryContext($app, $id, $crashAiAnalysisManager);
+
+        return $this->legacyResponse((new \Throttle\Crash())->carburetor($app, $id));
     }
 
     #[Route('/{id}/carburetor/data', name: 'carburetor_data', methods: ['GET'], requirements: ['id' => '[0-9a-zA-Z]{12}'], priority: -10)]
@@ -167,6 +171,106 @@ class LegacyCrashController extends AbstractController
                 'status' => 'error',
                 'reason' => $message,
             ], $action === 'load_cached' ? Response::HTTP_BAD_REQUEST : Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    #[Route('/{id}/ai-analyze', name: 'crash_ai_analyze', methods: ['POST'], requirements: ['id' => '[0-9a-zA-Z]{12}'], priority: -10)]
+    public function aiAnalyze(Request $request, string $id, CrashAiAnalysisManager $crashAiAnalysisManager): Response
+    {
+        if (!$this->isCsrfTokenValid('crash-ai-analyze:'.$id, (string) $request->request->get('_token'))) {
+            return $this->json(['status' => 'error', 'reason' => 'Invalid CSRF token.'], Response::HTTP_FORBIDDEN);
+        }
+
+        if ((UploadSettings::load($this->projectDir)['crash_ai_analysis_enabled'] ?? false) !== true) {
+            return $this->json(['status' => 'error', 'reason' => 'AI crash analysis is disabled by the administrator.'], Response::HTTP_FORBIDDEN);
+        }
+
+        $app = $this->legacyBridgeFactory->createHttp($request);
+        $user = $this->getUser();
+        if (!$user instanceof \App\Entity\User || $app['user'] === null) {
+            return $this->json(['status' => 'error', 'reason' => 'Authentication required.'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        $ownerId = $this->connection->fetchOne('SELECT owner_id FROM crash WHERE id = ?', [$id]);
+        if ($ownerId === false) {
+            return $this->json(['status' => 'error', 'reason' => 'Crash not found.'], Response::HTTP_NOT_FOUND);
+        }
+
+        $canManage = $app['user']['admin'] || ($ownerId !== null && in_array((int) $ownerId, $app['user']['owner_ids'], true));
+        if (!$canManage) {
+            return $this->json(['status' => 'error', 'reason' => 'Forbidden.'], Response::HTTP_FORBIDDEN);
+        }
+
+        try {
+            $result = $crashAiAnalysisManager->analyze($user, $app, $id, $request->request->all());
+
+            return $this->json($result);
+        } catch (\Throwable $e) {
+            return $this->json([
+                'status' => 'error',
+                'reason' => $e->getMessage(),
+            ], Response::HTTP_BAD_REQUEST);
+        }
+    }
+
+    #[Route('/{id}/ai-history', name: 'crash_ai_history', methods: ['GET'], requirements: ['id' => '[0-9a-zA-Z]{12}'], priority: -10)]
+    public function aiHistory(Request $request, string $id, CrashAiAnalysisManager $crashAiAnalysisManager): Response
+    {
+        if ((UploadSettings::load($this->projectDir)['crash_ai_analysis_enabled'] ?? false) !== true) {
+            return $this->json(['status' => 'error', 'reason' => 'AI crash analysis is disabled by the administrator.'], Response::HTTP_FORBIDDEN);
+        }
+
+        $app = $this->legacyBridgeFactory->createHttp($request);
+        $ownerId = $this->connection->fetchOne('SELECT owner_id FROM crash WHERE id = ?', [$id]);
+        if ($ownerId === false) {
+            return $this->json(['status' => 'error', 'reason' => 'Crash not found.'], Response::HTTP_NOT_FOUND);
+        }
+
+        $user = $this->getUser();
+        $canManage = $app['user'] !== null && ($app['user']['admin'] || ($ownerId !== null && in_array((int) $ownerId, $app['user']['owner_ids'], true)));
+
+        try {
+            return $this->json([
+                'status' => 'ok',
+                'items' => $crashAiAnalysisManager->listHistoryForCrash($id, $user instanceof \App\Entity\User ? $user : null, $canManage),
+                'can_ask' => $user instanceof \App\Entity\User && $canManage,
+            ]);
+        } catch (\Throwable $e) {
+            return $this->json([
+                'status' => 'error',
+                'reason' => $e->getMessage(),
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    #[Route('/{id}/ai-history/{historyId}/visibility', name: 'crash_ai_history_visibility', methods: ['POST'], requirements: ['id' => '[0-9a-zA-Z]{12}', 'historyId' => '\d+'], priority: -10)]
+    public function aiHistoryVisibility(Request $request, string $id, int $historyId, CrashAiAnalysisManager $crashAiAnalysisManager): Response
+    {
+        if (!$this->isCsrfTokenValid('crash-ai-analyze:'.$id, (string) $request->request->get('_token'))) {
+            return $this->json(['status' => 'error', 'reason' => 'Invalid CSRF token.'], Response::HTTP_FORBIDDEN);
+        }
+
+        if ((UploadSettings::load($this->projectDir)['crash_ai_analysis_enabled'] ?? false) !== true) {
+            return $this->json(['status' => 'error', 'reason' => 'AI crash analysis is disabled by the administrator.'], Response::HTTP_FORBIDDEN);
+        }
+
+        $user = $this->getUser();
+        if (!$user instanceof \App\Entity\User) {
+            return $this->json(['status' => 'error', 'reason' => 'Authentication required.'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        try {
+            $item = $crashAiAnalysisManager->updateHistoryVisibility($user, $id, $historyId, !empty($request->request->get('is_public')));
+
+            return $this->json([
+                'status' => 'ok',
+                'item' => $item,
+            ]);
+        } catch (\Throwable $e) {
+            return $this->json([
+                'status' => 'error',
+                'reason' => $e->getMessage(),
+            ], Response::HTTP_BAD_REQUEST);
         }
     }
 
@@ -267,9 +371,35 @@ class LegacyCrashController extends AbstractController
     }
 
     #[Route('/{id}', name: 'details', methods: ['GET'], requirements: ['id' => '[0-9a-zA-Z]{12}'], priority: -100)]
-    public function details(Request $request, string $id): Response
+    public function details(Request $request, string $id, CrashAiAnalysisManager $crashAiAnalysisManager): Response
     {
-        return $this->legacyResponse((new \Throttle\Crash())->details($this->legacyBridgeFactory->createHttp($request), $id));
+        $app = $this->legacyBridgeFactory->createHttp($request);
+        $this->attachAiHistoryContext($app, $id, $crashAiAnalysisManager);
+
+        return $this->legacyResponse((new \Throttle\Crash())->details($app, $id));
+    }
+
+    private function attachAiHistoryContext(\Silex\Application $app, string $id, CrashAiAnalysisManager $crashAiAnalysisManager): void
+    {
+        $app['crash-ai-history-items'] = [];
+
+        if ((UploadSettings::load($this->projectDir)['crash_ai_analysis_enabled'] ?? false) !== true) {
+            return;
+        }
+
+        $ownerId = $this->connection->fetchOne('SELECT owner_id FROM crash WHERE id = ?', [$id]);
+        if ($ownerId === false) {
+            return;
+        }
+
+        $user = $this->getUser();
+        $canManage = $app['user'] !== null && ($app['user']['admin'] || ($ownerId !== null && in_array((int) $ownerId, $app['user']['owner_ids'], true)));
+
+        try {
+            $app['crash-ai-history-items'] = $crashAiAnalysisManager->listHistoryForCrash($id, $user instanceof \App\Entity\User ? $user : null, $canManage);
+        } catch (\Throwable) {
+            $app['crash-ai-history-items'] = [];
+        }
     }
 
     private function recordTokenUsage(Request $request, Response $response): void

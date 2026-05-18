@@ -3,6 +3,7 @@
 namespace App\Legacy;
 
 use App\Runtime\UploadSettings;
+use App\Runtime\UserAiConfigManager;
 use App\Entity\User;
 use Doctrine\DBAL\Connection;
 use Psr\Log\LoggerInterface;
@@ -20,6 +21,7 @@ class LegacyBridgeFactory
     private LoggerInterface $logger;
     private Security $security;
     private CrashOwnerResolver $crashOwnerResolver;
+    private UserAiConfigManager $userAiConfigManager;
     private string $projectDir;
 
     /** @var array<string, mixed> */
@@ -37,6 +39,7 @@ class LegacyBridgeFactory
         LoggerInterface $logger,
         Security $security,
         CrashOwnerResolver $crashOwnerResolver,
+        UserAiConfigManager $userAiConfigManager,
         string $projectDir,
         array $legacyConfig,
         string $redisUrl
@@ -47,6 +50,7 @@ class LegacyBridgeFactory
         $this->logger = $logger;
         $this->security = $security;
         $this->crashOwnerResolver = $crashOwnerResolver;
+        $this->userAiConfigManager = $userAiConfigManager;
         $this->projectDir = $projectDir;
         $this->legacyConfig = $legacyConfig;
         $this->redisUrl = $redisUrl;
@@ -118,6 +122,7 @@ class LegacyBridgeFactory
             'theme' => $user->getTheme(),
             'owner_ids' => $this->crashOwnerResolver->getAllowedOwnerIds($user),
             'owners' => $this->crashOwnerResolver->getAllowedOwners($user),
+            'ai_configs' => $this->userAiConfigManager->listEnabledLegacySummariesForUser($user->getId()),
         ];
     }
 

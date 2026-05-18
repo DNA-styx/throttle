@@ -9,6 +9,8 @@ parameters:
     app.admins_default: ''
     app.admins: '%env(default:app.admins_default:APP_ADMINS)%'
     app.symbol_upload_token: '%env(SYMBOL_UPLOAD_TOKEN)%'
+    app.ai_settings_key_default: ''
+    app.ai_settings_key: '%env(default:app.ai_settings_key_default:AI_SETTINGS_KEY)%'
     app.legacy:
         accelerator: ''
         apikey: false
@@ -91,9 +93,15 @@ services:
 
     App\Legacy\LegacyBridgeFactory:
         arguments:
+            $userAiConfigManager: '@App\Runtime\UserAiConfigManager'
             $projectDir: '%kernel.project_dir%'
             $legacyConfig: '%app.legacy%'
             $redisUrl: '%env(REDIS_URL)%'
+
+    App\Runtime\AiSettingsCrypto:
+        arguments:
+            $configuredKey: '%app.ai_settings_key%'
+            $appSecret: '%kernel.secret%'
 
     App\Runtime\SymbolAdminManager:
         arguments:

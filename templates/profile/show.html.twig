@@ -4,8 +4,10 @@
 
 {% block body %}
     <div class="profile-shell">
-        {% for message in app.flashes('success') %}
-            <div class="alert alert-success">{{ message }}</div>
+        {% for label, messages in app.flashes %}
+            {% for message in messages %}
+                <div class="alert alert-{{ label == 'danger' ? 'danger' : (label == 'warning' ? 'warning' : 'success') }}">{{ message }}</div>
+            {% endfor %}
         {% endfor %}
 
         <div class="d-flex align-items-center justify-content-between mb-3">
@@ -224,5 +226,238 @@
                 </table>
             </div>
         </section>
+
+        <section class="profile-panel mt-3" data-ai-provider-section data-ai-provider-definitions="{{ aiProviderTemplates|json_encode|e('html_attr') }}">
+            <div class="mb-3">
+                <h2 class="h5 mb-1">AI analysis</h2>
+                <div class="text-muted">Save one or more AI API configurations for crash analysis. Keys are stored on the server and encrypted before being written to the database.</div>
+            </div>
+
+            {% if aiAnalysisEnabled %}
+                <div class="alert alert-success py-2 mb-3">Ask AI buttons are enabled globally in <a href="{{ path('health') }}" class="alert-link">/health</a>.</div>
+            {% else %}
+                <div class="alert alert-warning py-2 mb-3">Ask AI buttons are currently hidden because AI crash analysis is disabled in <a href="{{ path('health') }}" class="alert-link">/health</a>.</div>
+            {% endif %}
+
+            <div class="border rounded p-3 mb-3">
+                <h3 class="h6 mb-3">Add AI config</h3>
+                <form method="post" action="{{ path('profile_ai_config_save') }}">
+                    <input type="hidden" name="_token" value="{{ csrf_token('profile-ai-config-save') }}">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Display name</label>
+                            <input class="form-control" name="display_name" value="" maxlength="100" placeholder="My OpenAI config">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Provider</label>
+                            <select class="form-select" name="provider" required data-ai-provider-select>
+                                {% for providerKey, provider in aiProviderTemplates %}
+                                    <option value="{{ providerKey }}">{{ provider.label }}</option>
+                                {% endfor %}
+                            </select>
+                            <div class="form-text" data-ai-provider-help></div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Model</label>
+                            <input class="form-control font-monospace" name="model" value="" maxlength="255" placeholder="gpt-5.2" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">API key</label>
+                            <input type="password" class="form-control font-monospace" name="api_key" value="" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Base URL</label>
+                            <input class="form-control font-monospace" name="base_url" value="" maxlength="1024" placeholder="Optional unless using OpenRouter or Custom OpenAI-compatible" data-ai-base-url>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Temperature</label>
+                            <input class="form-control" name="temperature" value="0.2">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Max tokens</label>
+                            <input class="form-control" name="max_tokens" value="2048">
+                        </div>
+                        <div class="col-md-3 d-flex align-items-end">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch" id="ai-enabled-new" name="enabled" value="1" checked>
+                                <label class="form-check-label" for="ai-enabled-new">Enabled</label>
+                            </div>
+                        </div>
+                        <div class="col-md-3 d-flex align-items-end">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch" id="ai-default-new" name="is_default" value="1"{% if not aiConfigs %} checked{% endif %}>
+                                <label class="form-check-label" for="ai-default-new">Default config</label>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Default prompt</label>
+                            <textarea class="form-control" name="default_prompt" rows="8" required>{{ defaultAiPrompt }}</textarea>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Extra request JSON</label>
+                            <textarea class="form-control font-monospace" name="extra_options_json" rows="5" placeholder='{"reasoning": {"effort": "high"}}'></textarea>
+                            <div class="form-text">Optional provider-specific JSON merged into the request body. Useful for custom OpenAI-compatible APIs and advanced provider knobs.</div>
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <button type="submit" class="btn btn-primary">Create AI config</button>
+                    </div>
+                </form>
+            </div>
+
+            {% if aiConfigs %}
+                <div class="mb-2 d-flex align-items-center justify-content-between gap-2">
+                    <h3 class="h6 mb-0">Saved configs</h3>
+                    <div class="text-muted small">{{ aiConfigs|length }} saved</div>
+                </div>
+
+                <div class="profile-ai-config-list">
+                    {% for config in aiConfigs %}
+                        <details class="profile-ai-card">
+                            <summary class="profile-ai-card-summary">
+                                <div class="profile-ai-card-main">
+                                    <div class="fw-semibold">{{ config.display_name }}</div>
+                                    <div class="text-muted small">{{ config.provider_label }} &middot; {{ config.model }}</div>
+                                </div>
+                                <div class="profile-ai-card-meta">
+                                    {% if config.api_key_configured %}
+                                        <span class="profile-ai-key-indicator">Key {{ config.api_key_mask ?: 'saved' }}</span>
+                                    {% endif %}
+                                    {% if config.is_default %}
+                                        <span class="badge text-bg-primary">Default</span>
+                                    {% endif %}
+                                    {% if not config.enabled %}
+                                        <span class="badge text-bg-secondary">Disabled</span>
+                                    {% endif %}
+                                </div>
+                            </summary>
+
+                            <div class="profile-ai-card-body">
+                                <form method="post" action="{{ path('profile_ai_config_save') }}">
+                                    <input type="hidden" name="_token" value="{{ csrf_token('profile-ai-config-save') }}">
+                                    <input type="hidden" name="id" value="{{ config.id }}">
+
+                                    <div class="row g-3">
+                                        <div class="col-md-4">
+                                            <label class="form-label">Display name</label>
+                                            <input class="form-control" name="display_name" value="{{ config.display_name }}" maxlength="100" required>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label">Provider</label>
+                                            <select class="form-select" name="provider" required data-ai-provider-select>
+                                                {% for providerKey, provider in aiProviderTemplates %}
+                                                    <option value="{{ providerKey }}"{% if providerKey == config.provider %} selected{% endif %}>{{ provider.label }}</option>
+                                                {% endfor %}
+                                            </select>
+                                            <div class="form-text" data-ai-provider-help></div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label">Model</label>
+                                            <input class="form-control font-monospace" name="model" value="{{ config.model }}" maxlength="255" required>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label">API key</label>
+                                            <input type="password" class="form-control font-monospace" name="api_key" placeholder="Leave blank to keep the current key">
+                                            <div class="form-text">
+                                                {% if config.api_key_configured %}
+                                                    Saved as {{ config.api_key_mask ?: 'hidden value' }}. Enter a new value only when you want to replace it.
+                                                {% else %}
+                                                    No API key saved yet.
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label">Base URL</label>
+                                            <input class="form-control font-monospace" name="base_url" value="{{ config.base_url ?? '' }}" maxlength="1024" placeholder="Used for OpenRouter or custom OpenAI-compatible APIs" data-ai-base-url>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label">Temperature</label>
+                                            <input class="form-control" name="temperature" value="{{ config.temperature is not null ? config.temperature : '' }}" placeholder="0.2">
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label">Max tokens</label>
+                                            <input class="form-control" name="max_tokens" value="{{ config.max_tokens is not null ? config.max_tokens : '' }}" placeholder="2048">
+                                        </div>
+                                        <div class="col-md-3 d-flex align-items-end">
+                                            <div class="form-check form-switch">
+                                                <input class="form-check-input" type="checkbox" role="switch" id="ai-enabled-{{ config.id }}" name="enabled" value="1"{% if config.enabled %} checked{% endif %}>
+                                                <label class="form-check-label" for="ai-enabled-{{ config.id }}">Enabled</label>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-3 d-flex align-items-end">
+                                            <div class="form-check form-switch">
+                                                <input class="form-check-input" type="checkbox" role="switch" id="ai-default-{{ config.id }}" name="is_default" value="1"{% if config.is_default %} checked{% endif %}>
+                                                <label class="form-check-label" for="ai-default-{{ config.id }}">Default config</label>
+                                            </div>
+                                        </div>
+                                        <div class="col-12">
+                                            <label class="form-label">Default prompt</label>
+                                            <textarea class="form-control" name="default_prompt" rows="6" required>{{ config.default_prompt }}</textarea>
+                                        </div>
+                                        <div class="col-12">
+                                            <label class="form-label">Extra request JSON</label>
+                                            <textarea class="form-control font-monospace" name="extra_options_json" rows="5" placeholder='{"reasoning": {"effort": "high"}}'>{{ config.extra_options_json }}</textarea>
+                                            <div class="form-text">Optional provider-specific JSON merged into the request body.</div>
+                                        </div>
+                                    </div>
+
+                                    <div class="d-flex gap-2 mt-3">
+                                        <button type="submit" class="btn btn-primary">Save AI config</button>
+                                    </div>
+                                </form>
+                                <div class="d-flex gap-2 mt-2">
+                                    <form method="post" action="{{ path('profile_ai_config_delete') }}" onsubmit="return confirm('Delete this AI config?');">
+                                        <input type="hidden" name="_token" value="{{ csrf_token('profile-ai-config-delete') }}">
+                                        <input type="hidden" name="config_id" value="{{ config.id }}">
+                                        <button type="submit" class="btn btn-outline-danger">Delete</button>
+                                    </form>
+                                </div>
+                            </div>
+                        </details>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </section>
     </div>
+{% endblock %}
+
+{% block javascripts %}
+    {{ parent() }}
+    <script>
+        (() => {
+            const section = document.querySelector('[data-ai-provider-section]');
+            if (!section) {
+                return;
+            }
+
+            let definitions = {};
+            try {
+                definitions = JSON.parse(section.getAttribute('data-ai-provider-definitions') || '{}');
+            } catch (error) {
+                definitions = {};
+            }
+
+            const bindForm = (form) => {
+                const select = form.querySelector('[data-ai-provider-select]');
+                const help = form.querySelector('[data-ai-provider-help]');
+                const baseUrl = form.querySelector('[data-ai-base-url]');
+                if (!select || !help || !baseUrl) {
+                    return;
+                }
+
+                const update = () => {
+                    const provider = definitions[select.value] || null;
+                    help.textContent = provider && provider.help ? provider.help : '';
+                    if (provider && typeof provider.default_base_url === 'string' && baseUrl.value.trim() === '') {
+                        baseUrl.placeholder = provider.default_base_url !== '' ? provider.default_base_url : 'Required for custom OpenAI-compatible providers';
+                    }
+                };
+
+                select.addEventListener('change', update);
+                update();
+            };
+
+            section.querySelectorAll('form').forEach(bindForm);
+        })();
+    </script>
 {% endblock %}

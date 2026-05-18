@@ -22,6 +22,7 @@ This 2026 branch includes:
 - Symbol coverage view for report owners/admins.
 - Admin tools for manual binary uploads, symbol cache refresh, and stored symbol export.
 - Likely crash cause scoring.
+- Optional AI crash analysis with per-user API configs, saved history, and public history sharing.
 - SourceMod plugin/extension snapshots from Accelerator metadata when available.
 - Admin health page and systemd timer files for processing.
 
@@ -56,6 +57,7 @@ MARIADB_ROOT_PASSWORD=change-this-too
 STEAM_API_KEY=optional-steam-web-api-key
 APP_ADMINS=steam:YOUR_STEAMID64
 SYMBOL_UPLOAD_TOKEN=optional-global-symbol-token
+AI_SETTINGS_KEY=change-this-to-a-long-random-value
 APP_PORT=18080
 AUTO_MIGRATE=1
 ```
@@ -100,6 +102,7 @@ SENTRY_DSN=
 STEAM_API_KEY=
 APP_ADMINS=steam:YOUR_STEAMID64
 SYMBOL_UPLOAD_TOKEN=optional-global-symbol-token
+AI_SETTINGS_KEY=change-this-to-a-long-random-value
 ```
 
 Create the database and user:
@@ -207,6 +210,7 @@ In a crash report, **Processing Runs** are Throttle processor records: status, d
   - upload endpoint memory limit
   - anonymous minidump upload toggle for `/submit`
   - upload failure backoff for repeated symbol/binary upload failures on the same `module + identifier`
+  - `crash_ai_analysis_enabled`, which controls whether `Ask AI` is available on crash details and raw pages
 - `/health` binary upload request policy controls which Linux modules Accelerator is asked to upload during presubmit. Defaults are intentionally empty, so a fresh install will not request symbol or binary uploads until allow rules are configured.
 - `/health` also includes admin tools to:
   - refresh symbol caches and rescan stored symbols
@@ -217,6 +221,9 @@ In a crash report, **Processing Runs** are Throttle processor records: status, d
   - `var/symbol-request-policy.json`
   - `var/upload-settings.json`
   - `var/upload-failure-backoff.json`
+- AI API keys are stored server-side in encrypted form. Set `AI_SETTINGS_KEY` in `.env.local`, `.env.local.php`, Docker env, or another server-side environment source. If it is missing, Throttle falls back to `APP_SECRET`, but a dedicated `AI_SETTINGS_KEY` is recommended for production.
+- User AI configs live in **Profile -> AI analysis**. Users can save multiple providers, set a default prompt, use provider-specific extra request JSON, and review AI analysis history.
+- `Ask AI` is available to crash owners and admins when `/health` has AI analysis enabled. The modal can analyze crash details or raw output, keeps per-crash history, and lets owners/admins mark history entries public or private.
 - Grant admin access without editing the database by setting `APP_ADMINS` in `.env.local` or the service environment. Accepted values are separated by comma, space, or semicolon: numeric local user ids, `user:<id>`, SteamID64 values, or `steam:<SteamID64>`, for example `APP_ADMINS="steam:STEAMID64,user:1"`.
 - Admins can access `/health`, see global dashboards/audit data, view and manage crash reports they do not own, reprocess/delete crashes, and delete any crash signature note.
 - Pending crashes usually mean `crash:process` is not running or failed.
@@ -229,7 +236,7 @@ In a crash report, **Processing Runs** are Throttle processor records: status, d
 ### Security Notes
 
 - Never commit `.env.local`, `.env.local.php`, real tokens, database passwords, crash dumps, symbols, binaries, or production logs.
-- Keep `APP_SECRET`, `DATABASE_URL`, `STEAM_API_KEY`, `SYMBOL_UPLOAD_TOKEN`, and OAuth secrets in server environment files only.
+- Keep `APP_SECRET`, `AI_SETTINGS_KEY`, `DATABASE_URL`, `STEAM_API_KEY`, `SYMBOL_UPLOAD_TOKEN`, and OAuth secrets in server environment files only.
 - Put the app behind HTTPS in production.
 - Keep PHP, Composer dependencies, Node dependencies, Breakpad tools, and SourceMod Accelerator updated.
 

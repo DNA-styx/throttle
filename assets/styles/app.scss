@@ -216,6 +216,64 @@
   gap: 0.75rem;
 }
 
+.profile-ai-config-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.profile-ai-card {
+  border: 1px solid var(--bs-border-color);
+  border-radius: 8px;
+  background: var(--bs-body-bg);
+  overflow: hidden;
+}
+
+.profile-ai-card-summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  cursor: pointer;
+}
+
+.profile-ai-card-summary::-webkit-details-marker {
+  display: none;
+}
+
+.profile-ai-card-summary::marker {
+  content: "";
+}
+
+.profile-ai-card-main {
+  min-width: 0;
+}
+
+.profile-ai-card-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.profile-ai-key-indicator {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(var(--bs-primary-rgb), 0.12);
+  color: var(--bs-primary);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.profile-ai-card-body {
+  border-top: 1px solid var(--bs-border-color);
+  padding: 1rem;
+}
+
 .profile-stat-value {
   font-size: 1.25rem;
   font-weight: 600;
@@ -264,6 +322,20 @@
   background: #1a2330;
   border-color: #303b4a;
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+[data-bs-theme="dark"] .profile-ai-card {
+  background: #1a2330;
+  border-color: #303b4a;
+}
+
+[data-bs-theme="dark"] .profile-ai-card-body {
+  border-color: #303b4a;
+}
+
+[data-bs-theme="dark"] .profile-ai-key-indicator {
+  background: rgba(95, 159, 230, 0.18);
+  color: #8fc0ff;
 }
 
 [data-bs-theme="dark"] .table {

@@ -402,7 +402,7 @@ class HealthController extends AbstractController
     }
 
     /**
-     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int, crash_source_lookup_enabled: bool}
+     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int, crash_source_lookup_enabled: bool, crash_ai_analysis_enabled: bool}
      */
     private function readUploadSettingsFromRequest(Request $request): array
     {
@@ -414,6 +414,7 @@ class HealthController extends AbstractController
             'upload_failure_backoff_threshold' => (int) $request->request->get('upload_failure_backoff_threshold', 3),
             'upload_failure_backoff_ttl' => (int) $request->request->get('upload_failure_backoff_ttl', 3600),
             'crash_source_lookup_enabled' => $request->request->getBoolean('crash_source_lookup_enabled'),
+            'crash_ai_analysis_enabled' => $request->request->getBoolean('crash_ai_analysis_enabled'),
         ];
     }
 

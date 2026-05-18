@@ -1,4 +1,4 @@
-# Production установка
+﻿# Production установка
 
 ## Docker Compose
 
@@ -17,6 +17,7 @@ MARIADB_ROOT_PASSWORD=change-this-too
 STEAM_API_KEY=optional-steam-web-api-key
 APP_ADMINS=steam:YOUR_STEAMID64
 SYMBOL_UPLOAD_TOKEN=optional-global-symbol-token
+AI_SETTINGS_KEY=change-this-to-a-long-random-value
 APP_PORT=18080
 AUTO_MIGRATE=1
 ```
@@ -31,18 +32,18 @@ docker compose --env-file .env.prod.docker -f compose.prod.yaml exec app php bin
 
 `compose.prod.yaml` запускает:
 
-- `app` - веб-приложение.
-- `processor` - обработчик очереди, который раз в минуту выполняет `crash:process --update --limit=10`.
-- `db` - MariaDB.
-- `redis` - Redis.
+- `app` — веб-приложение
+- `processor` — обработчик очереди, который раз в минуту выполняет `crash:process --update --limit=10`
+- `db` — MariaDB
+- `redis` — Redis
 
-Постоянные Docker volumes хранят базу, Redis, `var/`, `dumps/` и `symbols/`. Это важно: настройки Binary upload request policy из `/health` сохраняются в `var/symbol-request-policy.json`, настройки обработки upload endpoints - в `var/upload-settings.json`, а upload failure backoff state - в `var/upload-failure-backoff.json`.
+Постоянные Docker volumes хранят базу, Redis, `var/`, `dumps/` и `symbols/`. Это важно: runtime-настройки `/health` сохраняются между перезапусками.
 
 ## Ручная установка Ubuntu/Nginx/PHP-FPM
 
-Нужны PHP 8.4 CLI/FPM, MariaDB 10.11+, Redis, Composer, Node.js, npm и Nginx. PHP extensions: `ctype`, `iconv`, `intl`, `pdo_mysql`, `bcmath`, `xsl`, `zip`.
+Нужны PHP 8.4 CLI/FPM, MariaDB 10.11+, Redis, Composer, Node.js, npm и Nginx. Требуемые PHP extensions включают `ctype`, `iconv`, `intl`, `pdo_mysql`, `bcmath`, `xsl`, `zip`.
 
-На Ubuntu 24.04 стандартный репозиторий не содержит PHP 8.4. Сначала подключите источник пакетов с PHP 8.4, например ppa:ondrej/php, либо используйте ��/репозиторий, где PHP 8.4 уже есть.
+На Ubuntu 24.04 стандартный репозиторий не содержит PHP 8.4. Сначала подключите источник пакетов с PHP 8.4, например `ppa:ondrej/php`, либо используйте ОС/репозиторий, где PHP 8.4 уже есть.
 
 ```bash
 cd /var/www/throttle
@@ -66,7 +67,10 @@ SENTRY_DSN=
 STEAM_API_KEY=
 APP_ADMINS=steam:YOUR_STEAMID64
 SYMBOL_UPLOAD_TOKEN=optional-global-symbol-token
+AI_SETTINGS_KEY=change-this-to-a-long-random-value
 ```
+
+`AI_SETTINGS_KEY` обязателен для production, если вы хотите хранить пользовательские AI API keys в зашифрованном виде. Если он не задан, Throttle использует `APP_SECRET` как fallback, но отдельный ключ шифрования безопаснее.
 
 Создайте базу и пользователя:
 
@@ -83,7 +87,7 @@ FLUSH PRIVILEGES;
 SQL
 ```
 
-Подготовьте production окружение:
+Подготовьте production-окружение:
 
 ```bash
 php8.4 $(which composer) dump-env prod
@@ -96,7 +100,7 @@ chmod -R ug+rwX var cache dumps symbols
 systemctl restart php8.4-fpm nginx
 ```
 
-Nginx должен смотреть в `public/` и разрешать крупные upload'ы:
+Nginx должен смотреть в `public/` и разрешать крупные uploads:
 
 ```nginx
 client_max_body_size 100M;
@@ -138,19 +142,71 @@ sudo -u www-data php8.4 /var/www/throttle/bin/console crash:process --env=prod -
 APP_ADMINS="steam:STEAMID64,user:1"
 ```
 
-На `/health` видны checks, очередь, runtime-каталоги, бинарники, Binary upload request policy, состояние upload failure backoff и настройки обработки upload endpoints. Через UI можно включать потоковую обработку `.sym`, задавать отдельный `memory_limit` для `/symbols/submit` и `/binary/submit`, включать защиту от бесконечных retry-циклов upload endpoints, вручную обновлять symbol cache, очищать backoff state, загружать бинарники с автогенерацией `.sym.gz` и экспортировать выбранные сохранённые symbols.
+Поддерживаются `user:<id>`, SteamID64 и `steam:<SteamID64>`. Разделители: запятая, пробел и `;`.
 
-`Binary upload request policy` по умолчанию пустой. На новой установке Throttle не будет автоматически запрашивать missing symbols или binaries у Accelerator, пока администратор явно не задаст allow-правила.
+На `/health` видны checks, очередь, runtime-каталоги, бинарники, Binary upload request policy, upload failure backoff и настройки обработки upload endpoints. Через UI можно:
 
-При бэкапах сохраняйте все runtime-файлы `/health`:
+- включать потоковую обработку `.sym`
+- задавать отдельный `memory_limit` для `/symbols/submit` и `/binary/submit`
+- включать защиту от бесконечных retry-циклов upload endpoints
+- вручную обновлять symbol cache
+- очищать backoff state
+- загружать бинарники с автогенерацией `.sym.gz`
+- экспортировать и удалять сохранённые symbols
+- включать `Enable AI crash analysis`
+
+Пока `Enable AI crash analysis` выключен, кнопки `Ask AI` на странице крэша и в raw не показываются.
+
+## AI analysis
+
+Пользовательские AI-конфиги настраиваются в **Profile -> AI analysis**. Сейчас поддерживаются:
+
+- OpenAI
+- Anthropic
+- Google Gemini
+- OpenRouter
+- Custom OpenAI-compatible
+
+Пользователь может:
+
+- сохранить несколько AI configs
+- выбрать default config и default prompt
+- задать provider-specific `Extra request JSON`
+- запускать анализ страницы крэша и raw output через `Ask AI`
+- смотреть историю AI-анализов конкретного крэша
+- делать history entries public/private
+
+AI API keys хранятся на сервере в зашифрованном виде. Поэтому `AI_SETTINGS_KEY` нужно хранить вместе с production env и включать в бэкапы env-конфига.
+
+## Что бэкапить
+
+При файловых бэкапах сохраняйте runtime-файлы `/health`:
 
 - `var/symbol-request-policy.json`
 - `var/upload-settings.json`
 - `var/upload-failure-backoff.json`
 
-Дополнительные runtime-заметки:
+Также бэкапьте:
 
-- Переключатель темы Light/Dark/System доступен ещё до входа и по умолчанию использует системную тему.
-- Настройки upload в `/health` могут отключать анонимные `/submit` minidump uploads; тогда `/submit` требует profile upload token или `SYMBOL_UPLOAD_TOKEN`.
-- `APP_ADMINS` принимает значения, разделённые запятой, пробелом или `;`: `user:<id>`, SteamID64 или `steam:<SteamID64>`. Администраторы получают доступ к `/health`, глобальным dashboard/audit данным, управлению crash reports, действиям reprocess/delete и удалению любых signature notes.
+- базу данных
+- `dumps/`
+- `symbols/`
+- production env-файлы с `APP_SECRET`, `AI_SETTINGS_KEY`, `DATABASE_URL`, `STEAM_API_KEY`, `SYMBOL_UPLOAD_TOKEN`
 
+AI history и AI configs хранятся в базе данных, поэтому отдельно в файловой системе их нет.
+
+## Диагностика
+
+- Если крэши долго висят в `pending`, значит `crash:process` не запущен или падает.
+- `bin/carburetor`, `bin/minidump_stackwalk`, `bin/dump_syms`, `bin/breakpad_moduleid` и `bin/nm` должны быть executable.
+- `var/`, `cache/`, `dumps/` и `symbols/` должны быть writable для пользователя PHP-FPM.
+- Если ошибка говорит про missing Encore entrypoints, выполните `npm ci && npm run build` и проверьте `public/build/entrypoints.json`.
+- Если Composer запускается через PHP 8.1 в проекте PHP 8.4, используйте `APP_ENV=prod APP_DEBUG=0 php8.4 $(which composer) install --no-dev --optimize-autoloader`.
+- Если PHP-FPM пишет про duplicate или missing extensions, исправьте `/etc/php/8.4/fpm/php.ini` и используйте package-managed `conf.d`.
+
+## Безопасность
+
+- Никогда не коммитьте `.env.local`, `.env.local.php`, реальные tokens, database passwords, crash dumps, symbols, binaries или production logs.
+- Держите `APP_SECRET`, `AI_SETTINGS_KEY`, `DATABASE_URL`, `STEAM_API_KEY`, `SYMBOL_UPLOAD_TOKEN` и OAuth secrets только в server-side env files.
+- В production используйте HTTPS.
+- Регулярно обновляйте PHP, Composer dependencies, Node dependencies, Breakpad tools и SourceMod Accelerator.

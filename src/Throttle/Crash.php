@@ -587,7 +587,8 @@ class Crash
             self::addCulpritCandidate(
                 $candidates,
                 $sourcePawnChain['plugin'],
-                $sourcePawnChain['score'],
+                $sourcePawnChain['score'] + 80,
+                10,
                 $sourcePawnChain['reasons'],
                 'Likely plugin cause'
             );
@@ -596,7 +597,8 @@ class Crash
             self::addCulpritCandidate(
                 $candidates,
                 $sourcePawnNativeHelperChain['label'],
-                $sourcePawnNativeHelperChain['score'],
+                $sourcePawnNativeHelperChain['score'] + 24,
+                14,
                 $sourcePawnNativeHelperChain['reasons'],
                 'Bridge'
             );
@@ -606,7 +608,8 @@ class Crash
             self::addCulpritCandidate(
                 $candidates,
                 basename($consoleBlaming),
-                $hasStrongSourcePawnCause ? 34 : (($stackFirstCandidate !== null && !$hasTerminalConsoleBridgeCause) ? 28 : ($hasSourcePawnBridge ? 84 : 60)),
+                $hasStrongSourcePawnCause ? 38 : (($stackFirstCandidate !== null && !$hasTerminalConsoleBridgeCause) ? 32 : ($hasSourcePawnBridge ? 92 : 72)),
+                4,
                 array_filter(array(
                     'Console log Blaming entry: ' . basename($consoleBlaming),
                     $hasConsoleBackedBridgeCause ? 'SourceMod bridge frames present; plugin debug frames are missing from stackwalk' : null,
@@ -627,22 +630,33 @@ class Crash
             self::addCulpritCandidate(
                 $candidates,
                 basename((string) $terminalConsoleCause['plugin']),
-                $hasStrongSourcePawnCause ? 42 : ($hasSourcePawnBridge ? 170 : 120),
+                $hasStrongSourcePawnCause ? 46 : ($hasSourcePawnBridge ? 180 : 130),
+                6,
                 $reasons,
                 $hasStrongSourcePawnCause ? 'Supporting signal' : 'Likely plugin cause'
             );
         }
 
         if (!$hasStrongSourcePawnCause && $stackFirstCandidate !== null) {
-            $score = $stackFirstCandidate['same_prefix_count'] >= 3 ? 164 : 136;
+            $failureScore = $stackFirstCandidate['same_prefix_count'] >= 3 ? 220 : 180;
+            $rootScore = self::isBridgeFrame(
+                (string) ($stackFirstCandidate['module'] ?? ''),
+                (string) ($stackFirstCandidate['function'] ?? ''),
+                (string) ($stackFirstCandidate['rendered'] ?? ''),
+                (string) $stackFirstCandidate['label']
+            ) ? 52 : 26;
             if (!$hasTerminalConsoleBridgeCause) {
-                $score += 28;
+                $rootScore += 8;
+            }
+            if ($hasSourcePawnBridge) {
+                $rootScore = max(12, $rootScore - 10);
             }
 
             self::addCulpritCandidate(
                 $candidates,
                 $stackFirstCandidate['label'],
-                $score,
+                $rootScore,
+                $failureScore,
                 array_filter(array(
                     'Frame #' . $stackFirstCandidate['frame'] . ': ' . $stackFirstCandidate['rendered'],
                     $stackFirstCandidate['same_prefix_count'] >= 3 ? 'Top ' . $stackFirstCandidate['same_prefix_count'] . ' frames resolve to the same crash module' : null,
@@ -652,6 +666,7 @@ class Crash
             );
         }
 
+        $frameContributionCounts = array();
         foreach ($stack as $index => $frame) {
             $module = (string) ($frame['module'] ?? '');
             $function = (string) ($frame['function'] ?? '');
@@ -662,45 +677,61 @@ class Crash
                 continue;
             }
 
-            $score = max(8, 42 - ($index * 4));
+            $rootScore = max(4, 18 - ($index * 2));
+            $failureScore = max(0, 28 - ($index * 3));
             $kind = 'Candidate';
             $reasons = array('Frame #' . ($frame['frame'] ?? $index) . ': ' . $rendered);
             $isSmxLabel = str_ends_with(strtolower($label), '.smx');
             $isBridgeFrame = self::isBridgeFrame($module, $function, $rendered, $label);
             $isNativeHelperFrame = self::isSourcePawnNativeHelperFrame($module, $function, $rendered, $label);
+            $isLifecycleFrame = self::isLifecycleCrashFrame($function, $rendered);
 
             if ($index === 0) {
                 if (($hasStrongSourcePawnCause || $hasConsoleBackedBridgeCause || $hasTerminalConsoleBridgeCause) && self::isServerEngineModule($label)) {
-                    $score += 8;
+                    $failureScore += 20;
+                    $rootScore += 4;
                     $kind = 'Native failure site';
                     $reasons[] = $hasStrongSourcePawnCause ? 'Native crash site reached from SourcePawn/JIT chain' : 'Native crash site reached from SourceMod evidence';
                 } else {
-                    $score += 28;
+                    $rootScore += 10;
+                    $failureScore += 44;
                 }
             }
 
             if (self::isPluginLikeLabel($label)) {
                 if ($isBridgeFrame && !$isSmxLabel) {
-                    $score -= 18;
+                    $rootScore += 36;
+                    $failureScore += 8;
                     $kind = 'Bridge';
                     $reasons[] = 'SourceMod bridge frame';
+                    if ($isLifecycleFrame) {
+                        $rootScore += 40;
+                        $reasons[] = 'Bridge frame is adjacent to player/entity removal or lifecycle callback logic';
+                    }
                 } else {
-                    $score += $isSmxLabel ? 44 : 22;
+                    $rootScore += $isSmxLabel ? 88 : 44;
                     $kind = $isSmxLabel ? 'Likely plugin cause' : 'Bridge';
                     $reasons[] = $isSmxLabel ? 'SourceMod plugin frame' : 'SourceMod extension module';
                 }
             } elseif ($isNativeHelperFrame && $hasSourcePawnNativeHelperChain) {
-                $score += 36;
+                $rootScore += 64;
+                $failureScore += 8;
                 $kind = 'Bridge';
                 $reasons[] = 'SourceMod native memory helper frame';
             } elseif ($isBridgeFrame) {
-                $score -= 24;
+                $rootScore += 28;
+                $failureScore += 6;
                 $kind = 'Bridge';
                 $reasons[] = 'SourcePawn/JIT bridge frame';
+                if ($isLifecycleFrame) {
+                    $rootScore += 34;
+                    $reasons[] = 'Bridge frame intersects with cleanup/remove/update callback flow';
+                }
             }
 
             if (self::isServerEngineModule($label)) {
-                $score += ($hasStrongSourcePawnCause || $hasConsoleBackedBridgeCause || $hasTerminalConsoleBridgeCause) ? 4 : 14;
+                $failureScore += ($hasStrongSourcePawnCause || $hasConsoleBackedBridgeCause || $hasTerminalConsoleBridgeCause) ? 22 : 36;
+                $rootScore += ($hasStrongSourcePawnCause || $hasConsoleBackedBridgeCause || $hasTerminalConsoleBridgeCause) ? 2 : 10;
                 if ($kind === 'Candidate') {
                     $kind = $index === 0 ? 'Native failure site' : 'Native module';
                 }
@@ -708,36 +739,42 @@ class Crash
             }
 
             if (preg_match('/__SourceHook_/i', $rendered) === 1) {
-                $score -= 55;
+                $rootScore = max(1, $rootScore - 32);
+                $failureScore = max(0, $failureScore - 24);
                 $kind = 'Bridge';
                 $reasons[] = 'Hook frame';
             }
 
             if (self::isSystemRuntimeModule($label) || self::isBootstrapRuntimeModule($label)) {
-                $score -= 60;
+                $rootScore = 1;
+                $failureScore = min($failureScore, 6);
                 $kind = 'Runtime';
                 $reasons[] = 'System/runtime module';
             }
 
             $moduleKey = $module !== '' && isset($presentByModule[$module]) ? $module : basename(str_replace('\\', '/', $module));
             if ($moduleKey !== '' && isset($presentByModule[$moduleKey]) && !$presentByModule[$moduleKey]) {
-                $score -= ($hasStrongSourcePawnCause || $hasConsoleBackedBridgeCause || $hasTerminalConsoleBridgeCause) && self::isServerEngineModule($label) ? 10 : 18;
+                $rootScore -= ($hasStrongSourcePawnCause || $hasConsoleBackedBridgeCause || $hasTerminalConsoleBridgeCause) && self::isServerEngineModule($label) ? 6 : 16;
                 $reasons[] = 'Module has no symbols';
             }
 
             if ($stackFirstCandidate !== null && strcasecmp($label, $stackFirstCandidate['label']) === 0 && !$hasStrongSourcePawnCause && !$hasTerminalConsoleBridgeCause) {
-                $score += max(10, 34 - ($index * 6));
+                $rootScore += max(4, 14 - ($index * 3));
+                $failureScore += max(10, 36 - ($index * 5));
                 if ($kind === 'Candidate' || $kind === 'Bridge') {
                     $kind = 'Native failure site';
                 }
                 $reasons[] = 'Top-of-stack crash module';
             }
 
-            self::addCulpritCandidate($candidates, $label, $score, $reasons, $kind);
+            $frameContributionCounts[$label] = ($frameContributionCounts[$label] ?? 0) + 1;
+            [$rootScore, $failureScore] = self::applyFrameContributionMultiplier($rootScore, $failureScore, $frameContributionCounts[$label]);
+
+            self::addCulpritCandidate($candidates, $label, $rootScore, $failureScore, $reasons, $kind);
 
             $sourcePawnFrame = self::parseSourcePawnFrame($rendered);
             if ($sourcePawnFrame !== null) {
-                self::addCulpritCandidate($candidates, $sourcePawnFrame['plugin'], $score + 28, array(
+                self::addCulpritCandidate($candidates, $sourcePawnFrame['plugin'], $rootScore + 42, 2, array(
                     'SourcePawn function: ' . $sourcePawnFrame['function'],
                     self::isSourcePawnEntryPoint($sourcePawnFrame['function']) ? 'Plugin entry point' : 'Plugin callsite',
                 ), self::isSourcePawnEntryPoint($sourcePawnFrame['function']) ? 'Entry point' : 'Likely plugin cause');
@@ -746,30 +783,41 @@ class Crash
 
         foreach (array('Plugin', 'SourceModPlugin') as $key) {
             if (!empty($metadata[$key]) && is_string($metadata[$key])) {
-                self::addCulpritCandidate($candidates, basename($metadata[$key]), 28, 'Crash metadata field: ' . $key, 'Supporting signal');
+                self::addCulpritCandidate($candidates, basename($metadata[$key]), 30, 2, 'Crash metadata field: ' . $key, 'Supporting signal');
             }
         }
 
         foreach (array('Extension', 'SourceModExtension') as $key) {
             if (!empty($metadata[$key]) && is_string($metadata[$key])) {
-                self::addCulpritCandidate($candidates, basename($metadata[$key]), 24, 'Crash metadata field: ' . $key, 'Bridge');
+                self::addCulpritCandidate($candidates, basename($metadata[$key]), 26, 2, 'Crash metadata field: ' . $key, 'Bridge');
             }
         }
 
         if (is_string($cmdline) && preg_match('/\+map\s+([^ ]+)/', $cmdline, $matches) === 1) {
-            self::addCulpritCandidate($candidates, 'Map: ' . $matches[1], 8, 'Active map from command line', 'Context');
+            self::addCulpritCandidate($candidates, 'Map: ' . $matches[1], 8, 0, 'Active map from command line', 'Context');
         }
 
         if (empty($candidates)) {
             return array();
         }
 
-        uasort($candidates, fn ($a, $b) => $b['score'] <=> $a['score']);
+        uasort($candidates, function ($a, $b) {
+            return ($b['root_cause_score'] <=> $a['root_cause_score'])
+                ?: ($b['failure_site_score'] <=> $a['failure_site_score'])
+                ?: (self::culpritKindPriority((string) $b['kind']) <=> self::culpritKindPriority((string) $a['kind']));
+        });
         $top = array_slice($candidates, 0, 6, true);
-        $total = array_sum(array_column($top, 'score'));
+        $total = array_sum(array_map(static fn (array $candidate): int => max(1, (int) ($candidate['root_cause_score'] ?? 0)), $top));
+        if ($total <= 0) {
+            $total = array_sum(array_column($top, 'failure_site_score'));
+        }
 
         return array_map(function ($candidate) use ($total) {
-            $candidate['percent'] = $total > 0 ? (int) round(($candidate['score'] / $total) * 100) : 0;
+            $displayScore = max(1, (int) ($candidate['root_cause_score'] ?? 0));
+            if ($displayScore <= 0) {
+                $displayScore = max(1, (int) ($candidate['failure_site_score'] ?? 0));
+            }
+            $candidate['percent'] = $total > 0 ? (int) round(($displayScore / $total) * 100) : 0;
             $candidate['reasons'] = array_slice(array_values(array_unique($candidate['reasons'])), 0, 4);
             $candidate['kind_class'] = self::culpritKindClass($candidate['kind']);
             $candidate['kind_title'] = self::culpritKindTitle($candidate['kind']);
@@ -780,18 +828,26 @@ class Crash
         }, array_values($top));
     }
 
-    private static function addCulpritCandidate(array &$candidates, string $label, int $score, string|array $reasons, string $kind = 'Candidate'): void
+    private static function addCulpritCandidate(array &$candidates, string $label, int $rootCauseScore, int $failureSiteScore, string|array $reasons, string $kind = 'Candidate'): void
     {
         $label = trim($label);
-        if ($label === '' || $score <= 0) {
+        if ($label === '' || ($rootCauseScore <= 0 && $failureSiteScore <= 0)) {
             return;
         }
 
         if (!isset($candidates[$label])) {
-            $candidates[$label] = array('label' => $label, 'score' => 0, 'percent' => 0, 'kind' => $kind, 'reasons' => array());
+            $candidates[$label] = array(
+                'label' => $label,
+                'root_cause_score' => 0,
+                'failure_site_score' => 0,
+                'percent' => 0,
+                'kind' => $kind,
+                'reasons' => array(),
+            );
         }
 
-        $candidates[$label]['score'] += max(1, $score);
+        $candidates[$label]['root_cause_score'] += max(0, $rootCauseScore);
+        $candidates[$label]['failure_site_score'] += max(0, $failureSiteScore);
         if (self::culpritKindPriority($kind) > self::culpritKindPriority((string) $candidates[$label]['kind'])) {
             $candidates[$label]['kind'] = $kind;
         }
@@ -801,6 +857,27 @@ class Crash
                 $candidates[$label]['reasons'][] = $reason;
             }
         }
+    }
+
+    /**
+     * @return array{0: int, 1: int}
+     */
+    private static function applyFrameContributionMultiplier(int $rootScore, int $failureScore, int $occurrence): array
+    {
+        $multipliers = [1 => 1.0, 2 => 0.65, 3 => 0.4];
+        $multiplier = $multipliers[$occurrence] ?? 0.25;
+
+        return [
+            (int) round($rootScore * $multiplier),
+            (int) round($failureScore * $multiplier),
+        ];
+    }
+
+    private static function isLifecycleCrashFrame(string $function, string $rendered): bool
+    {
+        $haystack = $function . ' ' . $rendered;
+
+        return preg_match('/UpdateOnRemove|RemovePlayer|Inactivate|Host_Changelevel|ChangeLevel|UTIL_RemoveImmediate|callback/i', $haystack) === 1;
     }
 
     private static function stackHasSourcePawnBridge(array $stack): bool
@@ -2117,7 +2194,104 @@ class Crash
             'symbol_upload_log' => self::loadSymbolUploadLog($app, $modules),
             'verified_source_lookup_frames' => $verifiedSourceLookupFrames,
             'source_lookup_enabled' => (($app['config']['upload-settings']['crash_source_lookup_enabled'] ?? false) === true),
+            'ai_analysis_enabled' => (($app['config']['upload-settings']['crash_ai_analysis_enabled'] ?? false) === true),
+            'public_ai_history_count' => self::countPublicAiHistory($app, (string) $id),
+            'ai_history_items' => $app['crash-ai-history-items'] ?? [],
         ));
+    }
+
+    /**
+     * @param array<string, bool> $includes
+     * @return array{text: string, sections: array<string, bool>, context: string}
+     */
+    public function buildAiAnalysisPacket(Application $app, string $id, string $context, array $includes): array
+    {
+        $crash = $app['db']->executeQuery('SELECT crash.id, UNIX_TIMESTAMP(crash.timestamp) AS timestamp, crash.ip AS ip, crash.owner_id AS owner, crash.server_id, crash.metadata, crash.cmdline, crash.thread, crash.processed, crash.failed, crash.stackhash, UNIX_TIMESTAMP(crash.lastview) AS lastview, server_owner.name FROM crash LEFT JOIN server_owner ON server_owner.id = crash.owner_id WHERE crash.id = ?', [$id])->fetch();
+        if ($crash === false) {
+            throw new \RuntimeException('Crash not found.');
+        }
+
+        if ($crash['thread'] == -1) {
+            $crash['thread'] = 0;
+        }
+
+        $crash['cmdline'] = self::sanitizeCrashCommandLine((string) $crash['cmdline']);
+        $crash['metadata'] = json_decode($crash['metadata'], true);
+        if (!is_array($crash['metadata'])) {
+            $crash['metadata'] = [];
+        }
+
+        $snapshots = self::extractSourceModSnapshots($crash['metadata']);
+        if (isset($crash['metadata']['HasConsoleLog'])) {
+            $crash['has_console_log'] = $crash['metadata']['HasConsoleLog'];
+            unset($crash['metadata']['HasConsoleLog']);
+        } else {
+            $crash['has_console_log'] = false;
+        }
+
+        if (isset($crash['metadata']['ExtensionBuild'])) {
+            unset($crash['metadata']['ExtensionBuild']);
+        }
+
+        ksort($crash['metadata']);
+
+        $stack = $app['db']->executeQuery('SELECT frame, module, function, rendered, url FROM frame WHERE crash = ? AND thread = ? ORDER BY frame', array($id, $crash['thread']))->fetchAll();
+        $modules = $app['db']->executeQuery('SELECT name, identifier, processed, present, HEX(base) AS base FROM module WHERE crash = ? ORDER BY name', array($id))->fetchAll();
+        $modules = self::buildModuleCoverageRows($modules, $app['config']);
+        $consoleCause = self::loadTerminalSourceModCause($app, $id, (bool) $crash['has_console_log']);
+        $terminalConsoleCause = ($consoleCause['terminal'] ?? false) ? $consoleCause : null;
+        $consoleBlaming = $consoleCause['supporting_blaming'] ?? ($terminalConsoleCause['blaming'] ?? null);
+        $rawSourcePawnChain = self::loadRawSourcePawnCauseChain($app, $id, $stack, $crash['metadata']);
+        $culpritCandidates = self::buildCulpritCandidates($stack, $modules, $crash['metadata'], $crash['cmdline'], $consoleBlaming, $terminalConsoleCause, $rawSourcePawnChain);
+        $symbolCoverage = self::buildSymbolCoverage($modules);
+        $consoleEntries = self::loadConsoleEntriesForAi($app, $id);
+
+        $lines = [];
+        $lines[] = sprintf('Crash ID: %s', $id);
+        $lines[] = sprintf('Analysis context: %s', $context);
+        $lines[] = '';
+
+        if (!empty($includes['header_metadata'])) {
+            $lines[] = '## Crash Header + Metadata';
+            $lines[] = self::buildAiHeaderSection($crash);
+            $lines[] = '';
+        }
+
+        if (!empty($includes['stack_trace'])) {
+            $lines[] = '## Stack Trace';
+            $lines[] = self::buildAiStackSection($stack);
+            $lines[] = '';
+        }
+
+        if (!empty($includes['likely_cause'])) {
+            $lines[] = '## Likely Cause';
+            $lines[] = self::buildAiLikelyCauseSection($culpritCandidates);
+            $lines[] = '';
+        }
+
+        if (!empty($includes['modules'])) {
+            $lines[] = '## Modules';
+            $lines[] = self::buildAiModulesSection($modules, $symbolCoverage);
+            $lines[] = '';
+        }
+
+        if (!empty($includes['console'])) {
+            $lines[] = '## Console History';
+            $lines[] = self::buildAiConsoleSection($consoleEntries, $snapshots);
+            $lines[] = '';
+        }
+
+        if (!empty($includes['raw'])) {
+            $lines[] = '## Raw';
+            $lines[] = self::buildAiRawSection($app, $id);
+            $lines[] = '';
+        }
+
+        return [
+            'text' => trim(implode("\n", array_filter($lines, static fn ($line): bool => $line !== null))),
+            'sections' => $includes,
+            'context' => $context,
+        ];
     }
 
     public function symbols(Application $app, $id)
@@ -2685,6 +2859,224 @@ class Crash
         return $app['twig']->render('console.html.twig', array('id' => $id, 'console' => $console));
     }
 
+    private static function sanitizeCrashCommandLine(string $cmdline): string
+    {
+        return (string) preg_replace_callback(array_map(function($v) {
+            return sprintf('/(?<=%s )[^ ]+/', preg_quote($v));
+        }, [
+            '+sv_password',
+            '+rcon_password',
+            '+sv_setsteamaccount',
+        ]), function($matches) {
+            return str_repeat('*', strlen($matches[0]));
+        }, $cmdline);
+    }
+
+    /**
+     * @return list<array{tick: string, time: string, message: string, severity: string}>
+     */
+    private static function loadConsoleEntriesForAi(Application $app, string $id): array
+    {
+        $path = $app['root'] . '/dumps/' . substr($id, 0, 2) . '/' . $id . '.meta.txt';
+
+        $metadata = null;
+        if (\Filesystem::pathExists($path . '.gz')) {
+            $metadata = gzdecode(\Filesystem::readFile($path . '.gz'));
+        } elseif (\Filesystem::pathExists($path)) {
+            $metadata = \Filesystem::readFile($path);
+        }
+
+        $console = [];
+        if ($metadata !== null) {
+            $ret = preg_match('/(?<=-------- CONSOLE HISTORY BEGIN --------)[^\\x00]+(?=-------- CONSOLE HISTORY END --------)/i', $metadata, $matches);
+            if ($ret === 1) {
+                $console = trim((string) $matches[0]);
+                $console = str_replace("\r\n", PHP_EOL, $console);
+                preg_match_all('/(\\d+)\\((\\d+\\.?\\d*)\\):  ([^\\x00]*?)(?=(?:\\d+\\(\\d+\\.\\d+\\):  )|$)/', $console, $console, PREG_SET_ORDER);
+                $console = array_reverse($console);
+                $activeGroup = null;
+                $console = array_map(function (array $line) use (&$activeGroup): array {
+                    $message = trim(self::stripAnsiEscapeSequences((string) ($line[3] ?? '')));
+                    [$severity, $nextGroup] = self::classifyConsoleLine($message, $activeGroup);
+                    $activeGroup = $nextGroup;
+
+                    return array(
+                        'tick' => trim((string) ($line[1] ?? '')),
+                        'time' => trim((string) ($line[2] ?? '')),
+                        'message' => $message,
+                        'severity' => $severity,
+                    );
+                }, $console);
+            }
+        }
+
+        return $console;
+    }
+
+    /**
+     * @param array<string, mixed> $crash
+     */
+    private static function buildAiHeaderSection(array $crash): string
+    {
+        $lines = [];
+        $lines[] = 'Uploaded: ' . date('M j, Y H:i', (int) ($crash['timestamp'] ?? time()));
+        if (!empty($crash['ip'])) {
+            $lines[] = 'Upload IP: ' . $crash['ip'];
+        }
+        if (!empty($crash['cmdline'])) {
+            $lines[] = 'Command Line: ' . $crash['cmdline'];
+        }
+        foreach (($crash['metadata'] ?? []) as $key => $value) {
+            if (is_scalar($value) && (string) $value !== '') {
+                $lines[] = sprintf('%s: %s', self::humanizeMetadataKeyForAi((string) $key), (string) $value);
+            }
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $stack
+     */
+    private static function buildAiStackSection(array $stack): string
+    {
+        if ($stack === []) {
+            return 'No processed stack frames are available.';
+        }
+
+        return implode("\n", array_map(
+            static fn (array $frame): string => sprintf('#%s %s', $frame['frame'] ?? '?', (string) ($frame['rendered'] ?? '[unknown frame]')),
+            $stack
+        ));
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $candidates
+     */
+    private static function buildAiLikelyCauseSection(array $candidates): string
+    {
+        if ($candidates === []) {
+            return 'No likely-cause candidates were produced.';
+        }
+
+        $lines = [];
+        $primary = $candidates[0];
+        $lines[] = sprintf('Primary suspect: %s (%s, %d%%)', $primary['label'], $primary['kind'] ?? 'Candidate', (int) ($primary['percent'] ?? 0));
+        foreach (($primary['reasons'] ?? []) as $reason) {
+            $lines[] = '- ' . $reason;
+        }
+
+        if (count($candidates) > 1) {
+            $lines[] = '';
+            $lines[] = 'Supporting candidates:';
+            foreach (array_slice($candidates, 1) as $candidate) {
+                $lines[] = sprintf('- %s (%s, %d%%)', $candidate['label'], $candidate['kind'] ?? 'Candidate', (int) ($candidate['percent'] ?? 0));
+            }
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $modules
+     * @param array<string, mixed> $symbolCoverage
+     */
+    private static function buildAiModulesSection(array $modules, array $symbolCoverage): string
+    {
+        $lines = [];
+        $lines[] = sprintf(
+            'Coverage: %d%% (%d/%d with symbols, %d missing, %d invalid)',
+            (int) ($symbolCoverage['percent'] ?? 0),
+            (int) ($symbolCoverage['with_symbols'] ?? 0),
+            (int) ($symbolCoverage['total'] ?? 0),
+            (int) ($symbolCoverage['missing'] ?? 0),
+            (int) ($symbolCoverage['invalid'] ?? 0)
+        );
+
+        foreach (array_slice($modules, 0, 30) as $module) {
+            $lines[] = sprintf(
+                '- %s | %s | %s | %s',
+                (string) ($module['name'] ?? ''),
+                (string) ($module['identifier'] ?? ''),
+                (string) ($module['coverage_status'] ?? ''),
+                (string) ($module['usefulness_hint'] ?? '')
+            );
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param list<array{tick: string, time: string, message: string, severity: string}> $consoleEntries
+     * @param array<string, string> $snapshots
+     */
+    private static function buildAiConsoleSection(array $consoleEntries, array $snapshots): string
+    {
+        $lines = [];
+        if ($consoleEntries === []) {
+            $lines[] = 'No console history is available.';
+        } else {
+            foreach (array_slice($consoleEntries, -60) as $entry) {
+                $lines[] = sprintf('[tick %s @ %s] %s', $entry['tick'], $entry['time'], $entry['message']);
+            }
+        }
+
+        if (!empty($snapshots['plugins'])) {
+            $lines[] = '';
+            $lines[] = 'SourceMod plugins snapshot:';
+            $lines[] = trim($snapshots['plugins']);
+        }
+
+        if (!empty($snapshots['extensions'])) {
+            $lines[] = '';
+            $lines[] = 'SourceMod extensions snapshot:';
+            $lines[] = trim($snapshots['extensions']);
+        }
+
+        return implode("\n", $lines);
+    }
+
+    private static function buildAiRawSection(Application $app, string $id): string
+    {
+        $response = (new self())->carburetor_data($app, $id);
+        $payload = json_decode((string) $response->getContent(), true);
+        if (!is_array($payload)) {
+            return 'Raw crash analysis is unavailable.';
+        }
+
+        $lines = [];
+        if (!empty($payload['error'])) {
+            $lines[] = 'Carburetor error: ' . $payload['error'];
+        }
+        if (!empty($payload['stderr_tail'])) {
+            $lines[] = 'stderr tail:';
+            $lines[] = trim((string) $payload['stderr_tail']);
+        }
+        if (!empty($payload['error_context']['summary'])) {
+            $lines[] = 'Failure context: ' . $payload['error_context']['summary'];
+        }
+        if (!empty($payload['raw_stdout']) && is_string($payload['raw_stdout'])) {
+            $lines[] = 'raw stdout:';
+            $lines[] = trim($payload['raw_stdout']);
+        } elseif (is_array($payload['fallback_stack'] ?? null)) {
+            $lines[] = 'fallback stack:';
+            foreach ($payload['fallback_stack'] as $frame) {
+                if (is_array($frame)) {
+                    $lines[] = sprintf('#%s %s', $frame['frame'] ?? '?', (string) ($frame['rendered'] ?? '[unknown frame]'));
+                }
+            }
+        } else {
+            $lines[] = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) ?: 'Raw crash data unavailable.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    private static function humanizeMetadataKeyForAi(string $key): string
+    {
+        return trim((string) preg_replace('/(?<!^)([A-Z])/', ' $1', str_replace('_', ' ', $key)));
+    }
+
     public function error(Application $app, $id)
     {
         if ($app['user'] === null) {
@@ -2808,7 +3200,18 @@ class Crash
             'symbols' => $app['request']->get('symbols', null),
             'source_lookup_enabled' => (($app['config']['upload-settings']['crash_source_lookup_enabled'] ?? false) === true),
             'source_lookup_local_allowed' => (($app['user']['admin'] ?? false) === true),
+            'ai_analysis_enabled' => (($app['config']['upload-settings']['crash_ai_analysis_enabled'] ?? false) === true),
+            'public_ai_history_count' => self::countPublicAiHistory($app, (string) $id),
+            'ai_history_items' => $app['crash-ai-history-items'] ?? [],
         ));
+    }
+
+    private static function countPublicAiHistory(Application $app, string $id): int
+    {
+        return (int) $app['db']->executeQuery(
+            'SELECT COUNT(*) FROM crash_ai_analysis_history WHERE crash = ? AND is_public = 1',
+            [$id],
+        )->fetchColumn();
     }
 
     public function carburetor_data(Application $app, $id)

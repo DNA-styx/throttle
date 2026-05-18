@@ -1,4 +1,4 @@
-{% extends 'layout.html.twig' %}
+﻿{% extends 'layout.html.twig' %}
 
 {% set supports_mobile = true %}
 
@@ -290,6 +290,98 @@
     margin-top: 10px;
 }
 
+.crash-ai-panel {
+    position: absolute;
+    z-index: 1061;
+    width: min(620px, calc(100vw - 64px));
+    padding: 12px;
+    border: 1px solid #303b4a;
+    border-radius: 4px;
+    background: #fff;
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.25);
+}
+
+.crash-ai-panel .form-group {
+    margin-bottom: 10px;
+}
+
+.crash-ai-panel .checkbox {
+    margin-top: 0;
+    margin-bottom: 8px;
+}
+
+.crash-ai-panel .checkbox.inline {
+    margin-right: 12px;
+}
+
+.crash-ai-result {
+    margin-top: 10px;
+    max-height: 340px;
+    overflow: auto;
+    white-space: pre-wrap;
+}
+
+.crash-ai-tabs {
+    margin-bottom: 10px;
+}
+
+.crash-ai-history-entry {
+    border-top: 1px solid rgba(120, 136, 156, 0.25);
+    padding: 10px 0;
+}
+
+.crash-ai-history-entry:first-child {
+    border-top: 0;
+    padding-top: 0;
+}
+
+.crash-ai-history-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.crash-ai-history-meta {
+    color: #8a97a6;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.crash-ai-history-response,
+.crash-ai-history-prompt {
+    white-space: pre-wrap;
+    max-height: 220px;
+    overflow: auto;
+    margin-top: 8px;
+}
+
+.crash-ai-history-empty {
+    margin-top: 8px;
+}
+
+.crash-ai-inline-spinner {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    margin-right: 6px;
+    border: 2px solid rgba(255, 255, 255, 0.35);
+    border-top-color: currentColor;
+    border-radius: 50%;
+    animation: crash-ai-spin 0.8s linear infinite;
+    vertical-align: -1px;
+}
+
+.likely-cause-group {
+    margin-top: 12px;
+}
+
+.likely-cause-group h4 {
+    margin: 0 0 10px;
+    padding-top: 2px;
+}
+
 body.theme-dark .raw-source-panel {
     background: #1a2330;
     border-color: #303b4a;
@@ -316,6 +408,29 @@ body.theme-dark .raw-source-panel .nav-tabs > li.active > a:focus {
 body.theme-dark .raw-source-panel code {
     background: #0d131a;
     color: #d8e7ff;
+}
+
+body.theme-dark .crash-ai-panel {
+    background: #1a2330;
+    border-color: #303b4a;
+    color: #d7dde6;
+}
+
+body.theme-dark .crash-ai-panel label,
+body.theme-dark .crash-ai-panel .help-block,
+body.theme-dark .crash-ai-panel .checkbox,
+body.theme-dark .crash-ai-panel .checkbox label {
+    color: #d7dde6;
+}
+
+body.theme-dark .crash-ai-panel code {
+    background: #0d131a;
+    color: #d8e7ff;
+}
+
+@keyframes crash-ai-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
 }
 </style>
 {% endblock %}
@@ -680,6 +795,11 @@ body.theme-dark .raw-source-panel code {
     <button type="button" class="btn btn-default btn-sm pull-right" id="copy-stacktrace" style="margin-top: 18px;" title="Copy stack trace" data-toggle="tooltip" data-container="body">
         <i class="icon-copy"></i>
     </button>
+  {% if ai_analysis_enabled and ((legacy_app.user and can_manage) or public_ai_history_count > 0) %}
+    <button type="button" class="btn btn-default btn-sm pull-right" id="ask-ai-details" style="margin-top: 18px; margin-right: 8px;" title="{{ legacy_app.user and can_manage ? 'Ask AI' : 'View AI history' }}" data-toggle="tooltip" data-container="body">
+        <i class="icon-magic"></i>
+    </button>
+  {% endif %}
 </div>
 <div id="details-stack-shell" class="well well-tight stack-source-shell">
     <table class="table table-stacktrace table-shown">
@@ -737,11 +857,72 @@ body.theme-dark .raw-source-panel code {
         <div class="raw-source-state"></div>
     </div>
 {% endif %}
+{% if ai_analysis_enabled and ((legacy_app.user and can_manage) or public_ai_history_count > 0) %}
+    <div id="details-ai-analysis-data"
+         class="hidden"
+         data-url="{{ path('crash_ai_analyze', {'id': crash.id}) }}"
+         data-history-url="{{ path('crash_ai_history', {'id': crash.id}) }}"
+         data-visibility-url-template="{{ path('crash_ai_history_visibility', {'id': crash.id, 'historyId': 0})|replace({'/0/': '/__HISTORY__/'} ) }}"
+         data-token="{{ csrf_token('crash-ai-analyze:' ~ crash.id) }}"
+         data-configs="{{ legacy_app.user.ai_configs|default([])|json_encode|e('html_attr') }}"
+         data-can-ask="{{ legacy_app.user and can_manage ? '1' : '0' }}">
+    </div>
+    <div id="details-ai-analysis-panel" class="crash-ai-panel hidden" aria-hidden="true">
+        <div class="raw-source-header">
+            <div class="raw-source-header-top">
+                <div>Ask AI about crash <code>{{ crash.id }}</code></div>
+                <button type="button" class="raw-source-close-x details-ai-close" aria-label="Close" title="Close"><i class="icon-remove"></i></button>
+            </div>
+            <div class="text-muted" style="margin-top: 4px;">Choose a saved AI config, adjust the prompt if needed, and select which crash data to send.</div>
+        </div>
+        <ul class="nav nav-tabs crash-ai-tabs">
+{% if legacy_app.user and can_manage %}
+            <li class="active"><a href="#" class="details-ai-tab-link" data-tab="ask">Ask</a></li>
+            <li><a href="#" class="details-ai-tab-link" data-tab="history">History</a></li>
+{% else %}
+            <li class="active"><a href="#" class="details-ai-tab-link" data-tab="history">History</a></li>
+{% endif %}
+        </ul>
+{% if legacy_app.user and can_manage %}
+        <div class="details-ai-tab-panel details-ai-tab-ask">
+            <div class="form-group">
+                <label>AI config</label>
+                <select class="form-control input-sm details-ai-config"></select>
+            </div>
+            <div class="form-group">
+                <label>Prompt</label>
+                <textarea class="form-control input-block-level details-ai-prompt" rows="8"></textarea>
+            </div>
+            <div class="form-group">
+                <label>Include</label>
+                <div>
+                    <label class="checkbox inline"><input type="checkbox" class="details-ai-include-stack" checked> Stack Trace</label>
+                    <label class="checkbox inline"><input type="checkbox" class="details-ai-include-cause" checked> Likely Cause</label>
+                    <label class="checkbox inline"><input type="checkbox" class="details-ai-include-modules" checked> Modules</label>
+                    <label class="checkbox inline"><input type="checkbox" class="details-ai-include-console" checked> Console</label>
+                    <label class="checkbox inline"><input type="checkbox" class="details-ai-include-header" checked> Header + metadata</label>
+                    <label class="checkbox inline"><input type="checkbox" class="details-ai-include-raw"> Raw</label>
+                </div>
+            </div>
+            <div class="btn-group btn-group-sm">
+                <button type="button" class="btn btn-primary details-ai-submit">Analyze</button>
+                <button type="button" class="btn btn-default details-ai-cancel">Close</button>
+            </div>
+            <div class="details-ai-status" style="margin-top: 10px;"></div>
+            <pre class="crash-ai-result hidden"></pre>
+        </div>
+{% endif %}
+        <div class="details-ai-tab-panel details-ai-tab-history{% if legacy_app.user and can_manage %} hidden{% endif %}">
+            <div class="details-ai-history-status"></div>
+            <div class="details-ai-history-list"></div>
+        </div>
+    </div>
+{% endif %}
 </div>
 
 {% if culprit_candidates|length > 0 %}
 <h2>Likely Cause</h2>
-<p class="muted">This heuristic prefers raw stack SourcePawn/JIT chains, then explicit native/extension crash sites, then tightly-correlated terminal SourceMod console exceptions.</p>
+<p class="muted">This heuristic ranks probable root cause separately from the native failure site, so engine crash frames do not automatically outrank nearby bridge, detour, or plugin evidence.</p>
 {% set primary = culprit_candidates[0] %}
 <div class="well">
     <div class="row">
@@ -766,9 +947,14 @@ body.theme-dark .raw-source-panel code {
         </div>
     </div>
 </div>
+{% if culprit_groups|length > 0 %}
+<div class="table-more module-log-toggle">
+    <a href="#likely-cause-more" data-toggle="collapse"><i class="icon-ellipsis-horizontal"></i> Supporting candidates</a>
+</div>
+<div id="likely-cause-more" class="collapse">
 {% for group in culprit_groups %}
-<div class="well well-tight">
-    <h4 style="margin: 0 0 8px;">{{ group.label }}</h4>
+<div class="well well-tight likely-cause-group">
+    <h4>{{ group.label }}</h4>
     <table class="table table-condensed" style="margin-bottom: 0;">
         <thead>
             <tr>
@@ -801,6 +987,8 @@ body.theme-dark .raw-source-panel code {
     </table>
 </div>
 {% endfor %}
+</div>
+{% endif %}
 {% endif %}
 
 {% if can_manage %}
@@ -1329,6 +1517,290 @@ body.theme-dark .raw-source-panel code {
     });
 {% endif %}
 
+{% if ai_analysis_enabled and ((legacy_app.user and can_manage) or public_ai_history_count > 0) %}
+    var detailsAiDataNode = $('#details-ai-analysis-data');
+    var detailsAiPanel = $('#details-ai-analysis-panel');
+    if (detailsAiPanel.length) {
+        detailsAiPanel.appendTo(document.body);
+    }
+    var detailsAiConfigs = [];
+    try {
+        detailsAiConfigs = JSON.parse(detailsAiDataNode.attr('data-configs') || '[]');
+    } catch (e) {
+        detailsAiConfigs = [];
+    }
+    var detailsAiUrl = detailsAiDataNode.attr('data-url');
+    var detailsAiHistoryUrl = detailsAiDataNode.attr('data-history-url');
+    var detailsAiVisibilityUrlTemplate = detailsAiDataNode.attr('data-visibility-url-template');
+    var detailsAiToken = detailsAiDataNode.attr('data-token');
+    var detailsAiCanAsk = detailsAiDataNode.attr('data-can-ask') === '1';
+    var detailsAiButton = $('#ask-ai-details');
+    var detailsAiSelect = detailsAiPanel.find('.details-ai-config');
+    var detailsAiPrompt = detailsAiPanel.find('.details-ai-prompt');
+    var detailsAiStatus = detailsAiPanel.find('.details-ai-status');
+    var detailsAiResult = detailsAiPanel.find('.crash-ai-result');
+    var detailsAiHistoryStatus = detailsAiPanel.find('.details-ai-history-status');
+    var detailsAiHistoryList = detailsAiPanel.find('.details-ai-history-list');
+    var detailsAiHistoryLoaded = false;
+    var detailsAiEmbeddedHistory = [];
+    try {
+        detailsAiEmbeddedHistory = JSON.parse(detailsAiDataNode.attr('data-history-items') || '[]');
+    } catch (e) {
+        detailsAiEmbeddedHistory = [];
+    }
+
+    function detailsAiSelectedConfig() {
+        var selectedId = String(detailsAiSelect.val() || '');
+        for (var i = 0; i < detailsAiConfigs.length; i++) {
+            if (String(detailsAiConfigs[i].id) === selectedId) {
+                return detailsAiConfigs[i];
+            }
+        }
+        return null;
+    }
+
+    function detailsAiRenderConfigs() {
+        if (!detailsAiCanAsk) {
+            return;
+        }
+        detailsAiSelect.empty();
+        if (!detailsAiConfigs.length) {
+            detailsAiSelect.append($('<option value=""></option>').text('No saved AI configs'));
+            detailsAiPrompt.val('');
+            return;
+        }
+
+        detailsAiConfigs.forEach(function(config) {
+            var label = config.display_name + ' (' + config.provider_label + ' / ' + config.model + ')';
+            detailsAiSelect.append($('<option></option>').attr('value', config.id).text(label));
+        });
+
+        var preferred = null;
+        detailsAiConfigs.forEach(function(config) {
+            if (config.is_default && preferred === null) {
+                preferred = String(config.id);
+            }
+        });
+        detailsAiSelect.val(preferred || String(detailsAiConfigs[0].id));
+        var selected = detailsAiSelectedConfig();
+        detailsAiPrompt.val(selected && selected.default_prompt ? selected.default_prompt : '');
+    }
+
+    function detailsAiShowTab(tab) {
+        detailsAiPanel.find('.details-ai-tab-link').parent().removeClass('active');
+        detailsAiPanel.find('.details-ai-tab-link[data-tab="' + tab + '"]').parent().addClass('active');
+        detailsAiPanel.find('.details-ai-tab-panel').addClass('hidden');
+        detailsAiPanel.find('.details-ai-tab-' + tab).removeClass('hidden');
+        if (tab === 'history') {
+            detailsAiLoadHistory(false);
+        }
+    }
+
+    function detailsAiShowPanel() {
+        detailsAiRenderConfigs();
+        detailsAiStatus.empty();
+        detailsAiResult.addClass('hidden').text('');
+
+        detailsAiPanel.removeClass('hidden').attr('aria-hidden', 'false');
+        var buttonRect = detailsAiButton[0].getBoundingClientRect();
+        var panelWidth = detailsAiPanel.outerWidth() || 620;
+        var scrollTop = $(window).scrollTop() || 0;
+        var scrollLeft = $(window).scrollLeft() || 0;
+        var viewportWidth = window.innerWidth || panelWidth;
+        var left = Math.max(12 + scrollLeft, Math.min(buttonRect.left + scrollLeft - panelWidth + detailsAiButton.outerWidth(), scrollLeft + viewportWidth - panelWidth - 12));
+        var top = Math.max(12 + scrollTop, buttonRect.top + scrollTop + detailsAiButton.outerHeight() + 6);
+        detailsAiPanel.css({ top: top + 'px', left: left + 'px' });
+        detailsAiShowTab(detailsAiCanAsk ? 'ask' : 'history');
+    }
+
+    function detailsAiHidePanel() {
+        detailsAiPanel.addClass('hidden').attr('aria-hidden', 'true');
+    }
+
+    function detailsAiSetStatus(type, text, loading) {
+        var box = $('<div></div>').addClass('alert alert-' + type);
+        if (loading) {
+            box.append($('<span class="crash-ai-inline-spinner"></span>'));
+        }
+        box.append(document.createTextNode(text));
+        detailsAiStatus.empty().append(box);
+    }
+
+    function detailsAiSetHistoryStatus(type, text) {
+        detailsAiHistoryStatus.empty().append($('<div></div>').addClass('alert alert-' + type).text(text));
+    }
+
+    function detailsAiHistorySections(entry) {
+        var labels = [];
+        if (entry.request_sections && entry.request_sections.stack_trace) labels.push('stack');
+        if (entry.request_sections && entry.request_sections.likely_cause) labels.push('cause');
+        if (entry.request_sections && entry.request_sections.modules) labels.push('modules');
+        if (entry.request_sections && entry.request_sections.console) labels.push('console');
+        if (entry.request_sections && entry.request_sections.header_metadata) labels.push('header');
+        if (entry.request_sections && entry.request_sections.raw) labels.push('raw');
+        return labels.join(', ');
+    }
+
+    function detailsAiRenderHistory(items) {
+        detailsAiHistoryList.empty();
+        if (!items || !items.length) {
+            detailsAiHistoryList.append($('<div class="crash-ai-history-empty muted"></div>').text('No AI history entries yet.'));
+            return;
+        }
+
+        items.forEach(function(entry) {
+            var item = $('<div class="crash-ai-history-entry"></div>');
+            var head = $('<div class="crash-ai-history-head"></div>').appendTo(item);
+            var metaBox = $('<div></div>').appendTo(head);
+            $('<div class="fw-semibold"></div>').text((entry.user_name || ('User #' + entry.user_id)) + ' В· ' + entry.provider_label + ' / ' + entry.model).appendTo(metaBox);
+            $('<div class="crash-ai-history-meta"></div>').text(entry.created_at + ' В· ' + entry.context + ' В· ' + detailsAiHistorySections(entry)).appendTo(metaBox);
+
+            var actions = $('<div class="text-right"></div>').appendTo(head);
+            $('<span class="label ' + (entry.is_public ? 'label-success' : 'label-default') + '"></span>')
+                .text(entry.is_public ? 'Public' : 'Private')
+                .appendTo(actions);
+
+            if (entry.can_toggle_visibility) {
+                actions.append(' ');
+                $('<button type="button" class="btn btn-mini btn-default"></button>')
+                    .text(entry.is_public ? 'Make private' : 'Make public')
+                    .on('click', function() {
+                        detailsAiSetHistoryStatus('info', 'Updating visibility...');
+                        $.ajax({
+                            url: detailsAiVisibilityUrlTemplate.replace('__HISTORY__', String(entry.id)),
+                            method: 'POST',
+                            data: {
+                                _token: detailsAiToken,
+                                is_public: entry.is_public ? '0' : '1'
+                            }
+                        }).done(function(result) {
+                            if (!result || result.status !== 'ok') {
+                                detailsAiSetHistoryStatus('danger', result && result.reason ? result.reason : 'Could not update visibility.');
+                                return;
+                            }
+                            detailsAiSetHistoryStatus('success', 'Visibility updated.');
+                            detailsAiLoadHistory(true);
+                        }).fail(function(xhr) {
+                            var message = 'Could not update visibility.';
+                            if (xhr && xhr.responseJSON && xhr.responseJSON.reason) {
+                                message = xhr.responseJSON.reason;
+                            }
+                            detailsAiSetHistoryStatus('danger', message);
+                        });
+                    })
+                    .appendTo(actions);
+            }
+
+            var promptDetails = $('<details></details>').appendTo(item);
+            $('<summary></summary>').text('Prompt').appendTo(promptDetails);
+            $('<pre class="crash-ai-history-prompt"></pre>').text(entry.prompt || '').appendTo(promptDetails);
+            $('<pre class="crash-ai-history-response"></pre>').text(entry.response_text || '').appendTo(item);
+            detailsAiHistoryList.append(item);
+        });
+    }
+
+    function detailsAiLoadHistory(forceReload) {
+        if (detailsAiHistoryLoaded && !forceReload) {
+            return;
+        }
+        detailsAiSetHistoryStatus('info', 'Loading AI history...');
+        $.getJSON(detailsAiHistoryUrl, function(result) {
+            if (!result || result.status !== 'ok') {
+                detailsAiSetHistoryStatus('danger', result && result.reason ? result.reason : 'Could not load AI history.');
+                return;
+            }
+            detailsAiHistoryStatus.empty();
+            detailsAiRenderHistory(result.items || []);
+            detailsAiHistoryLoaded = true;
+        }).fail(function(xhr) {
+            var message = 'Could not load AI history.';
+            if (xhr && xhr.responseJSON && xhr.responseJSON.reason) {
+                message = xhr.responseJSON.reason;
+            }
+            detailsAiSetHistoryStatus('danger', message);
+        });
+    }
+
+    if (detailsAiCanAsk) {
+        detailsAiSelect.on('change', function() {
+            var selected = detailsAiSelectedConfig();
+            if (selected && selected.default_prompt) {
+                detailsAiPrompt.val(selected.default_prompt);
+            }
+        });
+    }
+
+    detailsAiPanel.find('.details-ai-tab-link').on('click', function(event) {
+        event.preventDefault();
+        detailsAiShowTab($(this).data('tab'));
+    });
+
+    detailsAiButton.on('click', function(event) {
+        event.preventDefault();
+        detailsAiShowPanel();
+    });
+
+    detailsAiPanel.find('.details-ai-close, .details-ai-cancel').on('click', function() {
+        detailsAiHidePanel();
+    });
+
+    $(document).on('mousedown', function(event) {
+        if (detailsAiPanel.hasClass('hidden')) {
+            return;
+        }
+        var target = $(event.target);
+        if (target.closest('#details-ai-analysis-panel').length || target.closest('#ask-ai-details').length) {
+            return;
+        }
+        detailsAiHidePanel();
+    });
+
+    detailsAiPanel.find('.details-ai-submit').on('click', function() {
+        if (!detailsAiCanAsk) {
+            return;
+        }
+        var selected = detailsAiSelectedConfig();
+        if (!selected) {
+            detailsAiSetStatus('warning', 'Create an AI config in Profile first.');
+            return;
+        }
+
+        detailsAiSetStatus('info', 'Analyzing crash with AI...', true);
+        detailsAiResult.addClass('hidden').text('');
+
+        $.ajax({
+            url: detailsAiUrl,
+            method: 'POST',
+            data: {
+                _token: detailsAiToken,
+                ai_config_id: selected.id,
+                context: 'details',
+                prompt: detailsAiPrompt.val() || '',
+                include_stack_trace: detailsAiPanel.find('.details-ai-include-stack').is(':checked') ? '1' : '0',
+                include_likely_cause: detailsAiPanel.find('.details-ai-include-cause').is(':checked') ? '1' : '0',
+                include_modules: detailsAiPanel.find('.details-ai-include-modules').is(':checked') ? '1' : '0',
+                include_console: detailsAiPanel.find('.details-ai-include-console').is(':checked') ? '1' : '0',
+                include_header_metadata: detailsAiPanel.find('.details-ai-include-header').is(':checked') ? '1' : '0',
+                include_raw: detailsAiPanel.find('.details-ai-include-raw').is(':checked') ? '1' : '0'
+            }
+        }).done(function(result) {
+            if (!result || result.status !== 'ok') {
+                detailsAiSetStatus('danger', result && result.reason ? result.reason : 'AI analysis failed.');
+                return;
+            }
+            detailsAiSetStatus('success', result.provider_label + ' / ' + result.model + ' пїЅ ' + result.duration_ms + ' ms');
+            detailsAiResult.removeClass('hidden').text(result.response_text || '');
+            detailsAiHistoryLoaded = false;
+        }).fail(function(xhr) {
+            var message = 'AI analysis failed.';
+            if (xhr && xhr.responseJSON && xhr.responseJSON.reason) {
+                message = xhr.responseJSON.reason;
+            }
+            detailsAiSetStatus('danger', message);
+        });
+    });
+{% endif %}
+
 {% if has_error_string %}
     $.getJSON('{{ path('error', {id: crash.id}) }}', function(data) {
         if (data.string) {
@@ -1338,4 +1810,5 @@ body.theme-dark .raw-source-panel code {
 {% endif %}
 </script>
 {% endblock %}
+
 

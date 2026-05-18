@@ -1,4 +1,4 @@
-{% extends 'layout.html.twig' %}
+﻿{% extends 'layout.html.twig' %}
 
 {% set logout_to_index = true %}
 {% set supports_mobile = true %}
@@ -7,6 +7,9 @@
 <div class="clearfix" style="margin-bottom: 20px;">
     <a class="btn btn-default pull-left" href="{{ path('details', {'id': id}) }}"><i class="icon-chevron-left"></i> Back to Details</a>
     <a class="btn btn-default pull-right" href="{{ path('view', {'id': id}) }}">Even More Raw <i class="icon-chevron-right"></i></a>
+{% if ai_analysis_enabled and legacy_app.user %}
+    <button type="button" class="btn btn-default pull-right" id="ask-ai-raw" style="margin-right: 8px;"><i class="icon-magic"></i> Ask AI</button>
+{% endif %}
 </div>
 <style>
     .raw-stack-shell { position: relative; }
@@ -125,7 +128,44 @@
     .raw-source-diagnostics-toggle {
         margin-top: 10px;
     }
+    .crash-ai-panel {
+        position: absolute;
+        z-index: 5;
+        width: min(620px, calc(100% - 64px));
+        padding: 12px;
+        border: 1px solid #303b4a;
+        border-radius: 4px;
+        background: #fff;
+        box-shadow: 0 10px 26px rgba(0, 0, 0, 0.25);
+    }
+    .crash-ai-panel .form-group { margin-bottom: 10px; }
+    .crash-ai-panel .checkbox { margin-top: 0; margin-bottom: 8px; }
+    .crash-ai-panel .checkbox.inline { margin-right: 12px; }
+    .crash-ai-result { margin-top: 10px; max-height: 340px; overflow: auto; white-space: pre-wrap; }
+    .crash-ai-tabs { margin-bottom: 10px; }
+    .crash-ai-history-entry { border-top: 1px solid rgba(120, 136, 156, 0.25); padding: 10px 0; }
+    .crash-ai-history-entry:first-child { border-top: 0; padding-top: 0; }
+    .crash-ai-history-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+    .crash-ai-history-meta { color: #8a97a6; font-size: 12px; line-height: 1.4; }
+    .crash-ai-history-response,
+    .crash-ai-history-prompt { white-space: pre-wrap; max-height: 220px; overflow: auto; margin-top: 8px; }
+    .crash-ai-history-empty { margin-top: 8px; }
+    .crash-ai-inline-spinner {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        margin-right: 6px;
+        border: 2px solid rgba(255, 255, 255, 0.35);
+        border-top-color: currentColor;
+        border-radius: 50%;
+        animation: crash-ai-spin 0.8s linear infinite;
+        vertical-align: -1px;
+    }
     @keyframes raw-source-spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+    @keyframes crash-ai-spin {
         from { transform: rotate(0deg); }
         to { transform: rotate(360deg); }
     }
@@ -161,6 +201,21 @@
         background: #0d131a;
         color: #d8e7ff;
     }
+    body.theme-dark .crash-ai-panel {
+        background: #1a2330;
+        border-color: #303b4a;
+        color: #d7dde6;
+    }
+    body.theme-dark .crash-ai-panel label,
+    body.theme-dark .crash-ai-panel .help-block,
+    body.theme-dark .crash-ai-panel .checkbox,
+    body.theme-dark .crash-ai-panel .checkbox label {
+        color: #d7dde6;
+    }
+    body.theme-dark .crash-ai-panel code {
+        background: #0d131a;
+        color: #d8e7ff;
+    }
 </style>
 <div id="loading" class="progress" style="background-color: #fff; border: 1px solid #ccc; height: 40px;"><div class="progress-bar" style="width: 0%"></div></div>
 <div id="content" class="hidden">
@@ -180,6 +235,60 @@
         <pre class="tab-pane" id="tab-raw"></pre>
     </div>
 </div>
+{% if ai_analysis_enabled and legacy_app.user %}
+<div id="raw-ai-analysis-data"
+     class="hidden"
+     data-url="{{ path('crash_ai_analyze', {'id': id}) }}"
+     data-history-url="{{ path('crash_ai_history', {'id': id}) }}"
+     data-visibility-url-template="{{ path('crash_ai_history_visibility', {'id': id, 'historyId': 0})|replace({'/0/': '/__HISTORY__/'} ) }}"
+     data-token="{{ csrf_token('crash-ai-analyze:' ~ id) }}"
+     data-configs="{{ legacy_app.user.ai_configs|default([])|json_encode|e('html_attr') }}">
+</div>
+<div id="raw-ai-analysis-panel" class="crash-ai-panel hidden" aria-hidden="true">
+    <div class="raw-source-header">
+        <div class="raw-source-header-top">
+            <div>Ask AI about raw crash <code>{{ id }}</code></div>
+            <button type="button" class="raw-source-close-x raw-ai-close" aria-label="Close" title="Close"><i class="icon-remove"></i></button>
+        </div>
+        <div class="text-muted" style="margin-top: 4px;">This mode can include raw carburetor output in addition to the processed crash view.</div>
+    </div>
+    <ul class="nav nav-tabs crash-ai-tabs">
+        <li class="active"><a href="#" class="raw-ai-tab-link" data-tab="ask">Ask</a></li>
+        <li><a href="#" class="raw-ai-tab-link" data-tab="history">History</a></li>
+    </ul>
+    <div class="raw-ai-tab-panel raw-ai-tab-ask">
+        <div class="form-group">
+            <label>AI config</label>
+            <select class="form-control input-sm raw-ai-config"></select>
+        </div>
+        <div class="form-group">
+            <label>Prompt</label>
+            <textarea class="form-control input-block-level raw-ai-prompt" rows="8"></textarea>
+        </div>
+        <div class="form-group">
+            <label>Include</label>
+            <div>
+                <label class="checkbox inline"><input type="checkbox" class="raw-ai-include-stack" checked> Stack Trace</label>
+                <label class="checkbox inline"><input type="checkbox" class="raw-ai-include-cause" checked> Likely Cause</label>
+                <label class="checkbox inline"><input type="checkbox" class="raw-ai-include-modules" checked> Modules</label>
+                <label class="checkbox inline"><input type="checkbox" class="raw-ai-include-console" checked> Console</label>
+                <label class="checkbox inline"><input type="checkbox" class="raw-ai-include-header" checked> Header + metadata</label>
+                <label class="checkbox inline"><input type="checkbox" class="raw-ai-include-raw" checked> Raw</label>
+            </div>
+        </div>
+        <div class="btn-group btn-group-sm">
+            <button type="button" class="btn btn-primary raw-ai-submit">Analyze</button>
+            <button type="button" class="btn btn-default raw-ai-cancel">Close</button>
+        </div>
+        <div class="raw-ai-status" style="margin-top: 10px;"></div>
+        <pre class="crash-ai-result hidden"></pre>
+    </div>
+    <div class="raw-ai-tab-panel raw-ai-tab-history hidden">
+        <div class="raw-ai-history-status"></div>
+        <div class="raw-ai-history-list"></div>
+    </div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
@@ -202,6 +311,277 @@ var sourceLookupLocalAllowed = {{ source_lookup_local_allowed ? 'true' : 'false'
 var sourceLookupUrl = '{{ path('carburetor_source_lookup', { id: id }) | escape('js') }}';
 var sourceLookupToken = '{{ csrf_token('carburetor-source-lookup:' ~ id) | escape('js') }}';
 var sourceLookupModules = {};
+var rawAiEnabled = {{ ai_analysis_enabled and legacy_app.user ? 'true' : 'false' }};
+
+{% if ai_analysis_enabled and legacy_app.user %}
+var rawAiButton = $('#ask-ai-raw');
+var rawAiPanel = $('#raw-ai-analysis-panel');
+var rawAiDataNode = $('#raw-ai-analysis-data');
+var rawAiUrl = rawAiDataNode.attr('data-url');
+var rawAiHistoryUrl = rawAiDataNode.attr('data-history-url');
+var rawAiVisibilityUrlTemplate = rawAiDataNode.attr('data-visibility-url-template');
+var rawAiToken = rawAiDataNode.attr('data-token');
+var rawAiConfigs = [];
+try {
+    rawAiConfigs = JSON.parse(rawAiDataNode.attr('data-configs') || '[]');
+} catch (e) {
+    rawAiConfigs = [];
+}
+var rawAiSelect = rawAiPanel.find('.raw-ai-config');
+var rawAiPrompt = rawAiPanel.find('.raw-ai-prompt');
+var rawAiStatus = rawAiPanel.find('.raw-ai-status');
+var rawAiResult = rawAiPanel.find('.crash-ai-result');
+var rawAiHistoryStatus = rawAiPanel.find('.raw-ai-history-status');
+var rawAiHistoryList = rawAiPanel.find('.raw-ai-history-list');
+var rawAiHistoryLoaded = false;
+var rawAiEmbeddedHistory = [];
+try {
+    rawAiEmbeddedHistory = JSON.parse(rawAiDataNode.attr('data-history-items') || '[]');
+} catch (e) {
+    rawAiEmbeddedHistory = [];
+}
+
+function rawAiSelectedConfig() {
+    var selectedId = String(rawAiSelect.val() || '');
+    for (var i = 0; i < rawAiConfigs.length; i++) {
+        if (String(rawAiConfigs[i].id) === selectedId) {
+            return rawAiConfigs[i];
+        }
+    }
+    return null;
+}
+
+function rawAiRenderConfigs() {
+    rawAiSelect.empty();
+    if (!rawAiConfigs.length) {
+        rawAiSelect.append($('<option value=""></option>').text('No saved AI configs'));
+        rawAiPrompt.val('');
+        return;
+    }
+
+    rawAiConfigs.forEach(function(config) {
+        rawAiSelect.append($('<option></option>').attr('value', config.id).text(config.display_name + ' (' + config.provider_label + ' / ' + config.model + ')'));
+    });
+
+    var preferred = null;
+    rawAiConfigs.forEach(function(config) {
+        if (config.is_default && preferred === null) {
+            preferred = String(config.id);
+        }
+    });
+    rawAiSelect.val(preferred || String(rawAiConfigs[0].id));
+    var selected = rawAiSelectedConfig();
+    rawAiPrompt.val(selected && selected.default_prompt ? selected.default_prompt : '');
+}
+
+function rawAiSetStatus(type, text, loading) {
+    var box = $('<div></div>').addClass('alert alert-' + type);
+    if (loading) {
+        box.append($('<span class="crash-ai-inline-spinner"></span>'));
+    }
+    box.append(document.createTextNode(text));
+    rawAiStatus.empty().append(box);
+}
+
+function rawAiSetHistoryStatus(type, text) {
+    rawAiHistoryStatus.empty().append($('<div></div>').addClass('alert alert-' + type).text(text));
+}
+
+function rawAiShowTab(tab) {
+    rawAiPanel.find('.raw-ai-tab-link').parent().removeClass('active');
+    rawAiPanel.find('.raw-ai-tab-link[data-tab="' + tab + '"]').parent().addClass('active');
+    rawAiPanel.find('.raw-ai-tab-panel').addClass('hidden');
+    rawAiPanel.find('.raw-ai-tab-' + tab).removeClass('hidden');
+    if (tab === 'history') {
+        rawAiLoadHistory(false);
+    }
+}
+
+function rawAiHistorySections(entry) {
+    var labels = [];
+    if (entry.request_sections && entry.request_sections.stack_trace) labels.push('stack');
+    if (entry.request_sections && entry.request_sections.likely_cause) labels.push('cause');
+    if (entry.request_sections && entry.request_sections.modules) labels.push('modules');
+    if (entry.request_sections && entry.request_sections.console) labels.push('console');
+    if (entry.request_sections && entry.request_sections.header_metadata) labels.push('header');
+    if (entry.request_sections && entry.request_sections.raw) labels.push('raw');
+    return labels.join(', ');
+}
+
+function rawAiRenderHistory(items) {
+    rawAiHistoryList.empty();
+    if (!items || !items.length) {
+        rawAiHistoryList.append($('<div class="crash-ai-history-empty muted"></div>').text('No AI history entries yet.'));
+        return;
+    }
+
+    items.forEach(function(entry) {
+        var item = $('<div class="crash-ai-history-entry"></div>');
+        var head = $('<div class="crash-ai-history-head"></div>').appendTo(item);
+        var metaBox = $('<div></div>').appendTo(head);
+        $('<div class="fw-semibold"></div>').text((entry.user_name || ('User #' + entry.user_id)) + ' В· ' + entry.provider_label + ' / ' + entry.model).appendTo(metaBox);
+        $('<div class="crash-ai-history-meta"></div>').text(entry.created_at + ' В· ' + entry.context + ' В· ' + rawAiHistorySections(entry)).appendTo(metaBox);
+
+        var actions = $('<div class="text-right"></div>').appendTo(head);
+        $('<span class="label ' + (entry.is_public ? 'label-success' : 'label-default') + '"></span>')
+            .text(entry.is_public ? 'Public' : 'Private')
+            .appendTo(actions);
+
+        if (entry.can_toggle_visibility) {
+            actions.append(' ');
+            $('<button type="button" class="btn btn-mini btn-default"></button>')
+                .text(entry.is_public ? 'Make private' : 'Make public')
+                .on('click', function() {
+                    rawAiSetHistoryStatus('info', 'Updating visibility...');
+                    $.ajax({
+                        url: rawAiVisibilityUrlTemplate.replace('__HISTORY__', String(entry.id)),
+                        method: 'POST',
+                        data: {
+                            _token: rawAiToken,
+                            is_public: entry.is_public ? '0' : '1'
+                        }
+                    }).done(function(result) {
+                        if (!result || result.status !== 'ok') {
+                            rawAiSetHistoryStatus('danger', result && result.reason ? result.reason : 'Could not update visibility.');
+                            return;
+                        }
+                        rawAiSetHistoryStatus('success', 'Visibility updated.');
+                        rawAiLoadHistory(true);
+                    }).fail(function(xhr) {
+                        var message = 'Could not update visibility.';
+                        if (xhr && xhr.responseJSON && xhr.responseJSON.reason) {
+                            message = xhr.responseJSON.reason;
+                        }
+                        rawAiSetHistoryStatus('danger', message);
+                    });
+                })
+                .appendTo(actions);
+        }
+
+        var promptDetails = $('<details></details>').appendTo(item);
+        $('<summary></summary>').text('Prompt').appendTo(promptDetails);
+        $('<pre class="crash-ai-history-prompt"></pre>').text(entry.prompt || '').appendTo(promptDetails);
+        $('<pre class="crash-ai-history-response"></pre>').text(entry.response_text || '').appendTo(item);
+        rawAiHistoryList.append(item);
+    });
+}
+
+function rawAiLoadHistory(forceReload) {
+    if (rawAiHistoryLoaded && !forceReload) {
+        return;
+    }
+    rawAiSetHistoryStatus('info', 'Loading AI history...');
+    $.getJSON(rawAiHistoryUrl, function(result) {
+        if (!result || result.status !== 'ok') {
+            rawAiSetHistoryStatus('danger', result && result.reason ? result.reason : 'Could not load AI history.');
+            return;
+        }
+        rawAiHistoryStatus.empty();
+        rawAiRenderHistory(result.items || []);
+        rawAiHistoryLoaded = true;
+    }).fail(function(xhr) {
+        var message = 'Could not load AI history.';
+        if (xhr && xhr.responseJSON && xhr.responseJSON.reason) {
+            message = xhr.responseJSON.reason;
+        }
+        rawAiSetHistoryStatus('danger', message);
+    });
+}
+
+function rawAiShowPanel() {
+    rawAiRenderConfigs();
+    rawAiStatus.empty();
+    rawAiResult.addClass('hidden').text('');
+    rawAiPanel.removeClass('hidden').attr('aria-hidden', 'false');
+    var buttonRect = rawAiButton[0].getBoundingClientRect();
+    var panelWidth = rawAiPanel.outerWidth() || 620;
+    var scrollTop = $(window).scrollTop() || 0;
+    var scrollLeft = $(window).scrollLeft() || 0;
+    var viewportWidth = window.innerWidth || panelWidth;
+    var left = Math.max(12 + scrollLeft, Math.min(buttonRect.left + scrollLeft - panelWidth + rawAiButton.outerWidth(), scrollLeft + viewportWidth - panelWidth - 12));
+    var top = Math.max(12 + scrollTop, buttonRect.top + scrollTop + rawAiButton.outerHeight() + 6);
+    rawAiPanel.css({ top: top + 'px', left: left + 'px' });
+    rawAiShowTab('ask');
+}
+
+function rawAiHidePanel() {
+    rawAiPanel.addClass('hidden').attr('aria-hidden', 'true');
+}
+
+rawAiButton.on('click', function(event) {
+    event.preventDefault();
+    rawAiShowPanel();
+});
+
+rawAiSelect.on('change', function() {
+    var selected = rawAiSelectedConfig();
+    if (selected && selected.default_prompt) {
+        rawAiPrompt.val(selected.default_prompt);
+    }
+});
+
+rawAiPanel.find('.raw-ai-tab-link').on('click', function(event) {
+    event.preventDefault();
+    rawAiShowTab($(this).data('tab'));
+});
+
+rawAiPanel.find('.raw-ai-close, .raw-ai-cancel').on('click', function() {
+    rawAiHidePanel();
+});
+
+$(document).on('mousedown', function(event) {
+    if (rawAiPanel.hasClass('hidden')) {
+        return;
+    }
+    var target = $(event.target);
+    if (target.closest('#raw-ai-analysis-panel').length || target.closest('#ask-ai-raw').length) {
+        return;
+    }
+    rawAiHidePanel();
+});
+
+rawAiPanel.find('.raw-ai-submit').on('click', function() {
+    var selected = rawAiSelectedConfig();
+    if (!selected) {
+        rawAiSetStatus('warning', 'Create an AI config in Profile first.');
+        return;
+    }
+
+    rawAiSetStatus('info', 'Analyzing raw crash with AI...', true);
+    rawAiResult.addClass('hidden').text('');
+
+    $.ajax({
+        url: rawAiUrl,
+        method: 'POST',
+        data: {
+            _token: rawAiToken,
+            ai_config_id: selected.id,
+            context: 'raw',
+            prompt: rawAiPrompt.val() || '',
+            include_stack_trace: rawAiPanel.find('.raw-ai-include-stack').is(':checked') ? '1' : '0',
+            include_likely_cause: rawAiPanel.find('.raw-ai-include-cause').is(':checked') ? '1' : '0',
+            include_modules: rawAiPanel.find('.raw-ai-include-modules').is(':checked') ? '1' : '0',
+            include_console: rawAiPanel.find('.raw-ai-include-console').is(':checked') ? '1' : '0',
+            include_header_metadata: rawAiPanel.find('.raw-ai-include-header').is(':checked') ? '1' : '0',
+            include_raw: rawAiPanel.find('.raw-ai-include-raw').is(':checked') ? '1' : '0'
+        }
+    }).done(function(result) {
+        if (!result || result.status !== 'ok') {
+            rawAiSetStatus('danger', result && result.reason ? result.reason : 'AI analysis failed.');
+            return;
+        }
+        rawAiSetStatus('success', result.provider_label + ' / ' + result.model + ' · ' + result.duration_ms + ' ms');
+        rawAiResult.removeClass('hidden').text(result.response_text || '');
+        rawAiHistoryLoaded = false;
+    }).fail(function(xhr) {
+        var message = 'AI analysis failed.';
+        if (xhr && xhr.responseJSON && xhr.responseJSON.reason) {
+            message = xhr.responseJSON.reason;
+        }
+        rawAiSetStatus('danger', message);
+    });
+});
+{% endif %}
 
 function showError(message, data) {
     var lines = [message];
@@ -864,3 +1244,4 @@ oReq.onload = function(oEvent) {
 oReq.send(null);
 </script>
 {% endblock %}
+
