@@ -1,6 +1,7 @@
 <div class="dropdown">
+    {% set accountAvatarSeed = app.user.contactEmail ?: app.user.login ?: ('user-' ~ app.user.id) %}
     <button class="btn navbar-text-btn dropdown-toggle d-flex align-items-center gap-2 py-1" type="button" id="account-menu" data-bs-toggle="dropdown" aria-expanded="false">
-        <img src="{{ (app.user.contactEmail ?: 'user-' ~ app.user.id)|identicon(15) }}" alt="{{ app.user.name }}'s avatar" width="30" height="30" class="rounded border">
+        <img src="{{ accountAvatarSeed|identicon(15) }}" alt="{{ app.user.name }}'s avatar" width="30" height="30" class="rounded border account-menu-avatar">
         <span>{{ app.user.name ?: 'Account' }}</span>
     </button>
     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="account-menu">

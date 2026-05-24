@@ -53,7 +53,7 @@
                     {{ include('_account_menu_legacy.html.twig') }}
 {% else %}
                     {{ include('_theme_switcher.html.twig') }}
-                    <a href="{{ path('login_steam', {'return': legacy_app.request.pathInfo}) }}" class="btn btn-success navbar-btn"><i class="icon-signin"></i> Login with Steam</a>
+                    <a href="{{ path('login', {'return': legacy_app.request.pathInfo}) }}" class="btn btn-success navbar-btn"><i class="icon-signin"></i> Login</a>
 {% endif %}
                 </div>
             </div>

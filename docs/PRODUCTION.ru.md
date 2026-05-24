@@ -18,6 +18,8 @@ STEAM_API_KEY=optional-steam-web-api-key
 APP_ADMINS=steam:YOUR_STEAMID64
 SYMBOL_UPLOAD_TOKEN=optional-global-symbol-token
 AI_SETTINGS_KEY=change-this-to-a-long-random-value
+BOOTSTRAP_ADMIN_EMAIL=admin@example.com
+BOOTSTRAP_ADMIN_PASSWORD=change-this-password
 APP_PORT=18080
 AUTO_MIGRATE=1
 ```
@@ -68,9 +70,13 @@ STEAM_API_KEY=
 APP_ADMINS=steam:YOUR_STEAMID64
 SYMBOL_UPLOAD_TOKEN=optional-global-symbol-token
 AI_SETTINGS_KEY=change-this-to-a-long-random-value
+BOOTSTRAP_ADMIN_EMAIL=admin@example.com
+BOOTSTRAP_ADMIN_PASSWORD=change-this-password
 ```
 
 `AI_SETTINGS_KEY` обязателен для production, если вы хотите хранить пользовательские AI API keys в зашифрованном виде. Если он не задан, Throttle использует `APP_SECRET` как fallback, но отдельный ключ шифрования безопаснее.
+
+`BOOTSTRAP_ADMIN_EMAIL` и `BOOTSTRAP_ADMIN_PASSWORD` позволяют создать первого локального пользователя без Steam, если база пользователей ещё пустая. `BOOTSTRAP_ADMIN_EMAIL` сразу помечается подтверждённой, поэтому вход по email + password работает даже если исходящая почта ещё не настроена. Этот bootstrap-пользователь не получает админские права автоматически: их нужно выдать отдельно через `APP_ADMINS`, например `APP_ADMINS="user:1"` на чистой установке.
 
 Создайте базу и пользователя:
 
@@ -118,6 +124,8 @@ location ~ \.php$ {
 
 Для Docker это делает service `processor`.
 
+`MinidumpAccount` в `core.cfg` больше не обязателен, если upload URLs содержат profile token. В таком режиме владелец краша определяется по token.
+
 Для ручной установки подключите systemd timer:
 
 ```bash
@@ -133,6 +141,55 @@ systemctl list-timers throttle-crash-process.timer
 ```bash
 sudo -u www-data php8.4 /var/www/throttle/bin/console crash:process --env=prod --no-debug --update --limit=10
 ```
+
+Если вы используете email login links, confirmation emails или password reset, убедитесь, что очередь реально обрабатывается. При необходимости можно отдельно держать worker:
+
+```bash
+sudo -u www-data php8.4 /var/www/throttle/bin/console messenger:consume async --env=prod --no-debug
+```
+
+## Настройка способов входа
+
+Все методы входа включаются и выключаются в `/health`.
+
+### Steam
+
+- включите `Steam login` в `/health`
+- сервер должен иметь исходящий доступ к `https://steamcommunity.com/openid/login`
+- `STEAM_API_KEY` не обязателен для самой OpenID-аутентификации, но полезен для Steam profile lookups и связанных интеграций
+
+### Discord
+
+- задайте `OAUTH_DISCORD_CLIENT_ID`
+- задайте `OAUTH_DISCORD_CLIENT_SECRET`
+- откройте OAuth2-страницу вашего Discord-приложения, например `https://discord.com/developers/applications/BotID/oauth2`
+- возьмите `client id` и `client secret` из этого Discord-приложения
+- в тех же настройках OAuth2 добавьте callback URL:
+  - `https://YOUR_HOST/login/discord`
+- включите `Discord login` в `/health`
+
+### Email login links
+
+- задайте `MAILER_DSN`
+- задайте `MAILER_FROM`
+- включите `Email login links` в `/health`
+- письма отправляются через Symfony Messenger, поэтому без работающей очереди они будут ставиться в `async`, но не доставляться
+
+### Email + password
+
+- включите `Email + password login` в `/health`
+- включите `Email + password registration` в `/health`
+- включите `Password reset` в `/health`, если нужен recovery по почте
+- обычная self-registration требует рабочей исходящей почты, потому что email должен быть подтверждён до обычного входа
+- bootstrap-пользователь через `BOOTSTRAP_ADMIN_EMAIL` + `BOOTSTRAP_ADMIN_PASSWORD` создаётся сразу подтверждённым и может войти без email-подтверждения
+- bootstrap-пользователь не админ по умолчанию; для доступа к `/health` и admin-функциям добавьте его в `APP_ADMINS`, обычно `APP_ADMINS="user:1"` на чистой базе
+
+### Upload token login
+
+- включите `Upload-token login` в `/health`
+- этот способ использует тот же profile token, что и ownership crash uploads
+- `MinidumpAccount` можно оставить пустым, если generated upload URLs уже содержат profile token
+- это удобно, но по безопасности слабее, чем отдельный dedicated login token
 
 ## Health
 

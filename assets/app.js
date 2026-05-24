@@ -59,9 +59,6 @@ if (APP_CONFIG.sentry_dsn !== null) {
     Sentry.setUser(APP_CONFIG.sentry_user);
 }
 
-// start the Stimulus application
-import './bootstrap';
-
 document.addEventListener('click', async (event) => {
     const button = event.target.closest('[data-copy-token]');
     if (!(button instanceof HTMLButtonElement)) {

@@ -52,7 +52,7 @@ final class HttpAccessSubscriber implements EventSubscriberInterface
                 $return = '/';
             }
 
-            $event->setResponse(new RedirectResponse($this->urlGenerator->generate('login_steam', [
+            $event->setResponse(new RedirectResponse($this->urlGenerator->generate('login', [
                 'return' => $return,
             ])));
 

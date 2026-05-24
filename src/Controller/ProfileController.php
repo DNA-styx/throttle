@@ -4,8 +4,11 @@ namespace App\Controller;
 
 use App\Entity\ExternalAccount;
 use App\Entity\User;
+use App\Runtime\AuthEnvironment;
 use App\Runtime\CrashAiProviderCatalog;
 use App\Runtime\UploadSettings;
+use App\Runtime\AuthSettings;
+use App\Security\SocialLinkManager;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use App\Runtime\UserAiConfigManager;
@@ -13,8 +16,10 @@ use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\KernelInterface;
+use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
+use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorageInterface;
 
 #[IsGranted(User::ROLE_USER)]
 class ProfileController extends AbstractController
@@ -22,7 +27,7 @@ class ProfileController extends AbstractController
     private const TOKEN_ACTIVITY_PAGE_SIZE = 50;
 
     #[Route('/profile', name: 'profile', methods: ['GET'])]
-    public function show(Request $request, EntityManagerInterface $entityManager, Connection $connection, UserAiConfigManager $aiConfigManager, KernelInterface $kernel): Response
+    public function show(Request $request, EntityManagerInterface $entityManager, Connection $connection, UserAiConfigManager $aiConfigManager, KernelInterface $kernel, AuthSettings $authSettings, AuthEnvironment $authEnvironment): Response
     {
         $user = $this->currentUser();
         if ($user->getUploadToken() === '') {
@@ -30,11 +35,14 @@ class ProfileController extends AbstractController
             $entityManager->flush();
         }
         $steamAccount = $this->findExternalAccount($user, 'steam');
+        $discordAccount = $this->findExternalAccount($user, 'discord');
         $baseUrl = $request->getSchemeAndHttpHost();
-        $steamId = $steamAccount?->getIdentifier() ?? 'YOUR_STEAMID64';
-        $coreConfig = implode("\n", [
-            '"MinidumpAccount" "' . $steamId . '"',
-            '',
+        $coreLines = [];
+        if ($steamAccount !== null) {
+            $coreLines[] = '"MinidumpAccount" "' . $steamAccount->getIdentifier() . '"';
+            $coreLines[] = '';
+        }
+        $coreConfig = implode("\n", array_merge($coreLines, [
             '"MinidumpSymbolUpload" "3"',
             '"MinidumpBinaryUpload" "yes"',
             '"MinidumpPresubmit" "yes"',
@@ -42,11 +50,12 @@ class ProfileController extends AbstractController
             '"MinidumpUrl" "' . $baseUrl . '/submit?token=' . $user->getUploadToken() . '"',
             '"MinidumpSymbolUrl" "' . $baseUrl . '/symbols/submit?token=' . $user->getUploadToken() . '"',
             '"MinidumpBinaryUrl" "' . $baseUrl . '/binary/submit?token=' . $user->getUploadToken() . '"',
-        ]);
+        ]));
 
         return $this->render('profile/show.html.twig', [
             'user' => $user,
             'steamAccount' => $steamAccount,
+            'discordAccount' => $discordAccount,
             'coreConfig' => $coreConfig,
             'coreConfigBaseUrl' => $baseUrl,
             'tokenStats' => $this->loadTokenStats($connection, $user),
@@ -55,6 +64,16 @@ class ProfileController extends AbstractController
             'aiProviderTemplates' => $aiConfigManager->providerTemplates(),
             'defaultAiPrompt' => CrashAiProviderCatalog::DEFAULT_PROMPT,
             'aiAnalysisEnabled' => UploadSettings::load($kernel->getProjectDir())['crash_ai_analysis_enabled'],
+            'authMethods' => $authSettings->all(),
+            'contactEmail' => $user->getContactEmail(),
+            'canUnlinkSteam' => $steamAccount !== null && $this->countUsableLoginMethods($user, $authSettings) > 1,
+            'canUnlinkDiscord' => $discordAccount !== null && $this->countUsableLoginMethods($user, $authSettings) > 1,
+            'avatarSeed' => $this->avatarSeed($user),
+            'mailerConfigured' => $authEnvironment->isMailerConfigured(),
+            'mailerNotice' => $authEnvironment->mailerNotice(),
+            'discordConfigured' => $authEnvironment->isDiscordConfigured(),
+            'discordNotice' => $authEnvironment->discordNotice(),
+            'discordCallbackUrl' => $this->generateUrl('login_discord', [], \Symfony\Component\Routing\Generator\UrlGeneratorInterface::ABSOLUTE_URL),
         ]);
     }
 
@@ -113,6 +132,162 @@ class ProfileController extends AbstractController
         return $this->redirectToRoute('profile', [], Response::HTTP_SEE_OTHER);
     }
 
+    #[Route('/profile/email', name: 'profile_email', methods: ['POST'])]
+    public function saveEmail(Request $request, EntityManagerInterface $entityManager, \App\Repository\ExternalAccountRepository $externalAccountRepository, \App\Security\AuthMailer $authMailer, AuthEnvironment $authEnvironment): Response
+    {
+        if (!$this->isCsrfTokenValid('profile-email', (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+        if (!$authEnvironment->isMailerConfigured()) {
+            $this->addFlash('danger', $authEnvironment->mailerNotice());
+
+            return $this->redirectToRoute('profile');
+        }
+
+        $user = $this->currentUser();
+        $email = mb_strtolower(trim((string) $request->request->get('email', '')));
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $this->addFlash('danger', 'Enter a valid email address.');
+
+            return $this->redirectToRoute('profile');
+        }
+
+        $existing = $externalAccountRepository->findOneBy([
+            'kind' => 'email',
+            'identifier' => $email,
+        ]);
+        if ($existing !== null && $existing->getUser()->getId() !== $user->getId()) {
+            $this->addFlash('danger', 'This email is already linked to another user.');
+
+            return $this->redirectToRoute('profile');
+        }
+
+        foreach ($user->getExternalAccounts() as $externalAccount) {
+            if ($externalAccount->getKind() !== 'email' || $externalAccount->getIdentifier() === $email) {
+                continue;
+            }
+
+            $user->removeExternalAccount($externalAccount);
+            $entityManager->remove($externalAccount);
+        }
+
+        $emailAccount = $this->findExternalAccount($user, 'email');
+        if ($emailAccount === null) {
+            $emailAccount = new ExternalAccount($user, 'email', $email, $email);
+            $user->addExternalAccount($emailAccount);
+            $entityManager->persist($emailAccount);
+        }
+
+        $user->setContactEmail($email);
+        $user->setEmailVerifiedAt(null);
+        $entityManager->flush();
+
+        $authMailer->sendVerification($user, $email);
+        $this->addFlash('success', 'Email saved. Check your inbox to confirm it. If you do not see the message, check the Spam folder too.');
+
+        return $this->redirectToRoute('profile');
+    }
+
+    #[Route('/profile/password', name: 'profile_password', methods: ['POST'])]
+    public function savePassword(Request $request, EntityManagerInterface $entityManager, UserPasswordHasherInterface $passwordHasher): Response
+    {
+        if (!$this->isCsrfTokenValid('profile-password', (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        $user = $this->currentUser();
+        $current = (string) $request->request->get('current_password', '');
+        $new = (string) $request->request->get('new_password', '');
+        $confirm = (string) $request->request->get('confirm_password', '');
+        $hadPassword = $user->hasPassword();
+
+        if ($new === '' || strlen($new) < 8) {
+            $this->addFlash('danger', 'Password must be at least 8 characters long.');
+
+            return $this->redirectToRoute('profile');
+        }
+
+        if ($new !== $confirm) {
+            $this->addFlash('danger', 'Password confirmation does not match.');
+
+            return $this->redirectToRoute('profile');
+        }
+
+        if ($user->hasPassword() && !$passwordHasher->isPasswordValid($user, $current)) {
+            $this->addFlash('danger', 'Current password is incorrect.');
+
+            return $this->redirectToRoute('profile');
+        }
+
+        $user->setPasswordHash($passwordHasher->hashPassword($user, $new));
+        $entityManager->flush();
+
+        $this->addFlash('success', $hadPassword ? 'Password updated.' : 'Password set.');
+
+        return $this->redirectToRoute('profile');
+    }
+
+    #[Route('/profile/link/{kind}', name: 'profile_link_external', methods: ['GET'])]
+    public function linkExternal(string $kind, Request $request, AuthSettings $authSettings, AuthEnvironment $authEnvironment, SocialLinkManager $socialLinkManager): Response
+    {
+        $route = match ($kind) {
+            'steam' => 'login_steam',
+            'discord' => 'login_discord',
+            default => null,
+        };
+
+        if ($route === null) {
+            return new Response('Unsupported provider.', Response::HTTP_NOT_FOUND);
+        }
+
+        if (!$authSettings->isEnabled($kind)) {
+            return new Response('This login method is disabled.', Response::HTTP_FORBIDDEN);
+        }
+        if ($kind === 'discord' && !$authEnvironment->isDiscordConfigured()) {
+            $this->addFlash('danger', $authEnvironment->discordNotice());
+
+            return $this->redirectToRoute('profile');
+        }
+
+        $returnPath = $this->generateUrl('profile');
+        $socialLinkManager->begin($this->currentUser(), $kind, $returnPath);
+        $request->getSession()->set('_security.main.target_path', $returnPath);
+
+        return $this->redirectToRoute($route, [
+            'return' => $returnPath,
+        ]);
+    }
+
+    #[Route('/profile/unlink/{kind}', name: 'profile_unlink_external', methods: ['POST'])]
+    public function unlinkExternal(string $kind, Request $request, EntityManagerInterface $entityManager, AuthSettings $authSettings): Response
+    {
+        if (!$this->isCsrfTokenValid('profile-unlink-' . $kind, (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        $user = $this->currentUser();
+        $externalAccount = $this->findExternalAccount($user, $kind);
+        if ($externalAccount === null) {
+            $this->addFlash('danger', 'This account is not linked.');
+
+            return $this->redirectToRoute('profile');
+        }
+
+        if ($this->countUsableLoginMethods($user, $authSettings) <= 1) {
+            $this->addFlash('danger', 'You cannot unlink the last available sign-in method.');
+
+            return $this->redirectToRoute('profile');
+        }
+
+        $user->removeExternalAccount($externalAccount);
+        $entityManager->remove($externalAccount);
+        $entityManager->flush();
+
+        $this->addFlash('success', ucfirst($kind) . ' account unlinked.');
+
+        return $this->redirectToRoute('profile');
+    }
+
     #[Route('/profile/ai-config/save', name: 'profile_ai_config_save', methods: ['POST'])]
     public function saveAiConfig(Request $request, UserAiConfigManager $aiConfigManager): Response
     {
@@ -154,6 +329,35 @@ class ProfileController extends AbstractController
         return $this->redirectToRoute('profile', [], Response::HTTP_SEE_OTHER);
     }
 
+    #[Route('/profile/delete-account', name: 'profile_delete_account', methods: ['POST'])]
+    public function deleteAccount(Request $request, EntityManagerInterface $entityManager, UserPasswordHasherInterface $passwordHasher, TokenStorageInterface $tokenStorage): Response
+    {
+        if (!$this->isCsrfTokenValid('profile-delete-account', (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        $user = $this->currentUser();
+        if (mb_strtoupper(trim((string) $request->request->get('confirm_delete', ''))) !== 'DELETE') {
+            $this->addFlash('danger', 'Type DELETE to confirm account removal.');
+
+            return $this->redirectToRoute('profile');
+        }
+
+        if ($user->hasPassword() && !$passwordHasher->isPasswordValid($user, (string) $request->request->get('current_password', ''))) {
+            $this->addFlash('danger', 'Current password is incorrect.');
+
+            return $this->redirectToRoute('profile');
+        }
+
+        $entityManager->remove($user);
+        $entityManager->flush();
+
+        $tokenStorage->setToken(null);
+        $request->getSession()->invalidate();
+
+        return $this->redirectToRoute('login');
+    }
+
     private function currentUser(): User
     {
         $user = $this->getUser();
@@ -173,6 +377,35 @@ class ProfileController extends AbstractController
         }
 
         return null;
+    }
+
+    private function countUsableLoginMethods(User $user, AuthSettings $authSettings): int
+    {
+        $count = 0;
+        if ($user->hasLocalLogin() && $authSettings->isEnabled('password_login')) {
+            ++$count;
+        }
+        if ($authSettings->isEnabled('token_login') && $user->getUploadToken() !== '') {
+            ++$count;
+        }
+        if ($authSettings->isEnabled('email_login_link') && $user->isEmailVerified() && $user->getContactEmail() !== null) {
+            ++$count;
+        }
+        if ($authSettings->isEnabled('steam') && $this->findExternalAccount($user, 'steam') !== null) {
+            ++$count;
+        }
+        if ($authSettings->isEnabled('discord') && $this->findExternalAccount($user, 'discord') !== null) {
+            ++$count;
+        }
+
+        return $count;
+    }
+
+    private function avatarSeed(User $user): string
+    {
+        return $user->getContactEmail()
+            ?? $user->getLogin()
+            ?? 'user-' . $user->getId();
     }
 
     /**

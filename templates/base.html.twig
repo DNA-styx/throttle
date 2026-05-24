@@ -104,11 +104,11 @@
                                     {{ include('_theme_switcher.html.twig') }}
                                 </div>
                                 {% if not (app.request.attributes.get('_route') starts with 'login') %}
-                                    <a href="{{ path('login_steam', {'return': app.request.requestUri}) }}" class="btn btn-outline-primary me-2">
+                                    <a href="{{ path('login', {'return': app.request.requestUri}) }}" class="btn btn-outline-primary me-2">
                                         <svg class="bi me-1" width="16" height="16" aria-hidden="true">
-                                            <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#steam"></use>
+                                            <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#box-arrow-in-right"></use>
                                         </svg>
-                                        Login with Steam
+                                        Login
                                     </a>
                                 {% endif %}
                             {% endif %}

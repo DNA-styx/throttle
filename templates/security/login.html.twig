@@ -3,20 +3,195 @@
 {% block title %}Login{% endblock %}
 
 {% block body %}
-<div class="form-wrapper">
-    {% if login_link_sent %}
-        <div class="alert alert-success">{{ 'login.link_sent' | trans }}</div>
-    {% endif %}
-    {% if error %}
-        <div class="alert alert-danger">{{ error.messageKey | trans(error.messageData, 'security') }}</div>
-    {% endif %}
-    <div class="d-grid gap-2">
-        <a href="{{ path('login_steam') }}" class="btn btn-outline-primary">
-            <svg class="bi me-1" width="16" height="16" aria-hidden="true">
-                <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#steam"></use>
-            </svg>
-            Login with Steam
-        </a>
+<div class="auth-shell row justify-content-center">
+    <div class="col-xl-8 col-lg-10">
+        {% for label, messages in app.flashes %}
+            {% for message in messages %}
+                <div class="alert alert-{{ label == 'danger' ? 'danger' : (label == 'warning' ? 'warning' : 'success') }}">{{ message }}</div>
+            {% endfor %}
+        {% endfor %}
+        {% if error %}
+            <div class="alert alert-danger">{{ error.messageKey|trans(error.messageData, 'security') }}</div>
+        {% endif %}
+        {% if not mailerConfigured %}
+            <div class="alert alert-warning">{{ mailerNotice }}</div>
+        {% endif %}
+
+        <div class="auth-card card">
+            <div class="card-body">
+                <ul class="nav nav-tabs auth-tabs mb-4" id="auth-tabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="auth-signin-tab" data-bs-toggle="tab" data-bs-target="#auth-signin-panel" type="button" role="tab" aria-controls="auth-signin-panel" aria-selected="true">Sign in</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="auth-register-tab" data-bs-toggle="tab" data-bs-target="#auth-register-panel" type="button" role="tab" aria-controls="auth-register-panel" aria-selected="false">Create account</button>
+                    </li>
+                </ul>
+
+                <div class="tab-content auth-tab-content">
+                    <div class="tab-pane fade show active" id="auth-signin-panel" role="tabpanel" aria-labelledby="auth-signin-tab" tabindex="0">
+                        <h1 class="h4 mb-3">Sign in</h1>
+
+                        {% if auth_methods.password_login %}
+                            <form method="post" action="{{ path('login_password') }}" class="mb-4">
+                                <input type="hidden" name="_token" value="{{ csrf_token('login-password') }}">
+                                <input type="hidden" name="return" value="{{ return }}">
+                                <div class="mb-3">
+                                    <label class="form-label">Email</label>
+                                    <input class="form-control" name="email" autocomplete="username email" placeholder="name@example.com" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Password</label>
+                                    <input type="password" class="form-control" name="password" autocomplete="current-password" required>
+                                </div>
+                                <button type="submit" class="btn btn-primary">Login with password</button>
+                            </form>
+                        {% endif %}
+
+                        {% if auth_methods.token_login %}
+                            <form method="post" action="{{ path('login_token') }}" class="mb-4">
+                                <input type="hidden" name="_token" value="{{ csrf_token('login-token') }}">
+                                <input type="hidden" name="return" value="{{ return }}">
+                                <div class="mb-3">
+                                    <label class="form-label">Upload token</label>
+                                    <input class="form-control font-monospace" name="token" autocomplete="off" required>
+                                </div>
+                                <button type="submit" class="btn btn-outline-primary">Login with token</button>
+                            </form>
+                        {% endif %}
+
+                        {% if auth_methods.email_login_link and mailerConfigured %}
+                            <form method="post" action="{{ path('login_email_link_request') }}" class="mb-4">
+                                <input type="hidden" name="_token" value="{{ csrf_token('login-email-link-request') }}">
+                                <div class="mb-3">
+                                    <label class="form-label">Email login link</label>
+                                    <input type="email" class="form-control" name="email" autocomplete="email" required>
+                                </div>
+                                <button type="submit" class="btn btn-outline-secondary">Send sign-in link</button>
+                            </form>
+                        {% elseif auth_methods.email_login_link %}
+                            <div class="auth-inline-note mb-4">
+                                Email sign-in links are unavailable until email delivery is configured.
+                            </div>
+                        {% endif %}
+
+                        <div class="d-grid gap-2">
+                            {% if auth_methods.steam %}
+                                <a href="{{ path('login_steam', {'return': return}) }}" class="btn btn-outline-primary">
+                                    <svg class="bi me-1" width="16" height="16" aria-hidden="true">
+                                        <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#steam"></use>
+                                    </svg>
+                                    Login with Steam
+                                </a>
+                            {% endif %}
+                            {% if auth_methods.discord %}
+                                {% if discordConfigured %}
+                                    <a href="{{ path('login_discord', {'return': return}) }}" class="btn btn-outline-primary">
+                                        <svg class="auth-provider-icon auth-provider-icon-discord me-1" viewBox="0 0 127.14 96.36" aria-hidden="true" focusable="false">
+                                            <path fill="currentColor" d="M107.7,8.07A105.15,105.15,0,0,0,81.47,0a72.06,72.06,0,0,0-3.36,6.83A97.68,97.68,0,0,0,49,6.83,72.37,72.37,0,0,0,45.64,0,105.89,105.89,0,0,0,19.39,8.09C2.79,32.65-1.66,56.6.56,80.21h0A105.73,105.73,0,0,0,32.71,96.36A77.7,77.7,0,0,0,39.6,85.19a68.42,68.42,0,0,1-10.85-5.18c.91-.66,1.8-1.34,2.66-2.05a75.57,75.57,0,0,0,64.32,0c.87.71,1.76,1.39,2.67,2.05a68.68,68.68,0,0,1-10.87,5.19,77,77,0,0,0,6.89,11.16A105.25,105.25,0,0,0,126.58,80.2C129.23,52.84,122.06,29.11,107.7,8.07ZM42.45,65.69C36.18,65.69,31,59.94,31,52.87S36.06,40,42.45,40,53.9,45.78,53.79,52.87,48.78,65.69,42.45,65.69Zm42.24,0c-6.27,0-11.45-5.75-11.45-12.82S78.3,40,84.69,40,96.14,45.78,96,52.87,91,65.69,84.69,65.69Z"/>
+                                        </svg>
+                                        Login with Discord
+                                    </a>
+                                {% else %}
+                                    <span class="d-grid auth-disabled-provider" title="{{ discordNotice }} Callback URL: {{ discordCallbackUrl }}">
+                                        <button type="button" class="btn btn-outline-primary" disabled>
+                                            <svg class="auth-provider-icon auth-provider-icon-discord me-1" viewBox="0 0 127.14 96.36" aria-hidden="true" focusable="false">
+                                                <path fill="currentColor" d="M107.7,8.07A105.15,105.15,0,0,0,81.47,0a72.06,72.06,0,0,0-3.36,6.83A97.68,97.68,0,0,0,49,6.83,72.37,72.37,0,0,0,45.64,0,105.89,105.89,0,0,0,19.39,8.09C2.79,32.65-1.66,56.6.56,80.21h0A105.73,105.73,0,0,0,32.71,96.36A77.7,77.7,0,0,0,39.6,85.19a68.42,68.42,0,0,1-10.85-5.18c.91-.66,1.8-1.34,2.66-2.05a75.57,75.57,0,0,0,64.32,0c.87.71,1.76,1.39,2.67,2.05a68.68,68.68,0,0,1-10.87,5.19,77,77,0,0,0,6.89,11.16A105.25,105.25,0,0,0,126.58,80.2C129.23,52.84,122.06,29.11,107.7,8.07ZM42.45,65.69C36.18,65.69,31,59.94,31,52.87S36.06,40,42.45,40,53.9,45.78,53.79,52.87,48.78,65.69,42.45,65.69Zm42.24,0c-6.27,0-11.45-5.75-11.45-12.82S78.3,40,84.69,40,96.14,45.78,96,52.87,91,65.69,84.69,65.69Z"/>
+                                            </svg>
+                                            Login with Discord
+                                        </button>
+                                    </span>
+                                {% endif %}
+                            {% endif %}
+                        </div>
+
+                        {% if auth_methods.password_reset and mailerConfigured %}
+                            <div class="mt-4">
+                                <a href="{{ path('password_reset_request') }}">Forgot password?</a>
+                            </div>
+                        {% elseif auth_methods.password_reset %}
+                            <div class="mt-4 text-muted small">
+                                Password reset is unavailable until email delivery is configured.
+                            </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="tab-pane fade" id="auth-register-panel" role="tabpanel" aria-labelledby="auth-register-tab" tabindex="0">
+                        <h2 class="h4 mb-3">Create account</h2>
+                        {% if auth_methods.password_registration and mailerConfigured %}
+                            <form method="post" action="{{ path('register') }}">
+                                <input type="hidden" name="_token" value="{{ csrf_token('register') }}">
+                                <div class="mb-3">
+                                    <label class="form-label">Email</label>
+                                    <input type="email" class="form-control" name="email" autocomplete="email" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Password</label>
+                                    <input type="password" class="form-control" name="password" autocomplete="new-password" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Confirm password</label>
+                                    <input type="password" class="form-control" name="password_confirm" autocomplete="new-password" required>
+                                </div>
+                                <button type="submit" class="btn btn-success">Register</button>
+                            </form>
+
+                            <hr class="my-4">
+
+                            <form method="post" action="{{ path('register_resend_verification') }}">
+                                <input type="hidden" name="_token" value="{{ csrf_token('register-resend') }}">
+                                <input type="hidden" name="return" value="{{ path('login') }}">
+                                <div class="mb-3">
+                                    <label class="form-label">Resend verification email</label>
+                                    <input type="email" class="form-control" name="email" autocomplete="email" required>
+                                </div>
+                                <button type="submit" class="btn btn-outline-secondary">Resend verification</button>
+                            </form>
+                        {% elseif auth_methods.password_registration %}
+                            <div class="auth-inline-note">
+                                Registration is temporarily unavailable until email delivery is configured.
+                            </div>
+                        {% else %}
+                            <div class="text-muted">Registration is currently disabled.</div>
+                        {% endif %}
+
+                        {% if auth_methods.steam or auth_methods.discord %}
+                            <hr class="my-4">
+
+                            <div class="d-grid gap-2">
+                                {% if auth_methods.steam %}
+                                    <a href="{{ path('login_steam', {'return': return}) }}" class="btn btn-outline-primary">
+                                        <svg class="bi me-1" width="16" height="16" aria-hidden="true">
+                                            <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#steam"></use>
+                                        </svg>
+                                        Create account with Steam
+                                    </a>
+                                {% endif %}
+                                {% if auth_methods.discord %}
+                                    {% if discordConfigured %}
+                                        <a href="{{ path('login_discord', {'return': return}) }}" class="btn btn-outline-primary">
+                                            <svg class="auth-provider-icon auth-provider-icon-discord me-1" viewBox="0 0 127.14 96.36" aria-hidden="true" focusable="false">
+                                                <path fill="currentColor" d="M107.7,8.07A105.15,105.15,0,0,0,81.47,0a72.06,72.06,0,0,0-3.36,6.83A97.68,97.68,0,0,0,49,6.83,72.37,72.37,0,0,0,45.64,0,105.89,105.89,0,0,0,19.39,8.09C2.79,32.65-1.66,56.6.56,80.21h0A105.73,105.73,0,0,0,32.71,96.36A77.7,77.7,0,0,0,39.6,85.19a68.42,68.42,0,0,1-10.85-5.18c.91-.66,1.8-1.34,2.66-2.05a75.57,75.57,0,0,0,64.32,0c.87.71,1.76,1.39,2.67,2.05a68.68,68.68,0,0,1-10.87,5.19,77,77,0,0,0,6.89,11.16A105.25,105.25,0,0,0,126.58,80.2C129.23,52.84,122.06,29.11,107.7,8.07ZM42.45,65.69C36.18,65.69,31,59.94,31,52.87S36.06,40,42.45,40,53.9,45.78,53.79,52.87,48.78,65.69,42.45,65.69Zm42.24,0c-6.27,0-11.45-5.75-11.45-12.82S78.3,40,84.69,40,96.14,45.78,96,52.87,91,65.69,84.69,65.69Z"/>
+                                            </svg>
+                                            Create account with Discord
+                                        </a>
+                                    {% else %}
+                                        <span class="d-grid auth-disabled-provider" title="{{ discordNotice }} Callback URL: {{ discordCallbackUrl }}">
+                                            <button type="button" class="btn btn-outline-primary" disabled>
+                                                <svg class="auth-provider-icon auth-provider-icon-discord me-1" viewBox="0 0 127.14 96.36" aria-hidden="true" focusable="false">
+                                                    <path fill="currentColor" d="M107.7,8.07A105.15,105.15,0,0,0,81.47,0a72.06,72.06,0,0,0-3.36,6.83A97.68,97.68,0,0,0,49,6.83,72.37,72.37,0,0,0,45.64,0,105.89,105.89,0,0,0,19.39,8.09C2.79,32.65-1.66,56.6.56,80.21h0A105.73,105.73,0,0,0,32.71,96.36A77.7,77.7,0,0,0,39.6,85.19a68.42,68.42,0,0,1-10.85-5.18c.91-.66,1.8-1.34,2.66-2.05a75.57,75.57,0,0,0,64.32,0c.87.71,1.76,1.39,2.67,2.05a68.68,68.68,0,0,1-10.87,5.19,77,77,0,0,0,6.89,11.16A105.25,105.25,0,0,0,126.58,80.2C129.23,52.84,122.06,29.11,107.7,8.07ZM42.45,65.69C36.18,65.69,31,59.94,31,52.87S36.06,40,42.45,40,53.9,45.78,53.79,52.87,48.78,65.69,42.45,65.69Zm42.24,0c-6.27,0-11.45-5.75-11.45-12.82S78.3,40,84.69,40,96.14,45.78,96,52.87,91,65.69,84.69,65.69Z"/>
+                                                </svg>
+                                                Create account with Discord
+                                            </button>
+                                        </span>
+                                    {% endif %}
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}

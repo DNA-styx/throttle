@@ -26,11 +26,21 @@ security:
                 signature_properties: ['id']
 
             custom_authenticators:
+                - App\Security\LocalLoginAuthenticator
+                - App\Security\UploadTokenLoginAuthenticator
+                - App\Security\EmailLinkAuthenticator
                 - App\Security\SteamOpenIdAuthenticator
+                - App\Security\DiscordOAuthAuthenticator
 
             logout:
                 path: logout
                 target: /
+
+            remember_me:
+                secret: '%kernel.secret%'
+                lifetime: 2592000
+                path: /
+                always_remember_me: true
 
             # https://symfony.com/doc/current/security/impersonating_user.html
             switch_user: true

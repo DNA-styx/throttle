@@ -3,11 +3,13 @@
 namespace App\Controller;
 
 use App\Entity\User;
+use App\Runtime\AuthEnvironment;
 use App\Runtime\SymbolAdminManager;
 use App\Runtime\SymbolBinaryUpload;
 use App\Runtime\SymbolToolException;
 use App\Runtime\UploadFailureBackoff;
 use App\Runtime\UploadSettings;
+use App\Security\AuthMailer;
 use Doctrine\DBAL\Connection;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
@@ -17,6 +19,7 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 #[IsGranted(User::ROLE_ADMIN)]
@@ -25,7 +28,7 @@ class HealthController extends AbstractController
     private const SYMBOL_REQUEST_POLICY_PATH = '/var/symbol-request-policy.json';
 
     #[Route('/health', name: 'health', methods: ['GET', 'POST'])]
-    public function index(Request $request, Connection $connection, KernelInterface $kernel, SymbolAdminManager $symbolAdminManager, #[Autowire('%app.legacy%')] array $legacyConfig): Response
+    public function index(Request $request, Connection $connection, KernelInterface $kernel, SymbolAdminManager $symbolAdminManager, AuthEnvironment $authEnvironment, #[Autowire('%app.legacy%')] array $legacyConfig): Response
     {
         $root = $kernel->getProjectDir();
         $checks = [];
@@ -130,6 +133,10 @@ class HealthController extends AbstractController
 
         return $this->render('health/index.html.twig', [
             'checks' => $checks,
+            'authEnvironment' => $authEnvironment,
+            'mailerSummary' => $authEnvironment->mailerSummary(),
+            'mailerTestDefaultTo' => $authEnvironment->getMailerFrom() ?: '',
+            'discordCallbackUrl' => $this->generateUrl('login_discord', [], UrlGeneratorInterface::ABSOLUTE_URL),
             'queue' => $queue,
             'uploadSettings' => $uploadSettings,
             'uploadSettingsErrors' => $uploadSettingsErrors,
@@ -153,6 +160,36 @@ class HealthController extends AbstractController
             'backoffStats' => $backoffStats,
             'healthy' => !in_array(false, array_column($checks, 'ok'), true),
         ]);
+    }
+
+    #[Route('/health/auth/test-email', name: 'health_auth_test_email', methods: ['POST'])]
+    public function sendTestEmail(Request $request, AuthEnvironment $authEnvironment, AuthMailer $authMailer): Response
+    {
+        if (!$this->isCsrfTokenValid('health-auth-test-email', (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        if (!$authEnvironment->isMailerConfigured()) {
+            $this->addFlash('danger', $authEnvironment->mailerNotice());
+
+            return $this->redirectToRoute('health');
+        }
+
+        $to = mb_strtolower(trim((string) $request->request->get('email', '')));
+        if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
+            $this->addFlash('danger', 'Enter a valid recipient email for the SMTP test.');
+
+            return $this->redirectToRoute('health');
+        }
+
+        try {
+            $authMailer->sendDiagnostic($to, $request->getSchemeAndHttpHost());
+            $this->addFlash('success', sprintf('Test email sent to %s.', $to));
+        } catch (\Throwable $e) {
+            $this->addFlash('danger', 'SMTP test failed: ' . $e->getMessage());
+        }
+
+        return $this->redirectToRoute('health');
     }
 
     #[Route('/health/symbols/refresh', name: 'health_symbols_refresh', methods: ['POST'])]
@@ -402,7 +439,7 @@ class HealthController extends AbstractController
     }
 
     /**
-     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int, crash_source_lookup_enabled: bool, crash_ai_analysis_enabled: bool}
+     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int, crash_source_lookup_enabled: bool, crash_ai_analysis_enabled: bool, auth_enable_steam: bool, auth_enable_discord: bool, auth_enable_email_login_link: bool, auth_enable_password_login: bool, auth_enable_password_registration: bool, auth_enable_password_reset: bool, auth_enable_token_login: bool}
      */
     private function readUploadSettingsFromRequest(Request $request): array
     {
@@ -415,6 +452,13 @@ class HealthController extends AbstractController
             'upload_failure_backoff_ttl' => (int) $request->request->get('upload_failure_backoff_ttl', 3600),
             'crash_source_lookup_enabled' => $request->request->getBoolean('crash_source_lookup_enabled'),
             'crash_ai_analysis_enabled' => $request->request->getBoolean('crash_ai_analysis_enabled'),
+            'auth_enable_steam' => $request->request->getBoolean('auth_enable_steam'),
+            'auth_enable_discord' => $request->request->getBoolean('auth_enable_discord'),
+            'auth_enable_email_login_link' => $request->request->getBoolean('auth_enable_email_login_link'),
+            'auth_enable_password_login' => $request->request->getBoolean('auth_enable_password_login'),
+            'auth_enable_password_registration' => $request->request->getBoolean('auth_enable_password_registration'),
+            'auth_enable_password_reset' => $request->request->getBoolean('auth_enable_password_reset'),
+            'auth_enable_token_login' => $request->request->getBoolean('auth_enable_token_login'),
         ];
     }
 
@@ -432,6 +476,15 @@ class HealthController extends AbstractController
         }
         if ((int) ($settings['upload_failure_backoff_ttl'] ?? 0) < 60) {
             $errors[] = 'Upload failure backoff TTL must be at least 60 seconds.';
+        }
+        if (
+            !($settings['auth_enable_steam'] ?? false)
+            && !($settings['auth_enable_discord'] ?? false)
+            && !($settings['auth_enable_email_login_link'] ?? false)
+            && !($settings['auth_enable_password_login'] ?? false)
+            && !($settings['auth_enable_token_login'] ?? false)
+        ) {
+            $errors[] = 'At least one sign-in method must remain enabled.';
         }
 
         return $errors;

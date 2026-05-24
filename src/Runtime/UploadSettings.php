@@ -7,7 +7,7 @@ final class UploadSettings
     public const PATH = '/var/upload-settings.json';
 
     /**
-     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int, crash_source_lookup_enabled: bool, crash_ai_analysis_enabled: bool}
+     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int, crash_source_lookup_enabled: bool, crash_ai_analysis_enabled: bool, auth_enable_steam: bool, auth_enable_discord: bool, auth_enable_email_login_link: bool, auth_enable_password_login: bool, auth_enable_password_registration: bool, auth_enable_password_reset: bool, auth_enable_token_login: bool}
      */
     public static function defaults(): array
     {
@@ -20,11 +20,18 @@ final class UploadSettings
             'upload_failure_backoff_ttl' => 3600,
             'crash_source_lookup_enabled' => false,
             'crash_ai_analysis_enabled' => false,
+            'auth_enable_steam' => true,
+            'auth_enable_discord' => true,
+            'auth_enable_email_login_link' => true,
+            'auth_enable_password_login' => true,
+            'auth_enable_password_registration' => true,
+            'auth_enable_password_reset' => true,
+            'auth_enable_token_login' => true,
         ];
     }
 
     /**
-     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int, crash_source_lookup_enabled: bool, crash_ai_analysis_enabled: bool}
+     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int, crash_source_lookup_enabled: bool, crash_ai_analysis_enabled: bool, auth_enable_steam: bool, auth_enable_discord: bool, auth_enable_email_login_link: bool, auth_enable_password_login: bool, auth_enable_password_registration: bool, auth_enable_password_reset: bool, auth_enable_token_login: bool}
      */
     public static function load(string $root): array
     {
@@ -71,7 +78,7 @@ final class UploadSettings
     }
 
     /**
-     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int, crash_source_lookup_enabled: bool, crash_ai_analysis_enabled: bool}
+     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int, crash_source_lookup_enabled: bool, crash_ai_analysis_enabled: bool, auth_enable_steam: bool, auth_enable_discord: bool, auth_enable_email_login_link: bool, auth_enable_password_login: bool, auth_enable_password_registration: bool, auth_enable_password_reset: bool, auth_enable_token_login: bool}
      */
     public static function normalize(array $settings): array
     {
@@ -117,6 +124,27 @@ final class UploadSettings
             'crash_ai_analysis_enabled' => array_key_exists('crash_ai_analysis_enabled', $settings)
                 ? filter_var($settings['crash_ai_analysis_enabled'], FILTER_VALIDATE_BOOL)
                 : $defaults['crash_ai_analysis_enabled'],
+            'auth_enable_steam' => array_key_exists('auth_enable_steam', $settings)
+                ? filter_var($settings['auth_enable_steam'], FILTER_VALIDATE_BOOL)
+                : $defaults['auth_enable_steam'],
+            'auth_enable_discord' => array_key_exists('auth_enable_discord', $settings)
+                ? filter_var($settings['auth_enable_discord'], FILTER_VALIDATE_BOOL)
+                : $defaults['auth_enable_discord'],
+            'auth_enable_email_login_link' => array_key_exists('auth_enable_email_login_link', $settings)
+                ? filter_var($settings['auth_enable_email_login_link'], FILTER_VALIDATE_BOOL)
+                : $defaults['auth_enable_email_login_link'],
+            'auth_enable_password_login' => array_key_exists('auth_enable_password_login', $settings)
+                ? filter_var($settings['auth_enable_password_login'], FILTER_VALIDATE_BOOL)
+                : $defaults['auth_enable_password_login'],
+            'auth_enable_password_registration' => array_key_exists('auth_enable_password_registration', $settings)
+                ? filter_var($settings['auth_enable_password_registration'], FILTER_VALIDATE_BOOL)
+                : $defaults['auth_enable_password_registration'],
+            'auth_enable_password_reset' => array_key_exists('auth_enable_password_reset', $settings)
+                ? filter_var($settings['auth_enable_password_reset'], FILTER_VALIDATE_BOOL)
+                : $defaults['auth_enable_password_reset'],
+            'auth_enable_token_login' => array_key_exists('auth_enable_token_login', $settings)
+                ? filter_var($settings['auth_enable_token_login'], FILTER_VALIDATE_BOOL)
+                : $defaults['auth_enable_token_login'],
         ];
     }
 

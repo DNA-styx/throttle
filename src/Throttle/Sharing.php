@@ -25,22 +25,26 @@ class Sharing
         }
 
         $sharing = $app['db']->executeQuery(
-            'SELECT share.user AS id, server_owner.name, NULL AS avatar, steam.identifier AS steam_id, accepted
+            'SELECT share.user AS id, server_owner.name, NULL AS avatar, steam.identifier AS steam_id, discord.identifier AS discord_id, email.identifier AS email, accepted
              FROM share
              LEFT JOIN server_owner ON share.user = server_owner.id
              LEFT JOIN external_account AS steam ON steam.user_id = share.user AND steam.kind = ?
+             LEFT JOIN external_account AS discord ON discord.user_id = share.user AND discord.kind = ?
+             LEFT JOIN external_account AS email ON email.user_id = share.user AND email.kind = ?
              WHERE share.owner = ?
              ORDER BY accepted IS NULL DESC, accepted DESC',
-            array('steam', $app['user']['id'])
+            array('steam', 'discord', 'email', $app['user']['id'])
         )->fetchAll();
         $shared = $app['db']->executeQuery(
-            'SELECT share.owner AS id, server_owner.name, NULL AS avatar, steam.identifier AS steam_id, accepted
+            'SELECT share.owner AS id, server_owner.name, NULL AS avatar, steam.identifier AS steam_id, discord.identifier AS discord_id, email.identifier AS email, accepted
              FROM share
              LEFT JOIN server_owner ON share.owner = server_owner.id
              LEFT JOIN external_account AS steam ON steam.user_id = share.owner AND steam.kind = ?
+             LEFT JOIN external_account AS discord ON discord.user_id = share.owner AND discord.kind = ?
+             LEFT JOIN external_account AS email ON email.user_id = share.owner AND email.kind = ?
              WHERE share.user = ?
              ORDER BY accepted IS NULL DESC, accepted DESC',
-            array('steam', $app['user']['id'])
+            array('steam', 'discord', 'email', $app['user']['id'])
         )->fetchAll();
 
         return $app['twig']->render('share.html.twig', [
@@ -55,7 +59,16 @@ class Sharing
             $app->abort(401);
         }
 
-        return $app['twig']->render('invite.html.twig');
+        $settings = $app['config']['upload-settings'] ?? [];
+
+        return $app['twig']->render('invite.html.twig', [
+            'share_invite_methods' => [
+                'user_id' => true,
+                'email' => !empty($settings['auth_enable_email_login_link']) || !empty($settings['auth_enable_password_login']) || !empty($settings['auth_enable_password_registration']) || !empty($settings['auth_enable_password_reset']),
+                'steam' => !empty($settings['auth_enable_steam']),
+                'discord' => !empty($settings['auth_enable_discord']),
+            ],
+        ]);
     }
 
     public function invite_post(Application $app)
@@ -64,15 +77,14 @@ class Sharing
             $app->abort(401);
         }
 
-        $target = $app['request']->get('user', null);
+        $target = $this->extractInviteTarget($app);
         if ($target === null) {
-            $app['session']->getFlashBag()->add('error_share_invite', 'Missing user ID or SteamID64');
             return $app->redirect($app['url_generator']->generate('share_invite'));
         }
 
-        $user = $this->resolveInviteTargetUserId($app, trim((string) $target));
+        $user = $this->resolveInviteTargetUserId($app, $target['type'], $target['value']);
         if ($user === null) {
-            $app['session']->getFlashBag()->add('error_share_invite', 'Invalid or unknown user ID or SteamID64');
+            $app['session']->getFlashBag()->add('error_share_invite', 'Invalid or unknown user ID, email, SteamID64, or Discord ID.');
             return $app->redirect($app['url_generator']->generate('share_invite'));
         }
 
@@ -98,22 +110,82 @@ class Sharing
         return $app->redirect($return);
     }
 
-    private function resolveInviteTargetUserId(Application $app, string $target): ?int
+    /**
+     * @return array{type: string, value: string}|null
+     */
+    private function extractInviteTarget(Application $app): ?array
+    {
+        $fields = [
+            'user_id' => trim((string) $app['request']->get('user_id', '')),
+            'email' => mb_strtolower(trim((string) $app['request']->get('email', ''))),
+            'steam' => trim((string) $app['request']->get('steam_id', '')),
+            'discord' => trim((string) $app['request']->get('discord_id', '')),
+        ];
+
+        $filled = array_filter($fields, static fn (string $value): bool => $value !== '');
+        if ($filled === []) {
+            $legacy = trim((string) $app['request']->get('user', ''));
+            if ($legacy === '') {
+                $app['session']->getFlashBag()->add('error_share_invite', 'Enter a user ID, email, SteamID64, or Discord ID.');
+                return null;
+            }
+
+            if (filter_var($legacy, FILTER_VALIDATE_EMAIL)) {
+                return ['type' => 'email', 'value' => mb_strtolower($legacy)];
+            }
+
+            if (preg_match('/^steam:(\d{15,20})$/', $legacy, $matches) === 1) {
+                return ['type' => 'steam', 'value' => $matches[1]];
+            }
+
+            if (ctype_digit($legacy) && strlen($legacy) >= 15) {
+                return ['type' => 'steam', 'value' => $legacy];
+            }
+
+            return ['type' => 'user_id', 'value' => $legacy];
+        }
+
+        if (count($filled) > 1) {
+            $app['session']->getFlashBag()->add('error_share_invite', 'Fill only one invite field at a time.');
+
+            return null;
+        }
+
+        $type = array_key_first($filled);
+        return ['type' => (string) $type, 'value' => (string) $filled[$type]];
+    }
+
+    private function resolveInviteTargetUserId(Application $app, string $type, string $target): ?int
     {
         if ($target === '') {
             return null;
         }
 
-        if (preg_match('/^steam:(\d{15,20})$/', $target, $matches) === 1) {
-            return $this->findUserIdBySteamId($app, $matches[1]);
+        if ($type === 'email') {
+            if (!filter_var($target, FILTER_VALIDATE_EMAIL)) {
+                return null;
+            }
+
+            return $this->findUserIdByExternalAccount($app, 'email', mb_strtolower($target));
         }
 
-        if (!ctype_digit($target)) {
+        if ($type === 'steam') {
+            if (preg_match('/^steam:(\d{15,20})$/', $target, $matches) === 1) {
+                return $this->findUserIdByExternalAccount($app, 'steam', $matches[1]);
+            }
+            if (!ctype_digit($target) || strlen($target) < 15) {
+                return null;
+            }
+
+            return $this->findUserIdByExternalAccount($app, 'steam', $target);
+        }
+
+        if ($type === 'discord') {
+            return $this->findUserIdByExternalAccount($app, 'discord', $target);
+        }
+
+        if (!ctype_digit($target) || strlen($target) >= 15) {
             return null;
-        }
-
-        if (strlen($target) >= 15) {
-            return $this->findUserIdBySteamId($app, $target);
         }
 
         $user = (int) $target;
@@ -126,11 +198,11 @@ class Sharing
         return $exists === false ? null : $user;
     }
 
-    private function findUserIdBySteamId(Application $app, string $steamId): ?int
+    private function findUserIdByExternalAccount(Application $app, string $kind, string $identifier): ?int
     {
         $user = $app['db']->executeQuery(
             'SELECT user_id FROM external_account WHERE kind = ? AND identifier = ? LIMIT 1',
-            array('steam', $steamId)
+            array($kind, $identifier)
         )->fetchColumn(0);
 
         return $user === false ? null : (int) $user;

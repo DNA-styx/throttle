@@ -197,11 +197,37 @@
   color: var(--bs-primary);
 }
 
+.profile-avatar-image,
+.account-menu-avatar {
+  object-fit: cover;
+  background: var(--bs-tertiary-bg);
+}
+
 .profile-meta-line {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
   align-items: center;
+}
+
+.profile-danger-zone {
+  border-color: rgba(var(--bs-danger-rgb), 0.35);
+}
+
+.auth-inline-note {
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.5rem;
+  color: var(--bs-secondary-color);
+  background: var(--bs-tertiary-bg);
+}
+
+.auth-disabled-provider {
+  cursor: help;
+}
+
+.auth-disabled-provider > .btn[disabled] {
+  pointer-events: none;
 }
 
 .profile-config {
@@ -274,6 +300,46 @@
   padding: 1rem;
 }
 
+.auth-shell {
+  padding-top: 0.5rem;
+  padding-bottom: 1rem;
+}
+
+.auth-card {
+  border: 1px solid var(--bs-border-color);
+  box-shadow: 0 0.75rem 2rem rgba(16, 24, 40, 0.08);
+}
+
+.auth-card .card-body {
+  padding: 1.25rem;
+}
+
+.auth-tabs {
+  border-bottom: 1px solid var(--bs-border-color);
+}
+
+.auth-tabs .nav-link {
+  border: 1px solid transparent;
+  border-top-left-radius: 0.5rem;
+  border-top-right-radius: 0.5rem;
+  color: var(--bs-secondary-color);
+  font-weight: 600;
+}
+
+.auth-tabs .nav-link.active {
+  color: var(--bs-body-color);
+  background: var(--bs-body-bg);
+  border-color: var(--bs-border-color) var(--bs-border-color) var(--bs-body-bg);
+}
+
+.auth-provider-icon {
+  width: 1rem;
+  height: 1rem;
+  display: inline-block;
+  vertical-align: -0.125em;
+  fill: currentColor;
+}
+
 .profile-stat-value {
   font-size: 1.25rem;
   font-weight: 600;
@@ -327,6 +393,69 @@
 [data-bs-theme="dark"] .profile-ai-card {
   background: #1a2330;
   border-color: #303b4a;
+}
+
+[data-bs-theme="dark"] .auth-card {
+  background: #1a2330;
+  border-color: #303b4a;
+  box-shadow: 0 1.2rem 2.8rem rgba(0, 0, 0, 0.28);
+}
+
+[data-bs-theme="dark"] .auth-card .card-body {
+  color: #e5edf5;
+}
+
+[data-bs-theme="dark"] .auth-card .form-label,
+[data-bs-theme="dark"] .auth-card .h1,
+[data-bs-theme="dark"] .auth-card .h2,
+[data-bs-theme="dark"] .auth-card .h3,
+[data-bs-theme="dark"] .auth-card .h4,
+[data-bs-theme="dark"] .auth-card h1,
+[data-bs-theme="dark"] .auth-card h2,
+[data-bs-theme="dark"] .auth-card h3,
+[data-bs-theme="dark"] .auth-card h4 {
+  color: #f4f8fb;
+}
+
+[data-bs-theme="dark"] .auth-card hr {
+  border-color: #303b4a;
+  opacity: 1;
+}
+
+[data-bs-theme="dark"] .auth-card a:not(.btn) {
+  color: #8fc0ff;
+}
+
+[data-bs-theme="dark"] .auth-card .btn-outline-primary {
+  color: #8fc0ff;
+  border-color: #4b6b91;
+}
+
+[data-bs-theme="dark"] .auth-card .btn-outline-primary:hover,
+[data-bs-theme="dark"] .auth-card .btn-outline-primary:focus {
+  color: #fff;
+  background: #2b3849;
+  border-color: #6da8ff;
+}
+
+[data-bs-theme="dark"] .auth-tabs {
+  border-bottom-color: #303b4a;
+}
+
+[data-bs-theme="dark"] .auth-tabs .nav-link {
+  color: #95a3b4;
+}
+
+[data-bs-theme="dark"] .auth-tabs .nav-link:hover,
+[data-bs-theme="dark"] .auth-tabs .nav-link:focus {
+  color: #f4f8fb;
+  border-color: #303b4a #303b4a transparent;
+}
+
+[data-bs-theme="dark"] .auth-tabs .nav-link.active {
+  color: #f4f8fb;
+  background: #1a2330;
+  border-color: #303b4a #303b4a #1a2330;
 }
 
 [data-bs-theme="dark"] .profile-ai-card-body {

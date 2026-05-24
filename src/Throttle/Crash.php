@@ -2009,6 +2009,14 @@ class Crash
         $ip = $app['request']->getClientIp();
 
         $ownerId = null;
+        $providedUploadToken = self::getProvidedUploadToken($app);
+        if (is_string($providedUploadToken) && $providedUploadToken !== '') {
+            $tokenOwnerId = $app['db']->executeQuery('SELECT id FROM user WHERE upload_token = ? LIMIT 1', [$providedUploadToken])->fetchColumn(0);
+            if ($tokenOwnerId !== false && $tokenOwnerId !== null) {
+                $ownerId = (int) $tokenOwnerId;
+            }
+        }
+
         $legacyOwnerId = $app['request']->request->get('UserID');
         if ($legacyOwnerId !== null) {
             $app['request']->request->remove('UserID');
@@ -2023,7 +2031,10 @@ class Crash
             }
 
             if ($legacyOwnerId !== null) {
-                $ownerId = $app['owner_resolver']->resolveOwnerIdFromLegacyIdentifier($legacyOwnerId);
+                $resolvedOwnerId = $app['owner_resolver']->resolveOwnerIdFromLegacyIdentifier($legacyOwnerId);
+                if ($ownerId === null) {
+                    $ownerId = $resolvedOwnerId;
+                }
             }
         }
 

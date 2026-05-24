@@ -17,3 +17,7 @@ yarn-error.log
 legacy-master.zip
 .env.local
 .env.*.local
+.manual-install
+_dist
+*.tar.gz
+*.zip

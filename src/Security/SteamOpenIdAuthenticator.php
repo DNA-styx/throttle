@@ -2,6 +2,9 @@
 
 namespace App\Security;
 
+use App\Entity\User;
+use App\Runtime\AuthSettings;
+use Symfony\Bundle\SecurityBundle\Security;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -31,11 +34,17 @@ class SteamOpenIdAuthenticator extends AbstractAuthenticator
     private AuthenticationSuccessHandlerInterface $successHandler;
     private AuthenticationFailureHandlerInterface $failureHandler;
     private string $steamApiKey;
+    private AuthSettings $authSettings;
+    private SocialLinkManager $socialLinkManager;
+    private Security $security;
 
-    public function __construct(HttpClientInterface $httpClient, UserManager $userManager, AuthenticationSuccessHandlerInterface $successHandler, AuthenticationFailureHandlerInterface $failureHandler, string $steamApiKey)
+    public function __construct(HttpClientInterface $httpClient, UserManager $userManager, AuthSettings $authSettings, SocialLinkManager $socialLinkManager, Security $security, AuthenticationSuccessHandlerInterface $successHandler, AuthenticationFailureHandlerInterface $failureHandler, string $steamApiKey)
     {
         $this->httpClient = $httpClient;
         $this->userManager = $userManager;
+        $this->authSettings = $authSettings;
+        $this->socialLinkManager = $socialLinkManager;
+        $this->security = $security;
         $this->successHandler = $successHandler;
         $this->failureHandler = $failureHandler;
         $this->steamApiKey = $steamApiKey;
@@ -54,6 +63,11 @@ class SteamOpenIdAuthenticator extends AbstractAuthenticator
      */
     public function authenticate(Request $request): Passport
     {
+        $linkContext = $this->socialLinkManager->current();
+        if ($linkContext === null && !$this->authSettings->isEnabled('steam')) {
+            throw new CustomUserMessageAuthenticationException('Steam login is currently disabled.');
+        }
+
         if (!$request->query->has('openid_mode')) {
             throw new AuthenticationCredentialsNotFoundException();
         }
@@ -61,8 +75,19 @@ class SteamOpenIdAuthenticator extends AbstractAuthenticator
         $steamId = $this->validateOpenIdResponse($request);
         $steamDisplayName = $this->getSteamDisplayName($steamId);
 
-        $user = $this->userManager->findOrCreateUserForExternalAccount(
-            self::EXTERNAL_ACCOUNT_KIND, $steamId, $steamDisplayName, $steamDisplayName);
+        if ($linkContext !== null && $linkContext['kind'] === self::EXTERNAL_ACCOUNT_KIND) {
+            $currentUser = $this->security->getUser();
+            if (!$currentUser instanceof User) {
+                throw new CustomUserMessageAuthenticationException('You must be signed in to link Steam.');
+            }
+
+            $user = $currentUser;
+            $this->userManager->linkExternalAccount($user, self::EXTERNAL_ACCOUNT_KIND, $steamId, $steamDisplayName);
+            $this->socialLinkManager->clear();
+        } else {
+            $user = $this->userManager->findOrCreateUserForExternalAccount(
+                self::EXTERNAL_ACCOUNT_KIND, $steamId, $steamDisplayName, $steamDisplayName);
+        }
 
         return new SelfValidatingPassport(new UserBadge($user->getUserIdentifier(), function () use ($user) {
             return $user;

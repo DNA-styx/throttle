@@ -6,11 +6,30 @@
 parameters:
     app.name: 'Throttle'
     app.login_link_lifetime: 600
+    app.auth_email_login_lifetime: 900
+    app.auth_email_verify_lifetime: 86400
+    app.auth_password_reset_lifetime: 3600
     app.admins_default: ''
     app.admins: '%env(default:app.admins_default:APP_ADMINS)%'
     app.symbol_upload_token: '%env(SYMBOL_UPLOAD_TOKEN)%'
     app.ai_settings_key_default: ''
     app.ai_settings_key: '%env(default:app.ai_settings_key_default:AI_SETTINGS_KEY)%'
+    app.bootstrap_admin_login_default: ''
+    app.bootstrap_admin_login: '%env(default:app.bootstrap_admin_login_default:BOOTSTRAP_ADMIN_LOGIN)%'
+    app.bootstrap_admin_email_default: ''
+    app.bootstrap_admin_email: '%env(default:app.bootstrap_admin_email_default:BOOTSTRAP_ADMIN_EMAIL)%'
+    app.bootstrap_admin_password_default: ''
+    app.bootstrap_admin_password: '%env(default:app.bootstrap_admin_password_default:BOOTSTRAP_ADMIN_PASSWORD)%'
+    app.mailer_dsn_default: 'null://null'
+    app.mailer_dsn: '%env(default:app.mailer_dsn_default:MAILER_DSN)%'
+    app.mailer_from_default: 'throttle@example.com'
+    app.mailer_from: '%env(default:app.mailer_from_default:MAILER_FROM)%'
+    app.steam_api_key_default: ''
+    app.steam_api_key: '%env(default:app.steam_api_key_default:STEAM_API_KEY)%'
+    app.oauth_discord_client_id_default: ''
+    app.oauth_discord_client_id: '%env(default:app.oauth_discord_client_id_default:OAUTH_DISCORD_CLIENT_ID)%'
+    app.oauth_discord_client_secret_default: ''
+    app.oauth_discord_client_secret: '%env(default:app.oauth_discord_client_secret_default:OAUTH_DISCORD_CLIENT_SECRET)%'
     app.legacy:
         accelerator: ''
         apikey: false
@@ -56,6 +75,34 @@ services:
     App\Security\UserManager:
         arguments:
             $loginLinkLifetime: '%app.login_link_lifetime%'
+
+    App\Security\BootstrapAdminManager:
+        arguments:
+            $bootstrapLogin: '%app.bootstrap_admin_login%'
+            $bootstrapEmail: '%app.bootstrap_admin_email%'
+            $bootstrapPassword: '%app.bootstrap_admin_password%'
+
+    App\Runtime\AuthTokenManager:
+        arguments:
+            $emailLoginLifetime: '%app.auth_email_login_lifetime%'
+            $emailVerifyLifetime: '%app.auth_email_verify_lifetime%'
+            $passwordResetLifetime: '%app.auth_password_reset_lifetime%'
+
+    App\Runtime\AuthSettings:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
+    App\Security\AuthMailer:
+        arguments:
+            $fromAddress: '%app.mailer_from%'
+
+    App\Runtime\AuthEnvironment:
+        arguments:
+            $mailerDsn: '%app.mailer_dsn%'
+            $mailerFrom: '%app.mailer_from%'
+            $steamApiKey: '%app.steam_api_key%'
+            $discordClientId: '%app.oauth_discord_client_id%'
+            $discordClientSecret: '%app.oauth_discord_client_secret%'
 
     App\Security\ConfigAdminChecker:
         arguments:

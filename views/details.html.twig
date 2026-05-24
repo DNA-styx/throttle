@@ -539,7 +539,7 @@ body.theme-dark .crash-ai-panel code {
 {% endif %}
 {% else %}
 {% if not legacy_app.user %}
-<div class="alert alert-block alert-info">If you are the owner of this crash, <a href="{{ path('login_steam', {'return': legacy_app.request.pathInfo}) }}" class="alert-link">login with Steam</a> to see more information.</div>
+<div class="alert alert-block alert-info">If you are the owner of this crash, <a href="{{ path('login', {'return': legacy_app.request.pathInfo}) }}" class="alert-link">sign in</a> to see more information.</div>
 {% elseif not can_manage %}
 <div class="alert alert-block alert-info">You can not see full information about this crash as you are not the owner.</div>
 {% endif %}

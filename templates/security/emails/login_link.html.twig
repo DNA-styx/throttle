@@ -1,0 +1,7 @@
+<p>Hello {{ user.name }},</p>
+
+<p>Use this one-time sign-in link for Throttle:</p>
+
+<p><a href="{{ actionUrl }}">{{ actionUrl }}</a></p>
+
+<p>This link expires at {{ expiresAt|date('Y-m-d H:i:s') }}.</p>

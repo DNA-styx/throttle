@@ -23,6 +23,11 @@ class AuthenticationEntryPoint implements AuthenticationEntryPointInterface
      */
     public function start(Request $request, ?AuthenticationException $authException = null): Response
     {
-        return new RedirectResponse($this->urlGenerator->generate('login'));
+        $return = $request->getRequestUri();
+        if ($return === '' || $return[0] !== '/' || str_starts_with($return, '//')) {
+            $return = '/';
+        }
+
+        return new RedirectResponse($this->urlGenerator->generate('login', ['return' => $return]));
     }
 }

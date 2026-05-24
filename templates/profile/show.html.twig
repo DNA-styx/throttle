@@ -25,30 +25,201 @@
 
         <div class="profile-panel mb-3">
             <div class="d-flex align-items-center gap-3">
-                <svg class="bi profile-avatar" width="48" height="48" aria-hidden="true">
-                    <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#{{ steamAccount ? 'steam' : 'person-fill' }}"></use>
-                </svg>
+                <img src="{{ avatarSeed|identicon(24) }}" alt="{{ user.name }} avatar" width="48" height="48" class="profile-avatar-image rounded border">
                 <div>
                     <div class="h5 mb-1">{{ user.name }}</div>
-                    {% if steamAccount %}
-                        <div class="text-muted profile-meta-line">
-                            <span>User ID: {{ user.id }}</span>
+                    <div class="text-muted profile-meta-line">
+                        <span>User ID: {{ user.id }}</span>
+                        {% if contactEmail %}
+                            <span>Email: {{ contactEmail }}</span>
+                            <span>{{ user.emailVerifiedAt ? 'Verified' : 'Unverified' }}</span>
+                        {% endif %}
+                        {% if steamAccount %}
                             <a href="https://steamcommunity.com/profiles/{{ steamAccount.identifier }}" rel="noopener noreferrer">
                                 {{ steamAccount.identifier }}
                             </a>
                             {% if steamAccount.lastLogin %}
-                                <span>Last login: {{ steamAccount.lastLogin|date('Y-m-d H:i:s') }}</span>
+                                <span>Last Steam login: {{ steamAccount.lastLogin|date('Y-m-d H:i:s') }}</span>
                             {% endif %}
-                        </div>
-                    {% else %}
-                        <div class="text-muted">User ID: {{ user.id }}</div>
-                        <a href="{{ path('login_steam') }}" class="btn btn-sm btn-outline-primary mt-2">
-                            Link Steam
-                        </a>
-                    {% endif %}
+                        {% endif %}
+                    </div>
                 </div>
             </div>
         </div>
+
+        <section class="profile-panel mb-3">
+            <div class="mb-3">
+                <h2 class="h5 mb-1">Login methods</h2>
+                <div class="text-muted">Manage local sign-in, email status, Steam, Discord, and token-based access.</div>
+            </div>
+            {% if not mailerConfigured %}
+                <div class="alert alert-warning">{{ mailerNotice }}</div>
+            {% endif %}
+
+            <div class="table-responsive mb-3">
+                <table class="table table-sm align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Method</th>
+                            <th>Status</th>
+                            <th>Details</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Local password</td>
+                            <td>{{ user.hasLocalLogin ? 'Enabled' : 'Not set' }}</td>
+                            <td>{{ contactEmail ?: 'Add and verify an email to use password sign-in.' }}</td>
+                            <td class="text-end">Managed below</td>
+                        </tr>
+                        <tr>
+                            <td>Email login link</td>
+                            <td>{{ authMethods.email_login_link ? 'Enabled' : 'Disabled in /health' }}</td>
+                            <td>
+                                {% if contactEmail %}
+                                    {{ contactEmail }} · {{ user.emailVerifiedAt ? 'Verified' : 'Needs verification' }}
+                                {% else %}
+                                    No email linked
+                                {% endif %}
+                            </td>
+                            <td class="text-end">
+                                {% if contactEmail and not user.emailVerifiedAt %}
+                                    <form method="post" action="{{ path('register_resend_verification') }}" class="d-inline">
+                                        <input type="hidden" name="_token" value="{{ csrf_token('register-resend') }}">
+                                        <input type="hidden" name="email" value="{{ contactEmail }}">
+                                        <input type="hidden" name="return" value="{{ path('profile') }}">
+                                        <button type="submit" class="btn btn-sm btn-outline-secondary" {{ not mailerConfigured ? 'disabled' : '' }}>Resend verification</button>
+                                    </form>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Upload token login</td>
+                            <td>{{ authMethods.token_login ? 'Enabled' : 'Disabled in /health' }}</td>
+                            <td>Uses the same upload token shown below.</td>
+                            <td class="text-end">Managed by token regeneration</td>
+                        </tr>
+                        <tr>
+                            <td>Steam</td>
+                            <td>{{ steamAccount ? 'Linked' : 'Not linked' }}</td>
+                            <td>
+                                {% if steamAccount %}
+                                    {{ steamAccount.identifier }}
+                                {% else %}
+                                    No Steam account linked
+                                {% endif %}
+                            </td>
+                            <td class="text-end">
+                                {% if steamAccount %}
+                                    {% if canUnlinkSteam %}
+                                        <form method="post" action="{{ path('profile_unlink_external', {'kind': 'steam'}) }}" class="d-inline">
+                                            <input type="hidden" name="_token" value="{{ csrf_token('profile-unlink-steam') }}">
+                                            <button type="submit" class="btn btn-sm btn-outline-danger">Unlink</button>
+                                        </form>
+                                    {% else %}
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled>Last method</button>
+                                    {% endif %}
+                                {% elseif authMethods.steam %}
+                                    <a href="{{ path('profile_link_external', {'kind': 'steam'}) }}" class="btn btn-sm btn-outline-primary">Link Steam</a>
+                                {% else %}
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled>Disabled in /health</button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Discord</td>
+                            <td>{{ discordAccount ? 'Linked' : 'Not linked' }}</td>
+                            <td>
+                                {% if discordAccount %}
+                                    {{ discordAccount.displayName }}
+                                {% else %}
+                                    No Discord account linked
+                                {% endif %}
+                            </td>
+                            <td class="text-end">
+                                {% if discordAccount %}
+                                    {% if canUnlinkDiscord %}
+                                        <form method="post" action="{{ path('profile_unlink_external', {'kind': 'discord'}) }}" class="d-inline">
+                                            <input type="hidden" name="_token" value="{{ csrf_token('profile-unlink-discord') }}">
+                                            <button type="submit" class="btn btn-sm btn-outline-danger">Unlink</button>
+                                        </form>
+                                    {% else %}
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled>Last method</button>
+                                    {% endif %}
+                                {% elseif authMethods.discord and discordConfigured %}
+                                    <a href="{{ path('profile_link_external', {'kind': 'discord'}) }}" class="btn btn-sm btn-outline-primary">Link Discord</a>
+                                {% elseif authMethods.discord %}
+                                    <span class="d-inline-block auth-disabled-provider" title="{{ discordNotice }} Callback URL: {{ discordCallbackUrl }}">
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled>Configure OAuth first</button>
+                                    </span>
+                                {% else %}
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled>Disabled in /health</button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <form method="post" action="{{ path('profile_password') }}" class="row g-3">
+                <input type="hidden" name="_token" value="{{ csrf_token('profile-password') }}">
+                {% if user.hasPassword %}
+                    <div class="col-md-4">
+                        <label class="form-label">Current password</label>
+                        <input type="password" class="form-control" name="current_password" autocomplete="current-password">
+                    </div>
+                {% endif %}
+                <div class="col-md-4">
+                    <label class="form-label">{{ user.hasPassword ? 'New password' : 'Set password' }}</label>
+                    <input type="password" class="form-control" name="new_password" autocomplete="new-password" required>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Confirm password</label>
+                    <input type="password" class="form-control" name="confirm_password" autocomplete="new-password" required>
+                </div>
+                <div class="col-12">
+                    <button type="submit" class="btn btn-primary">{{ user.hasPassword ? 'Change password' : 'Set password' }}</button>
+                </div>
+            </form>
+
+            <hr class="my-4">
+
+            <form method="post" action="{{ path('profile_email') }}" class="row g-3">
+                <input type="hidden" name="_token" value="{{ csrf_token('profile-email') }}">
+                <div class="col-md-8">
+                    <label class="form-label">Contact email</label>
+                    <input type="email" class="form-control" name="email" value="{{ contactEmail ?: '' }}" autocomplete="email" required>
+                </div>
+                <div class="col-md-4 d-flex align-items-end">
+                    <button type="submit" class="btn btn-outline-primary w-100" {{ not mailerConfigured ? 'disabled' : '' }}>{{ contactEmail ? 'Update email' : 'Add email' }}</button>
+                </div>
+            </form>
+        </section>
+
+        <section class="profile-panel profile-danger-zone mb-3">
+            <div class="mb-3">
+                <h2 class="h5 mb-1 text-danger">Delete account</h2>
+                <div class="text-muted">This permanently removes your local account, linked login methods, teams, and upload token access. Owned crash reports will stay, but ownership will be cleared.</div>
+            </div>
+
+            <form method="post" action="{{ path('profile_delete_account') }}" class="row g-3">
+                <input type="hidden" name="_token" value="{{ csrf_token('profile-delete-account') }}">
+                {% if user.hasPassword %}
+                    <div class="col-md-4">
+                        <label class="form-label">Current password</label>
+                        <input type="password" class="form-control" name="current_password" autocomplete="current-password" required>
+                    </div>
+                {% endif %}
+                <div class="col-md-4">
+                    <label class="form-label">Type DELETE to confirm</label>
+                    <input type="text" class="form-control" name="confirm_delete" autocomplete="off" required>
+                </div>
+                <div class="col-md-4 d-flex align-items-end">
+                    <button type="submit" class="btn btn-outline-danger w-100">Delete account</button>
+                </div>
+            </form>
+        </section>
 
         <section class="profile-panel mb-3">
             <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
@@ -137,8 +308,8 @@
             <div class="row g-3">
                 <div class="col-md-6">
                     <label class="form-label" for="core-account">MinidumpAccount</label>
-                    <input id="core-account" class="form-control" data-core-field="account" value="{{ steamAccount ? steamAccount.identifier : 'YOUR_STEAMID64' }}">
-                    <div class="form-text">SteamID64 that will own uploaded crashes.</div>
+                    <input id="core-account" class="form-control" data-core-field="account" value="{{ steamAccount ? steamAccount.identifier : '' }}" placeholder="{{ steamAccount ? '' : 'Optional when token is used' }}">
+                    <div class="form-text">Optional legacy owner hint. Leave blank when ownership should come from the upload token.</div>
                 </div>
                 <div class="col-md-6">
                     <label class="form-label" for="core-base-url">Base URL</label>
@@ -196,7 +367,7 @@
                     <tbody>
                         <tr>
                             <td><code>MinidumpAccount</code></td>
-                            <td>Links uploaded crash dumps to this profile by SteamID64.</td>
+                            <td>Optional legacy owner hint. When your upload token is present, ownership can be resolved without SteamID64.</td>
                         </tr>
                         <tr>
                             <td><code>MinidumpSymbolUpload</code></td>

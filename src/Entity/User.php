@@ -11,7 +11,7 @@ use Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface;
 use Symfony\Component\Security\Core\User\UserInterface;
 
 #[ORM\Entity(repositoryClass: UserRepository::class)]
-class User extends ServerOwner implements UserInterface
+class User extends ServerOwner implements UserInterface, PasswordAuthenticatedUserInterface
 {
     public const ROLE_USER = 'ROLE_USER';
     public const ROLE_ADMIN = 'ROLE_ADMIN';
@@ -37,6 +37,15 @@ class User extends ServerOwner implements UserInterface
 
     #[ORM\Column(nullable: true)]
     protected ?\DateTimeImmutable $lastLogin = null;
+
+    #[ORM\Column(length: 64, unique: true, nullable: true)]
+    protected ?string $login = null;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    protected ?string $passwordHash = null;
+
+    #[ORM\Column(nullable: true)]
+    protected ?\DateTimeImmutable $emailVerifiedAt = null;
 
     #[ORM\Column(length: 128, unique: true)]
     protected string $uploadToken = '';
@@ -107,6 +116,63 @@ class User extends ServerOwner implements UserInterface
         $this->lastLogin = $lastLogin;
 
         return $this;
+    }
+
+    public function getLogin(): ?string
+    {
+        return $this->login;
+    }
+
+    public function setLogin(?string $login): self
+    {
+        $login = $login !== null ? mb_strtolower(trim($login)) : null;
+        $this->login = ($login === '') ? null : $login;
+
+        return $this;
+    }
+
+    public function hasLocalLogin(): bool
+    {
+        return $this->passwordHash !== null
+            && $this->passwordHash !== ''
+            && (
+                ($this->login !== null && $this->login !== '')
+                || $this->getContactEmail() !== null
+            );
+    }
+
+    public function getPassword(): ?string
+    {
+        return $this->passwordHash;
+    }
+
+    public function setPasswordHash(?string $passwordHash): self
+    {
+        $this->passwordHash = $passwordHash !== '' ? $passwordHash : null;
+
+        return $this;
+    }
+
+    public function hasPassword(): bool
+    {
+        return $this->passwordHash !== null && $this->passwordHash !== '';
+    }
+
+    public function getEmailVerifiedAt(): ?\DateTimeImmutable
+    {
+        return $this->emailVerifiedAt;
+    }
+
+    public function setEmailVerifiedAt(?\DateTimeImmutable $emailVerifiedAt): self
+    {
+        $this->emailVerifiedAt = $emailVerifiedAt;
+
+        return $this;
+    }
+
+    public function isEmailVerified(): bool
+    {
+        return $this->emailVerifiedAt !== null;
     }
 
     public function getUploadToken(): string
@@ -190,6 +256,7 @@ class User extends ServerOwner implements UserInterface
     {
         if ($contactEmail === null) {
             $this->contactEmail = null;
+            $this->emailVerifiedAt = null;
 
             return $this;
         }
@@ -260,16 +327,6 @@ class User extends ServerOwner implements UserInterface
     public function getUserIdentifier(): string
     {
         return (string)$this->getId();
-    }
-
-    /**
-     * This method can be removed in Symfony 6.0 - is not needed for apps that do not check user passwords.
-     *
-     * @see PasswordAuthenticatedUserInterface
-     */
-    public function getPassword(): ?string
-    {
-        return null;
     }
 
     /**

@@ -67,6 +67,158 @@
         <section class="profile-panel mt-3">
             <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
                 <div>
+                    <h2 class="h5 mb-1">Authentication & Mail</h2>
+                    <div class="text-muted">Quick diagnostics for SMTP delivery plus Steam and Discord sign-in configuration.</div>
+                </div>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Component</th>
+                            <th>Status</th>
+                            <th>Details</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="{{ mailerSummary.configured ? '' : 'table-warning' }}">
+                            <td>SMTP mailer</td>
+                            <td>{{ mailerSummary.configured ? 'Configured' : 'Not configured' }}</td>
+                            <td>
+                                {% if mailerSummary.configured %}
+                                    <div><strong>From:</strong> <code>{{ authEnvironment.getMailerFrom() }}</code></div>
+                                    <div><strong>Method:</strong> <code>{{ mailerSummary.scheme|upper }}</code></div>
+                                    <div><strong>Host:</strong> <code>{{ mailerSummary.host }}</code>{% if mailerSummary.port %}:<code>{{ mailerSummary.port }}</code>{% endif %}</div>
+                                    <div><strong>Username:</strong> <code>{{ mailerSummary.username }}</code></div>
+                                    <div><strong>Encryption:</strong> <code>{{ mailerSummary.encryption ?: 'default' }}</code>{% if mailerSummary.auth_mode %} · <strong>Auth:</strong> <code>{{ mailerSummary.auth_mode }}</code>{% endif %}</div>
+                                    <div class="small text-muted mt-1">DKIM/SPF are applied by your mail provider and DNS, not by Throttle itself.</div>
+                                {% else %}
+                                    <span class="text-muted">{{ authEnvironment.mailerNotice() }}</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr class="{{ uploadSettings.auth_enable_steam ? '' : 'table-warning' }}">
+                            <td>Steam login</td>
+                            <td>{{ uploadSettings.auth_enable_steam ? 'Enabled' : 'Disabled' }}</td>
+                            <td>
+                                <div><strong>Toggle:</strong> <code>{{ uploadSettings.auth_enable_steam ? 'enabled' : 'disabled' }}</code></div>
+                                <div><strong>STEAM_API_KEY:</strong> <code>{{ authEnvironment.isSteamApiConfigured() ? authEnvironment.getSteamApiKeyMasked() : 'not configured' }}</code></div>
+                                <div class="small text-muted mt-1">{{ authEnvironment.steamNotice() }}</div>
+                            </td>
+                        </tr>
+                        <tr class="{{ authEnvironment.isDiscordConfigured() ? '' : 'table-warning' }}">
+                            <td>Discord OAuth</td>
+                            <td>{{ authEnvironment.isDiscordConfigured() ? 'Configured' : 'Not configured' }}</td>
+                            <td>
+                                <div><strong>Toggle:</strong> <code>{{ uploadSettings.auth_enable_discord ? 'enabled' : 'disabled' }}</code></div>
+                                {% if authEnvironment.isDiscordConfigured() %}
+                                    <div><strong>Client ID:</strong> <code>{{ authEnvironment.getDiscordClientIdMasked() }}</code></div>
+                                    <div><strong>Callback URL:</strong> <code>{{ discordCallbackUrl }}</code></div>
+                                {% else %}
+                                    <div class="text-muted">{{ authEnvironment.discordNotice() }}</div>
+                                    <div><strong>Expected callback URL:</strong> <code>{{ discordCallbackUrl }}</code></div>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="border rounded p-3 mt-3">
+                <div class="d-flex align-items-center justify-content-between gap-3 mb-2">
+                    <div>
+                        <h3 class="h6 mb-1">SMTP delivery test</h3>
+                        <div class="text-muted">Sends a real email through the configured Symfony mailer and shows the exact transport error if sending fails.</div>
+                    </div>
+                </div>
+                <form method="post" action="{{ path('health_auth_test_email') }}" class="row g-3">
+                    <input type="hidden" name="_token" value="{{ csrf_token('health-auth-test-email') }}">
+                    <div class="col-md-8">
+                        <label class="form-label" for="health-test-email">Recipient email</label>
+                        <input id="health-test-email" type="email" class="form-control" name="email" value="{{ mailerTestDefaultTo }}" placeholder="admin@example.com" required>
+                    </div>
+                    <div class="col-md-4 d-flex align-items-end">
+                        <button type="submit" class="btn btn-primary w-100" {{ not mailerSummary.configured ? 'disabled' : '' }}>Send test email</button>
+                    </div>
+                </form>
+            </div>
+
+            <hr class="my-4">
+
+            <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
+                <div>
+                    <h3 class="h6 mb-1">Authentication methods</h3>
+                    <div class="text-muted">Turn individual sign-in methods on or off without touching the rest of the upload settings.</div>
+                </div>
+            </div>
+
+            <form method="post" class="health-settings-stack">
+                <input type="hidden" name="_token" value="{{ csrf_token('upload-settings') }}">
+                <input type="hidden" name="upload_settings_form" value="1">
+                <input type="hidden" name="streaming_symbols_enabled" value="{{ uploadSettings.streaming_symbols_enabled ? '1' : '0' }}">
+                <input type="hidden" name="allow_anonymous_minidump_uploads" value="{{ uploadSettings.allow_anonymous_minidump_uploads ? '1' : '0' }}">
+                <input type="hidden" name="crash_source_lookup_enabled" value="{{ uploadSettings.crash_source_lookup_enabled ? '1' : '0' }}">
+                <input type="hidden" name="crash_ai_analysis_enabled" value="{{ uploadSettings.crash_ai_analysis_enabled ? '1' : '0' }}">
+                <input type="hidden" name="upload_memory_limit" value="{{ uploadSettings.upload_memory_limit }}">
+                <input type="hidden" name="upload_failure_backoff_enabled" value="{{ uploadSettings.upload_failure_backoff_enabled ? '1' : '0' }}">
+                <input type="hidden" name="upload_failure_backoff_threshold" value="{{ uploadSettings.upload_failure_backoff_threshold }}">
+                <input type="hidden" name="upload_failure_backoff_ttl" value="{{ uploadSettings.upload_failure_backoff_ttl }}">
+
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch" id="auth-enable-steam" name="auth_enable_steam" value="1"{% if uploadSettings.auth_enable_steam %} checked{% endif %}>
+                            <label class="form-check-label" for="auth-enable-steam">Enable Steam login</label>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch" id="auth-enable-discord" name="auth_enable_discord" value="1"{% if uploadSettings.auth_enable_discord %} checked{% endif %}>
+                            <label class="form-check-label" for="auth-enable-discord">Enable Discord login</label>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch" id="auth-enable-email-login-link" name="auth_enable_email_login_link" value="1"{% if uploadSettings.auth_enable_email_login_link %} checked{% endif %}>
+                            <label class="form-check-label" for="auth-enable-email-login-link">Enable email login links</label>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch" id="auth-enable-password-login" name="auth_enable_password_login" value="1"{% if uploadSettings.auth_enable_password_login %} checked{% endif %}>
+                            <label class="form-check-label" for="auth-enable-password-login">Enable email + password login</label>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch" id="auth-enable-password-registration" name="auth_enable_password_registration" value="1"{% if uploadSettings.auth_enable_password_registration %} checked{% endif %}>
+                            <label class="form-check-label" for="auth-enable-password-registration">Enable email + password registration</label>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch" id="auth-enable-password-reset" name="auth_enable_password_reset" value="1"{% if uploadSettings.auth_enable_password_reset %} checked{% endif %}>
+                            <label class="form-check-label" for="auth-enable-password-reset">Enable password reset</label>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch" id="auth-enable-token-login" name="auth_enable_token_login" value="1"{% if uploadSettings.auth_enable_token_login %} checked{% endif %}>
+                            <label class="form-check-label" for="auth-enable-token-login">Enable upload token login</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-3">
+                    <button type="submit" class="btn btn-primary">Save authentication settings</button>
+                </div>
+            </form>
+        </section>
+
+        <section class="profile-panel mt-3">
+            <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
+                <div>
                     <h2 class="h5 mb-1">Upload processing settings</h2>
                     <div class="text-muted">Runtime settings used by symbol uploads, binary uploads, optional raw source lookup, and optional AI crash analysis.</div>
                 </div>
