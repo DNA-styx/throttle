@@ -38,7 +38,8 @@ class UserVoter extends EntityActionVoter
 
         return match ($action) {
             self::DELETE => $isAdmin && !$isCurrentUser,
-            self::EDIT, self::VIEW => $isAdmin || $isCurrentUser,
+            self::EDIT => $isAdmin || $isCurrentUser,
+            self::VIEW => true,
             default => false,
         };
     }

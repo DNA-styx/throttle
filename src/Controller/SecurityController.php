@@ -10,6 +10,7 @@ use App\Runtime\AuthSettings;
 use App\Runtime\AuthTokenManager;
 use App\Security\AuthMailer;
 use App\Security\SocialLinkManager;
+use App\Security\UserAccessManager;
 use App\Security\UserManager;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -62,7 +63,7 @@ class SecurityController extends AbstractController
     }
 
     #[Route('/login/email-link/request', name: 'login_email_link_request', methods: ['POST'])]
-    public function requestEmailLink(Request $request, AuthSettings $authSettings, AuthEnvironment $authEnvironment, UserManager $userManager, AuthMailer $authMailer): Response
+    public function requestEmailLink(Request $request, AuthSettings $authSettings, AuthEnvironment $authEnvironment, UserManager $userManager, AuthMailer $authMailer, UserAccessManager $userAccessManager): Response
     {
         if (!$authSettings->isEnabled('email_login_link')) {
             return new Response('Email login links are disabled.', Response::HTTP_FORBIDDEN);
@@ -79,7 +80,7 @@ class SecurityController extends AbstractController
         $email = mb_strtolower(trim((string) $request->request->get('email', '')));
         if ($email !== '') {
             $user = $userManager->findByEmail($email);
-            if ($user instanceof User && $user->isEmailVerified()) {
+            if ($user instanceof User && $user->isEmailVerified() && !$userAccessManager->isInteractiveLoginBlocked($user)) {
                 $authMailer->sendLoginLink($user, $email);
             }
         }
@@ -196,7 +197,7 @@ class SecurityController extends AbstractController
     }
 
     #[Route('/register/resend-verification', name: 'register_resend_verification', methods: ['POST'])]
-    public function resendVerification(Request $request, AuthEnvironment $authEnvironment, UserManager $userManager, AuthMailer $authMailer): Response
+    public function resendVerification(Request $request, AuthEnvironment $authEnvironment, UserManager $userManager, AuthMailer $authMailer, UserAccessManager $userAccessManager): Response
     {
         $return = $this->resolveReturnPath($request);
         if (!$this->isCsrfTokenValid('register-resend', (string) $request->request->get('_token'))) {
@@ -212,7 +213,7 @@ class SecurityController extends AbstractController
         $email = mb_strtolower(trim((string) $request->request->get('email', '')));
         if ($email !== '') {
             $user = $userManager->findByEmail($email);
-            if ($user instanceof User && !$user->isEmailVerified()) {
+            if ($user instanceof User && !$user->isEmailVerified() && !$userAccessManager->isInteractiveLoginBlocked($user)) {
                 $authMailer->sendVerification($user, $email);
             }
         }
@@ -223,7 +224,7 @@ class SecurityController extends AbstractController
     }
 
     #[Route('/password/reset', name: 'password_reset_request', methods: ['GET', 'POST'])]
-    public function passwordReset(Request $request, AuthSettings $authSettings, AuthEnvironment $authEnvironment, UserManager $userManager, AuthMailer $authMailer): Response
+    public function passwordReset(Request $request, AuthSettings $authSettings, AuthEnvironment $authEnvironment, UserManager $userManager, AuthMailer $authMailer, UserAccessManager $userAccessManager): Response
     {
         if (!$authSettings->isEnabled('password_reset')) {
             return new Response('Password reset is disabled.', Response::HTTP_FORBIDDEN);
@@ -249,7 +250,7 @@ class SecurityController extends AbstractController
         $email = mb_strtolower(trim((string) $request->request->get('email', '')));
         if ($email !== '') {
             $user = $userManager->findByEmail($email);
-            if ($user instanceof User && $user->isEmailVerified()) {
+            if ($user instanceof User && $user->isEmailVerified() && !$userAccessManager->isInteractiveLoginBlocked($user)) {
                 $authMailer->sendPasswordReset($user, $email);
             }
         }
@@ -260,7 +261,7 @@ class SecurityController extends AbstractController
     }
 
     #[Route('/password/reset/confirm', name: 'password_reset_confirm', methods: ['GET', 'POST'])]
-    public function passwordResetConfirm(Request $request, AuthSettings $authSettings, AuthTokenManager $authTokenManager, UserRepository $userRepository, UserPasswordHasherInterface $passwordHasher, EntityManagerInterface $entityManager): Response
+    public function passwordResetConfirm(Request $request, AuthSettings $authSettings, AuthTokenManager $authTokenManager, UserRepository $userRepository, UserPasswordHasherInterface $passwordHasher, EntityManagerInterface $entityManager, UserAccessManager $userAccessManager): Response
     {
         if (!$authSettings->isEnabled('password_reset')) {
             return new Response('Password reset is disabled.', Response::HTTP_FORBIDDEN);
@@ -307,7 +308,7 @@ class SecurityController extends AbstractController
 
         $user = $userRepository->find($consumed['user_id']);
         if ($user instanceof User) {
-            if ($user->getContactEmail() === null || !hash_equals($user->getContactEmail(), (string) ($consumed['email'] ?? '')) || !$user->isEmailVerified()) {
+            if ($user->getContactEmail() === null || !hash_equals($user->getContactEmail(), (string) ($consumed['email'] ?? '')) || !$user->isEmailVerified() || $userAccessManager->isInteractiveLoginBlocked($user)) {
                 $this->addFlash('danger', 'This password reset link is invalid or expired.');
 
                 return $this->redirectToRoute('login');

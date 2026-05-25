@@ -8,6 +8,7 @@ use App\Runtime\AuthEnvironment;
 use App\Runtime\CrashAiProviderCatalog;
 use App\Runtime\UploadSettings;
 use App\Runtime\AuthSettings;
+use App\Security\UserAccessManager;
 use App\Security\SocialLinkManager;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
@@ -27,7 +28,7 @@ class ProfileController extends AbstractController
     private const TOKEN_ACTIVITY_PAGE_SIZE = 50;
 
     #[Route('/profile', name: 'profile', methods: ['GET'])]
-    public function show(Request $request, EntityManagerInterface $entityManager, Connection $connection, UserAiConfigManager $aiConfigManager, KernelInterface $kernel, AuthSettings $authSettings, AuthEnvironment $authEnvironment): Response
+    public function show(Request $request, EntityManagerInterface $entityManager, Connection $connection, UserAiConfigManager $aiConfigManager, KernelInterface $kernel, AuthSettings $authSettings, AuthEnvironment $authEnvironment, UserAccessManager $userAccessManager): Response
     {
         $user = $this->currentUser();
         if ($user->getUploadToken() === '') {
@@ -36,7 +37,7 @@ class ProfileController extends AbstractController
         }
         $steamAccount = $this->findExternalAccount($user, 'steam');
         $discordAccount = $this->findExternalAccount($user, 'discord');
-        $baseUrl = $request->getSchemeAndHttpHost();
+        $baseUrl = 'http://'.$request->getHttpHost();
         $coreLines = [];
         if ($steamAccount !== null) {
             $coreLines[] = '"MinidumpAccount" "' . $steamAccount->getIdentifier() . '"';
@@ -66,8 +67,8 @@ class ProfileController extends AbstractController
             'aiAnalysisEnabled' => UploadSettings::load($kernel->getProjectDir())['crash_ai_analysis_enabled'],
             'authMethods' => $authSettings->all(),
             'contactEmail' => $user->getContactEmail(),
-            'canUnlinkSteam' => $steamAccount !== null && $this->countUsableLoginMethods($user, $authSettings) > 1,
-            'canUnlinkDiscord' => $discordAccount !== null && $this->countUsableLoginMethods($user, $authSettings) > 1,
+            'canUnlinkSteam' => $steamAccount !== null && $userAccessManager->canManageOwnAuthMethods($user) && $userAccessManager->countUsableLoginMethods($user) > 1,
+            'canUnlinkDiscord' => $discordAccount !== null && $userAccessManager->canManageOwnAuthMethods($user) && $userAccessManager->countUsableLoginMethods($user) > 1,
             'avatarSeed' => $this->avatarSeed($user),
             'mailerConfigured' => $authEnvironment->isMailerConfigured(),
             'mailerNotice' => $authEnvironment->mailerNotice(),
@@ -98,10 +99,16 @@ class ProfileController extends AbstractController
     }
 
     #[Route('/profile/token/regenerate', name: 'profile_regenerate_token', methods: ['POST'])]
-    public function regenerateToken(Request $request, EntityManagerInterface $entityManager): Response
+    public function regenerateToken(Request $request, EntityManagerInterface $entityManager, UserAccessManager $userAccessManager): Response
     {
         if (!$this->isCsrfTokenValid('regenerate-upload-token', (string) $request->request->get('_token'))) {
             return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        if (!$userAccessManager->canManageOwnAuthMethods($this->currentUser())) {
+            $this->addFlash('danger', 'This account cannot manage sign-in methods right now.');
+
+            return $this->redirectToRoute('profile');
         }
 
         $this->currentUser()->regenerateUploadToken();
@@ -132,12 +139,33 @@ class ProfileController extends AbstractController
         return $this->redirectToRoute('profile', [], Response::HTTP_SEE_OTHER);
     }
 
+    #[Route('/profile/privacy', name: 'profile_privacy', methods: ['POST'])]
+    public function savePrivacy(Request $request, EntityManagerInterface $entityManager): Response
+    {
+        if (!$this->isCsrfTokenValid('profile-privacy', (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        $this->currentUser()->setProfilePrivate($request->request->getBoolean('profile_private'));
+        $entityManager->flush();
+
+        $this->addFlash('success', 'Profile privacy settings saved.');
+
+        return $this->redirectToRoute('profile', [], Response::HTTP_SEE_OTHER);
+    }
+
     #[Route('/profile/email', name: 'profile_email', methods: ['POST'])]
-    public function saveEmail(Request $request, EntityManagerInterface $entityManager, \App\Repository\ExternalAccountRepository $externalAccountRepository, \App\Security\AuthMailer $authMailer, AuthEnvironment $authEnvironment): Response
+    public function saveEmail(Request $request, EntityManagerInterface $entityManager, \App\Repository\ExternalAccountRepository $externalAccountRepository, \App\Security\AuthMailer $authMailer, AuthEnvironment $authEnvironment, UserAccessManager $userAccessManager): Response
     {
         if (!$this->isCsrfTokenValid('profile-email', (string) $request->request->get('_token'))) {
             return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
         }
+        if (!$userAccessManager->canManageOwnAuthMethods($this->currentUser())) {
+            $this->addFlash('danger', 'This account cannot manage sign-in methods right now.');
+
+            return $this->redirectToRoute('profile');
+        }
+
         if (!$authEnvironment->isMailerConfigured()) {
             $this->addFlash('danger', $authEnvironment->mailerNotice());
 
@@ -189,10 +217,16 @@ class ProfileController extends AbstractController
     }
 
     #[Route('/profile/password', name: 'profile_password', methods: ['POST'])]
-    public function savePassword(Request $request, EntityManagerInterface $entityManager, UserPasswordHasherInterface $passwordHasher): Response
+    public function savePassword(Request $request, EntityManagerInterface $entityManager, UserPasswordHasherInterface $passwordHasher, UserAccessManager $userAccessManager): Response
     {
         if (!$this->isCsrfTokenValid('profile-password', (string) $request->request->get('_token'))) {
             return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        if (!$userAccessManager->canManageOwnAuthMethods($this->currentUser())) {
+            $this->addFlash('danger', 'This account cannot manage sign-in methods right now.');
+
+            return $this->redirectToRoute('profile');
         }
 
         $user = $this->currentUser();
@@ -228,8 +262,14 @@ class ProfileController extends AbstractController
     }
 
     #[Route('/profile/link/{kind}', name: 'profile_link_external', methods: ['GET'])]
-    public function linkExternal(string $kind, Request $request, AuthSettings $authSettings, AuthEnvironment $authEnvironment, SocialLinkManager $socialLinkManager): Response
+    public function linkExternal(string $kind, Request $request, AuthSettings $authSettings, AuthEnvironment $authEnvironment, SocialLinkManager $socialLinkManager, UserAccessManager $userAccessManager): Response
     {
+        if (!$userAccessManager->canManageOwnAuthMethods($this->currentUser())) {
+            $this->addFlash('danger', 'This account cannot manage linked sign-in methods right now.');
+
+            return $this->redirectToRoute('profile');
+        }
+
         $route = match ($kind) {
             'steam' => 'login_steam',
             'discord' => 'login_discord',
@@ -259,21 +299,27 @@ class ProfileController extends AbstractController
     }
 
     #[Route('/profile/unlink/{kind}', name: 'profile_unlink_external', methods: ['POST'])]
-    public function unlinkExternal(string $kind, Request $request, EntityManagerInterface $entityManager, AuthSettings $authSettings): Response
+    public function unlinkExternal(string $kind, Request $request, EntityManagerInterface $entityManager, AuthSettings $authSettings, UserAccessManager $userAccessManager): Response
     {
         if (!$this->isCsrfTokenValid('profile-unlink-' . $kind, (string) $request->request->get('_token'))) {
             return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
         }
 
+        if (!$userAccessManager->canManageOwnAuthMethods($this->currentUser())) {
+            $this->addFlash('danger', 'This account cannot manage linked sign-in methods right now.');
+
+            return $this->redirectToRoute('profile');
+        }
+
         $user = $this->currentUser();
-        $externalAccount = $this->findExternalAccount($user, $kind);
+        $externalAccount = $userAccessManager->findExternalAccount($user, $kind);
         if ($externalAccount === null) {
             $this->addFlash('danger', 'This account is not linked.');
 
             return $this->redirectToRoute('profile');
         }
 
-        if ($this->countUsableLoginMethods($user, $authSettings) <= 1) {
+        if ($userAccessManager->countUsableLoginMethods($user) <= 1) {
             $this->addFlash('danger', 'You cannot unlink the last available sign-in method.');
 
             return $this->redirectToRoute('profile');
@@ -377,28 +423,6 @@ class ProfileController extends AbstractController
         }
 
         return null;
-    }
-
-    private function countUsableLoginMethods(User $user, AuthSettings $authSettings): int
-    {
-        $count = 0;
-        if ($user->hasLocalLogin() && $authSettings->isEnabled('password_login')) {
-            ++$count;
-        }
-        if ($authSettings->isEnabled('token_login') && $user->getUploadToken() !== '') {
-            ++$count;
-        }
-        if ($authSettings->isEnabled('email_login_link') && $user->isEmailVerified() && $user->getContactEmail() !== null) {
-            ++$count;
-        }
-        if ($authSettings->isEnabled('steam') && $this->findExternalAccount($user, 'steam') !== null) {
-            ++$count;
-        }
-        if ($authSettings->isEnabled('discord') && $this->findExternalAccount($user, 'discord') !== null) {
-            ++$count;
-        }
-
-        return $count;
     }
 
     private function avatarSeed(User $user): string

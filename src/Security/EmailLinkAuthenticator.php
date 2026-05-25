@@ -25,6 +25,7 @@ final class EmailLinkAuthenticator extends AbstractAuthenticator
         private readonly UserRepository $userRepository,
         private readonly AuthSettings $authSettings,
         private readonly AuthRedirector $authRedirector,
+        private readonly UserAccessManager $userAccessManager,
     ) {
     }
 
@@ -58,6 +59,9 @@ final class EmailLinkAuthenticator extends AbstractAuthenticator
 
                 if (!$user->isEmailVerified() || $user->getContactEmail() === null || !hash_equals($user->getContactEmail(), (string) ($consumed['email'] ?? ''))) {
                     throw new CustomUserMessageAuthenticationException('This login link is invalid or expired.');
+                }
+                if ($this->userAccessManager->isInteractiveLoginBlocked($user)) {
+                    throw new CustomUserMessageAuthenticationException('This account is blocked from signing in.');
                 }
 
                 return $user;

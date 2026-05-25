@@ -294,6 +294,32 @@
             </form>
         </section>
 
+        <section class="profile-panel">
+            <div class="mb-3">
+                <h2 class="h5 mb-1">Profile privacy</h2>
+                <div class="text-muted">Control what other signed-in users can see on your player profile page.</div>
+            </div>
+
+            <form method="post" action="{{ path('profile_privacy') }}">
+                <input type="hidden" name="_token" value="{{ csrf_token('profile-privacy') }}">
+                <div class="form-check form-switch mb-3">
+                    <input
+                        id="profile-private"
+                        class="form-check-input"
+                        type="checkbox"
+                        name="profile_private"
+                        value="1"
+                        {% if user.profilePrivate %}checked{% endif %}
+                    >
+                    <label class="form-check-label" for="profile-private">
+                        Make my player profile private
+                    </label>
+                </div>
+                <div class="form-text mb-3">When enabled, other users will only see your avatar and a privacy notice. Admins and you still see the full profile.</div>
+                <button type="submit" class="btn btn-primary">Save privacy</button>
+            </form>
+        </section>
+
         <section
             class="profile-panel"
             data-core-config-generator
@@ -314,7 +340,7 @@
                 <div class="col-md-6">
                     <label class="form-label" for="core-base-url">Base URL</label>
                     <input id="core-base-url" class="form-control" data-core-field="baseUrl" value="{{ coreConfigBaseUrl }}">
-                    <div class="form-text">This is generated from the current page host, not hardcoded.</div>
+                    <div class="form-text">This is generated from the current page host and intentionally uses plain HTTP for Accelerator core.cfg.</div>
                 </div>
                 <div class="col-md-4">
                     <label class="form-label" for="core-symbol-upload">MinidumpSymbolUpload</label>

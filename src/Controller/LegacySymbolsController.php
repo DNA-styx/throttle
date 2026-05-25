@@ -94,7 +94,10 @@ class LegacySymbolsController extends AbstractController
             return null;
         }
 
-        return $this->userRepository->findOneBy(['uploadToken' => $provided]);
+        return $this->userRepository->findOneBy([
+            'uploadToken' => $provided,
+            'uploadsBlocked' => false,
+        ]);
     }
 
     private function getProvidedToken(Request $request): ?string

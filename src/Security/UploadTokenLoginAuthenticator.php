@@ -24,6 +24,7 @@ final class UploadTokenLoginAuthenticator extends AbstractAuthenticator
         private readonly UserRepository $userRepository,
         private readonly AuthSettings $authSettings,
         private readonly AuthRedirector $authRedirector,
+        private readonly UserAccessManager $userAccessManager,
     ) {
     }
 
@@ -48,6 +49,12 @@ final class UploadTokenLoginAuthenticator extends AbstractAuthenticator
                 $user = $this->userRepository->findOneBy(['uploadToken' => $identifier]);
                 if (!$user instanceof User) {
                     throw new CustomUserMessageAuthenticationException('Invalid upload token.');
+                }
+                if ($this->userAccessManager->isInteractiveLoginBlocked($user)) {
+                    throw new CustomUserMessageAuthenticationException('This account is blocked from signing in.');
+                }
+                if ($this->userAccessManager->isUploadTokenBlocked($user)) {
+                    throw new CustomUserMessageAuthenticationException('This upload token is currently blocked.');
                 }
 
                 if (!$user->isEmailVerified() && $user->getContactEmail() !== null && count($user->getExternalAccounts()) === 1) {

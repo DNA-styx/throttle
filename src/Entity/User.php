@@ -47,11 +47,26 @@ class User extends ServerOwner implements UserInterface, PasswordAuthenticatedUs
     #[ORM\Column(nullable: true)]
     protected ?\DateTimeImmutable $emailVerifiedAt = null;
 
+    #[ORM\Column(options: ['default' => false])]
+    protected bool $isBanned = false;
+
+    #[ORM\Column(options: ['default' => false])]
+    protected bool $uploadsBlocked = false;
+
+    #[ORM\Column(nullable: true)]
+    protected ?\DateTimeImmutable $bannedAt = null;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    protected ?string $bannedReason = null;
+
     #[ORM\Column(length: 128, unique: true)]
     protected string $uploadToken = '';
 
     #[ORM\Column(length: 16, options: ['default' => self::THEME_LIGHT])]
     protected string $theme = self::THEME_LIGHT;
+
+    #[ORM\Column(options: ['default' => false])]
+    protected bool $profilePrivate = false;
 
     /** @var Collection<int, ExternalAccount> */
     #[ORM\OneToMany(mappedBy: 'user', targetEntity: ExternalAccount::class, cascade: ['remove'])]
@@ -175,6 +190,64 @@ class User extends ServerOwner implements UserInterface, PasswordAuthenticatedUs
         return $this->emailVerifiedAt !== null;
     }
 
+    public function isBanned(): bool
+    {
+        return $this->isBanned;
+    }
+
+    public function setIsBanned(bool $isBanned): self
+    {
+        $this->isBanned = $isBanned;
+        if (!$isBanned) {
+            $this->bannedAt = null;
+            $this->bannedReason = null;
+        } elseif ($this->bannedAt === null) {
+            $this->bannedAt = new \DateTimeImmutable();
+        }
+
+        return $this;
+    }
+
+    public function getUploadsBlocked(): bool
+    {
+        return $this->uploadsBlocked;
+    }
+
+    public function setUploadsBlocked(bool $uploadsBlocked): self
+    {
+        $this->uploadsBlocked = $uploadsBlocked;
+
+        return $this;
+    }
+
+    public function getBannedAt(): ?\DateTimeImmutable
+    {
+        return $this->bannedAt;
+    }
+
+    public function setBannedAt(?\DateTimeImmutable $bannedAt): self
+    {
+        $this->bannedAt = $bannedAt;
+        if ($bannedAt === null) {
+            $this->isBanned = false;
+        }
+
+        return $this;
+    }
+
+    public function getBannedReason(): ?string
+    {
+        return $this->bannedReason;
+    }
+
+    public function setBannedReason(?string $bannedReason): self
+    {
+        $bannedReason = $bannedReason !== null ? trim($bannedReason) : null;
+        $this->bannedReason = $bannedReason !== '' ? $bannedReason : null;
+
+        return $this;
+    }
+
     public function getUploadToken(): string
     {
         return $this->uploadToken;
@@ -199,6 +272,18 @@ class User extends ServerOwner implements UserInterface, PasswordAuthenticatedUs
         }
 
         $this->theme = $theme;
+
+        return $this;
+    }
+
+    public function isProfilePrivate(): bool
+    {
+        return $this->profilePrivate;
+    }
+
+    public function setProfilePrivate(bool $profilePrivate): self
+    {
+        $this->profilePrivate = $profilePrivate;
 
         return $this;
     }

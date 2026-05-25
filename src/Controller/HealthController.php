@@ -3,6 +3,7 @@
 namespace App\Controller;
 
 use App\Entity\User;
+use App\Runtime\AdminUserManager;
 use App\Runtime\AuthEnvironment;
 use App\Runtime\SymbolAdminManager;
 use App\Runtime\SymbolBinaryUpload;
@@ -28,7 +29,7 @@ class HealthController extends AbstractController
     private const SYMBOL_REQUEST_POLICY_PATH = '/var/symbol-request-policy.json';
 
     #[Route('/health', name: 'health', methods: ['GET', 'POST'])]
-    public function index(Request $request, Connection $connection, KernelInterface $kernel, SymbolAdminManager $symbolAdminManager, AuthEnvironment $authEnvironment, #[Autowire('%app.legacy%')] array $legacyConfig): Response
+    public function index(Request $request, Connection $connection, KernelInterface $kernel, SymbolAdminManager $symbolAdminManager, AuthEnvironment $authEnvironment, AdminUserManager $adminUserManager, #[Autowire('%app.legacy%')] array $legacyConfig): Response
     {
         $root = $kernel->getProjectDir();
         $checks = [];
@@ -137,6 +138,7 @@ class HealthController extends AbstractController
             'mailerSummary' => $authEnvironment->mailerSummary(),
             'mailerTestDefaultTo' => $authEnvironment->getMailerFrom() ?: '',
             'discordCallbackUrl' => $this->generateUrl('login_discord', [], UrlGeneratorInterface::ABSOLUTE_URL),
+            'userSummary' => $adminUserManager->summary(),
             'queue' => $queue,
             'uploadSettings' => $uploadSettings,
             'uploadSettingsErrors' => $uploadSettingsErrors,

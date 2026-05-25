@@ -1,0 +1,402 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Users / Health{% endblock %}
+
+{% block body %}
+    <div class="profile-shell health-shell">
+        <div class="d-flex align-items-center justify-content-between mb-3">
+            <div>
+                <h1 class="h3 mb-1">User management</h1>
+                <div class="text-muted">Admin-only tools for login methods, bans, profile-token restrictions, and account ownership.</div>
+            </div>
+            <div class="d-flex gap-2">
+                <a href="{{ path('health') }}" class="btn btn-outline-secondary">Back to /health</a>
+                <a href="{{ path('dashboard') }}" class="btn btn-outline-secondary">Dashboard</a>
+            </div>
+        </div>
+
+        {% for label, messages in app.flashes %}
+            {% for message in messages %}
+                <div class="alert alert-{{ label == 'danger' ? 'danger' : (label == 'warning' ? 'warning' : 'success') }}">{{ message }}</div>
+            {% endfor %}
+        {% endfor %}
+
+        <section class="row g-3 mb-3">
+            <div class="col-md-4">
+                <article class="profile-panel h-100">
+                    <div>
+                        <div class="text-uppercase small text-muted">Matched users</div>
+                        <div class="display-6 fw-semibold">{{ list.total }}</div>
+                        <div class="small text-muted">Current filter result set</div>
+                    </div>
+                </article>
+            </div>
+            <div class="col-md-4">
+                <article class="profile-panel h-100">
+                    <div>
+                        <div class="text-uppercase small text-muted">Current page</div>
+                        <div class="display-6 fw-semibold">{{ list.page }}</div>
+                        <div class="small text-muted">of {{ list.total_pages }}</div>
+                    </div>
+                </article>
+            </div>
+            <div class="col-md-4">
+                <article class="profile-panel h-100">
+                    <div>
+                        <div class="text-uppercase small text-muted">Selected user</div>
+                        <div class="display-6 fw-semibold">{{ selected ? selected.user.id : '-' }}</div>
+                        <div class="small text-muted">{{ selected ? selected.stats.name : 'Choose a user below' }}</div>
+                    </div>
+                </article>
+            </div>
+        </section>
+
+        <section class="profile-panel mb-3">
+            <h2 class="h5 mb-3">Filters</h2>
+            <form method="get" action="{{ path('health_users') }}" class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label" for="filter-id">User ID</label>
+                    <input id="filter-id" class="form-control" name="id" value="{{ filters.id }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" for="filter-email">Email</label>
+                    <input id="filter-email" type="email" class="form-control" name="email" value="{{ filters.email }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" for="filter-steam">SteamID64</label>
+                    <input id="filter-steam" class="form-control" name="steam_id" value="{{ filters.steam_id }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" for="filter-discord">Discord ID</label>
+                    <input id="filter-discord" class="form-control" name="discord_id" value="{{ filters.discord_id }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" for="filter-role">Role</label>
+                    <select id="filter-role" class="form-select" name="role">
+                        <option value=""{{ filters.role == '' ? ' selected' : '' }}>Any</option>
+                        <option value="ROLE_USER"{{ filters.role == 'ROLE_USER' ? ' selected' : '' }}>ROLE_USER</option>
+                        <option value="ROLE_ADMIN"{{ filters.role == 'ROLE_ADMIN' ? ' selected' : '' }}>ROLE_ADMIN</option>
+                        <option value="ROLE_ALLOWED_TO_SWITCH"{{ filters.role == 'ROLE_ALLOWED_TO_SWITCH' ? ' selected' : '' }}>ROLE_ALLOWED_TO_SWITCH</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" for="filter-banned">Banned</label>
+                    <select id="filter-banned" class="form-select" name="banned">
+                        <option value="all"{{ filters.banned == 'all' ? ' selected' : '' }}>Any</option>
+                        <option value="yes"{{ filters.banned == 'yes' ? ' selected' : '' }}>Yes</option>
+                        <option value="no"{{ filters.banned == 'no' ? ' selected' : '' }}>No</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" for="filter-uploads">Uploads blocked</label>
+                    <select id="filter-uploads" class="form-select" name="uploads_blocked">
+                        <option value="all"{{ filters.uploads_blocked == 'all' ? ' selected' : '' }}>Any</option>
+                        <option value="yes"{{ filters.uploads_blocked == 'yes' ? ' selected' : '' }}>Yes</option>
+                        <option value="no"{{ filters.uploads_blocked == 'no' ? ' selected' : '' }}>No</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" for="filter-verified">Email verified</label>
+                    <select id="filter-verified" class="form-select" name="email_verified">
+                        <option value="all"{{ filters.email_verified == 'all' ? ' selected' : '' }}>Any</option>
+                        <option value="yes"{{ filters.email_verified == 'yes' ? ' selected' : '' }}>Yes</option>
+                        <option value="no"{{ filters.email_verified == 'no' ? ' selected' : '' }}>No</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" for="filter-password">Has local password</label>
+                    <select id="filter-password" class="form-select" name="has_local_password">
+                        <option value="all"{{ filters.has_local_password == 'all' ? ' selected' : '' }}>Any</option>
+                        <option value="yes"{{ filters.has_local_password == 'yes' ? ' selected' : '' }}>Yes</option>
+                        <option value="no"{{ filters.has_local_password == 'no' ? ' selected' : '' }}>No</option>
+                    </select>
+                </div>
+                <div class="col-12 d-flex gap-2">
+                    <button type="submit" class="btn btn-primary">Search</button>
+                    <a href="{{ path('health_users') }}" class="btn btn-outline-secondary">Clear</a>
+                </div>
+            </form>
+        </section>
+
+        <section class="profile-panel mb-3">
+            <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
+                <div>
+                    <h2 class="h5 mb-1">Users</h2>
+                    <div class="text-muted">{{ list.total }} matching user{{ list.total == 1 ? '' : 's' }}.</div>
+                </div>
+                <div class="text-muted">Page {{ list.page }} / {{ list.total_pages }}</div>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>User</th>
+                            <th>Contact</th>
+                            <th>Roles</th>
+                            <th>Providers</th>
+                            <th>Status</th>
+                            <th>Ownership</th>
+                            <th>Last login</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in list.rows %}
+                            <tr class="{{ selectedUserId == row.id ? 'table-active' : '' }}">
+                                <td>{{ row.id }}</td>
+                                <td>
+                                    <div class="fw-semibold">{{ row.name }}</div>
+                                    <div class="small text-muted">{{ row.login ?: 'No legacy login' }}</div>
+                                </td>
+                                <td>
+                                    <div>{{ row.contact_email ?: 'No email' }}</div>
+                                    <div class="small text-muted">{{ row.email_verified ? 'Verified' : 'Unverified' }}</div>
+                                </td>
+                                <td>
+                                    {% if row.effective_admin %}
+                                        <span class="badge text-bg-danger">Admin</span>
+                                    {% endif %}
+                                    {% if 'ROLE_ALLOWED_TO_SWITCH' in row.roles|default([]) %}
+                                        <span class="badge text-bg-info">Switch</span>
+                                    {% endif %}
+                                    {% if row.admin_source == 'database + APP_ADMINS' or row.admin_source == 'database role' %}
+                                        <span class="badge text-bg-secondary">DB role</span>
+                                    {% endif %}
+                                    {% if row.admin_source == 'database + APP_ADMINS' or row.admin_source == 'APP_ADMINS' %}
+                                        <span class="badge text-bg-warning">APP_ADMINS</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if row.steam_id %}<span class="badge text-bg-secondary">Steam</span>{% endif %}
+                                    {% if row.discord_id %}<span class="badge text-bg-secondary">Discord</span>{% endif %}
+                                    {% if row.has_password %}<span class="badge text-bg-secondary">Password</span>{% endif %}
+                                    {% if row.has_upload_token and row.usable_login_methods > 0 %}<span class="badge text-bg-secondary">Token</span>{% endif %}
+                                </td>
+                                <td>
+                                    {% if row.is_banned %}
+                                        <span class="badge text-bg-danger">Banned</span>
+                                    {% endif %}
+                                    {% if row.uploads_blocked %}
+                                        <span class="badge text-bg-warning">Uploads blocked</span>
+                                    {% endif %}
+                                    {% if not row.is_banned and not row.uploads_blocked %}
+                                        <span class="badge text-bg-success">Active</span>
+                                    {% endif %}
+                                </td>
+                                <td class="small">
+                                    <div>Teams: {{ row.teams_count }}</div>
+                                    <div>Servers: {{ row.servers_count }}</div>
+                                    <div>Crashes: {{ row.crashes_count }}</div>
+                                    <div>Shares out/in: {{ row.outgoing_share_accepted }}/{{ row.incoming_share_accepted }}</div>
+                                </td>
+                                <td>{{ row.last_login ?: 'Never' }}</td>
+                                <td class="text-end">
+                                    <div class="d-flex gap-2 justify-content-end">
+                                        <a href="{{ path('user_edit', {id: row.id}) }}" class="btn btn-sm btn-outline-primary">Manage</a>
+                                        <a href="{{ path('health_user_show', {id: row.id}) }}" class="btn btn-sm btn-outline-secondary">Admin</a>
+                                    </div>
+                                </td>
+                            </tr>
+                        {% else %}
+                            <tr>
+                                <td colspan="9" class="text-muted">No users matched the current filters.</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            {% if list.total_pages > 1 %}
+                <div class="d-flex gap-2 mt-3">
+                    {% if list.page > 1 %}
+                        <a class="btn btn-outline-secondary btn-sm" href="{{ path('health_users', filters|merge({page: list.page - 1})) }}">Previous</a>
+                    {% endif %}
+                    {% if list.page < list.total_pages %}
+                        <a class="btn btn-outline-secondary btn-sm" href="{{ path('health_users', filters|merge({page: list.page + 1})) }}">Next</a>
+                    {% endif %}
+                </div>
+            {% endif %}
+        </section>
+
+        {% if selected %}
+            {% set user = selected.user %}
+            {% set stats = selected.stats %}
+            <section class="profile-panel mb-3">
+                <div class="health-detail-hero mb-3">
+                    <div>
+                        <div class="health-stat-label">Selected account</div>
+                        <h2 class="h4 mb-1">User #{{ user.id }} / {{ stats.name }}</h2>
+                        <div class="health-inline-meta">
+                            <span>Admin source: {{ selected.admin_source }}</span>
+                            <span>Usable login methods: {{ selected.usable_login_methods }}</span>
+                            <a href="{{ path('user_show', {id: user.id}) }}">Open player profile</a>
+                            <a href="{{ path('user_edit', {id: user.id}) }}">Open edit form</a>
+                        </div>
+                    </div>
+                    <div class="d-flex gap-2 flex-wrap justify-content-end">
+                        {% if selected.effective_admin %}
+                            <span class="badge text-bg-danger">Effective admin</span>
+                        {% endif %}
+                        {% if stats.is_banned %}
+                            <span class="badge text-bg-danger">Banned</span>
+                        {% endif %}
+                        {% if stats.uploads_blocked %}
+                            <span class="badge text-bg-warning">Uploads blocked</span>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="health-mini-stat-grid mb-3">
+                    <article>
+                        <span>Teams</span>
+                        <strong>{{ stats.teams_count }}</strong>
+                    </article>
+                    <article>
+                        <span>Servers</span>
+                        <strong>{{ stats.servers_count }}</strong>
+                    </article>
+                    <article>
+                        <span>Crashes</span>
+                        <strong>{{ stats.crashes_count }}</strong>
+                    </article>
+                    <article>
+                        <span>Last login</span>
+                        <strong>{{ stats.last_login ?: 'Never' }}</strong>
+                    </article>
+                </div>
+
+                <div class="small text-muted mb-3">
+                    Outgoing shares: {{ stats.outgoing_share_accepted }}/{{ stats.outgoing_share_total }}
+                    / Incoming shares: {{ stats.incoming_share_accepted }}/{{ stats.incoming_share_total }}
+                </div>
+
+                <div class="row g-3">
+                    <div class="col-lg-6">
+                        <div class="border rounded p-3 h-100">
+                            <h3 class="h6 mb-3">Roles</h3>
+                            <form method="post" action="{{ path('health_user_roles', {id: user.id}) }}">
+                                <input type="hidden" name="_token" value="{{ csrf_token('health-user-roles-' ~ user.id) }}">
+                                {% for role in managedRoles %}
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="role-{{ user.id }}-{{ role }}" name="roles[]" value="{{ role }}"{% if role in user.roles %} checked{% endif %}>
+                                        <label class="form-check-label" for="role-{{ user.id }}-{{ role }}">{{ role }}</label>
+                                    </div>
+                                {% endfor %}
+                                <button type="submit" class="btn btn-primary btn-sm mt-3">Save roles</button>
+                            </form>
+                        </div>
+                    </div>
+                    <div class="col-lg-6">
+                        <div class="border rounded p-3 h-100">
+                            <h3 class="h6 mb-3">Contact email</h3>
+                            <form method="post" action="{{ path('health_user_email', {id: user.id}) }}">
+                                <input type="hidden" name="_token" value="{{ csrf_token('health-user-email-' ~ user.id) }}">
+                                <div class="mb-3">
+                                    <label class="form-label" for="health-user-email-{{ user.id }}">Email</label>
+                                    <input id="health-user-email-{{ user.id }}" type="email" class="form-control" name="email" value="{{ user.contactEmail ?: '' }}" placeholder="leave blank to remove">
+                                </div>
+                                <div class="form-check mb-3">
+                                    <input class="form-check-input" type="checkbox" id="health-user-email-verified-{{ user.id }}" name="email_verified" value="1"{% if user.emailVerified %} checked{% endif %}>
+                                    <label class="form-check-label" for="health-user-email-verified-{{ user.id }}">Mark email as verified</label>
+                                </div>
+                                <button type="submit" class="btn btn-primary btn-sm">Save email</button>
+                            </form>
+                        </div>
+                    </div>
+                    <div class="col-lg-6">
+                        <div class="border rounded p-3 h-100">
+                            <h3 class="h6 mb-3">Moderation</h3>
+                            <form method="post" action="{{ path('health_user_ban', {id: user.id}) }}" class="mb-3">
+                                <input type="hidden" name="_token" value="{{ csrf_token('health-user-ban-' ~ user.id) }}">
+                                <input type="hidden" name="ban" value="{{ user.isBanned ? '0' : '1' }}">
+                                <label class="form-label" for="health-user-ban-reason-{{ user.id }}">Ban reason</label>
+                                <input id="health-user-ban-reason-{{ user.id }}" class="form-control mb-2" name="banned_reason" value="{{ user.bannedReason ?: '' }}" placeholder="optional reason">
+                                <button type="submit" class="btn btn-{{ user.isBanned ? 'success' : 'warning' }} btn-sm">{{ user.isBanned ? 'Unban user' : 'Ban user' }}</button>
+                                {% if user.bannedAt %}
+                                    <div class="small text-muted mt-2">Banned at {{ user.bannedAt|date('Y-m-d H:i:s') }}</div>
+                                {% endif %}
+                            </form>
+
+                            <form method="post" action="{{ path('health_user_uploads', {id: user.id}) }}">
+                                <input type="hidden" name="_token" value="{{ csrf_token('health-user-uploads-' ~ user.id) }}">
+                                <input type="hidden" name="uploads_blocked" value="{{ user.uploadsBlocked ? '0' : '1' }}">
+                                <button type="submit" class="btn btn-{{ user.uploadsBlocked ? 'success' : 'warning' }} btn-sm">{{ user.uploadsBlocked ? 'Restore token uploads' : 'Block token uploads' }}</button>
+                            </form>
+                        </div>
+                    </div>
+                    <div class="col-lg-6">
+                        <div class="border rounded p-3 h-100">
+                            <h3 class="h6 mb-3">Upload token</h3>
+                            <div class="small text-muted mb-2">Current token suffix: <code>{{ user.uploadToken|slice(-12) }}</code></div>
+                            <form method="post" action="{{ path('health_user_regenerate_token', {id: user.id}) }}">
+                                <input type="hidden" name="_token" value="{{ csrf_token('health-user-token-' ~ user.id) }}">
+                                <button type="submit" class="btn btn-outline-primary btn-sm">Regenerate upload token</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="profile-panel mb-3">
+                <h2 class="h5 mb-3">Linked identities</h2>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Kind</th>
+                                <th>Identifier</th>
+                                <th>Display name</th>
+                                <th>Last login</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for account in selected.external_accounts %}
+                                <tr>
+                                    <td>{{ account.id }}</td>
+                                    <td>
+                                        {{ account.kind }}
+                                        {% if account.is_contact_email %}
+                                            <span class="badge text-bg-info">Contact</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="font-monospace">{{ account.identifier }}</td>
+                                    <td>{{ account.display_name }}</td>
+                                    <td>{{ account.last_login ?: '-' }}</td>
+                                    <td class="text-end">
+                                        <form method="post" action="{{ path('health_user_unlink_external', {id: user.id, externalAccountId: account.id}) }}">
+                                            <input type="hidden" name="_token" value="{{ csrf_token('health-user-unlink-' ~ user.id ~ '-' ~ account.id) }}">
+                                            <button type="submit" class="btn btn-outline-danger btn-sm">Unlink</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            {% else %}
+                                <tr>
+                                    <td colspan="6" class="text-muted">No linked identities.</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="profile-panel profile-danger-zone">
+                <h2 class="h5 mb-3">Danger zone</h2>
+                <div class="small text-muted mb-3">
+                    Account deletion is only available when the user no longer owns teams, servers, crashes, or share relationships.
+                </div>
+                <form method="post" action="{{ path('health_user_delete', {id: user.id}) }}">
+                    <input type="hidden" name="_token" value="{{ csrf_token('health-user-delete-' ~ user.id) }}">
+                    <div class="mb-3">
+                        <label class="form-label" for="confirm-delete-{{ user.id }}">Type DELETE to remove this account</label>
+                        <input id="confirm-delete-{{ user.id }}" class="form-control" name="confirm_delete" placeholder="DELETE">
+                    </div>
+                    <button type="submit" class="btn btn-danger btn-sm">Delete account</button>
+                </form>
+            </section>
+        {% endif %}
+    </div>
+{% endblock %}

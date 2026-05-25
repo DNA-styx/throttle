@@ -18,6 +18,7 @@ legacy-master.zip
 .env.local
 .env.*.local
 .manual-install
+.manual-install-clean
 _dist
 *.tar.gz
 *.zip

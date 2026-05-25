@@ -40,6 +40,42 @@
             </div>
         </section>
 
+        <section class="profile-panel mb-3">
+            <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
+                <div>
+                    <h2 class="h5 mb-1">Users</h2>
+                    <div class="text-muted">Quick summary of account state, linked providers, and moderation flags.</div>
+                </div>
+                <a href="{{ path('health_users') }}" class="btn btn-outline-primary">Manage users</a>
+            </div>
+            <div class="profile-stat-grid">
+                <div>
+                    <div class="profile-stat-value">{{ userSummary.total }}</div>
+                    <div class="text-muted">Total users</div>
+                </div>
+                <div>
+                    <div class="profile-stat-value">{{ userSummary.banned }}</div>
+                    <div class="text-muted">Banned</div>
+                </div>
+                <div>
+                    <div class="profile-stat-value">{{ userSummary.uploads_blocked }}</div>
+                    <div class="text-muted">Uploads blocked</div>
+                </div>
+                <div>
+                    <div class="profile-stat-value">{{ userSummary.with_password }}</div>
+                    <div class="text-muted">With password</div>
+                </div>
+                <div>
+                    <div class="profile-stat-value">{{ userSummary.with_steam }}</div>
+                    <div class="text-muted">Steam linked</div>
+                </div>
+                <div>
+                    <div class="profile-stat-value">{{ userSummary.with_discord }}</div>
+                    <div class="text-muted">Discord linked</div>
+                </div>
+            </div>
+        </section>
+
         <section class="profile-panel">
             <h2 class="h5 mb-3">Checks</h2>
             <div class="table-responsive">

@@ -6,6 +6,7 @@ use App\Runtime\AuthSettings;
 use App\Runtime\AuthEnvironment;
 use KnpU\OAuth2ClientBundle\Client\ClientRegistry;
 use KnpU\OAuth2ClientBundle\Security\Authenticator\OAuth2Authenticator;
+use App\Entity\User;
 use Symfony\Bundle\SecurityBundle\Security;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -31,10 +32,11 @@ class DiscordOAuthAuthenticator extends OAuth2Authenticator
     private AuthEnvironment $authEnvironment;
     private SocialLinkManager $socialLinkManager;
     private Security $security;
+    private UserAccessManager $userAccessManager;
     private AuthenticationSuccessHandlerInterface $successHandler;
     private AuthenticationFailureHandlerInterface $failureHandler;
 
-    public function __construct(ClientRegistry $clientRegistry, UserManager $userManager, AuthSettings $authSettings, AuthEnvironment $authEnvironment, SocialLinkManager $socialLinkManager, Security $security, AuthenticationSuccessHandlerInterface $successHandler, AuthenticationFailureHandlerInterface $failureHandler)
+    public function __construct(ClientRegistry $clientRegistry, UserManager $userManager, AuthSettings $authSettings, AuthEnvironment $authEnvironment, SocialLinkManager $socialLinkManager, Security $security, UserAccessManager $userAccessManager, AuthenticationSuccessHandlerInterface $successHandler, AuthenticationFailureHandlerInterface $failureHandler)
     {
         $this->clientRegistry = $clientRegistry;
         $this->userManager = $userManager;
@@ -42,6 +44,7 @@ class DiscordOAuthAuthenticator extends OAuth2Authenticator
         $this->authEnvironment = $authEnvironment;
         $this->socialLinkManager = $socialLinkManager;
         $this->security = $security;
+        $this->userAccessManager = $userAccessManager;
         $this->successHandler = $successHandler;
         $this->failureHandler = $failureHandler;
     }
@@ -84,8 +87,11 @@ class DiscordOAuthAuthenticator extends OAuth2Authenticator
 
         if ($linkContext !== null && $linkContext['kind'] === self::EXTERNAL_ACCOUNT_KIND) {
             $currentUser = $this->security->getUser();
-            if (!$currentUser instanceof \App\Entity\User) {
+            if (!$currentUser instanceof User) {
                 throw new CustomUserMessageAuthenticationException('You must be signed in to link Discord.');
+            }
+            if (!$this->userAccessManager->canManageOwnAuthMethods($currentUser)) {
+                throw new CustomUserMessageAuthenticationException('This account cannot manage linked sign-in methods.');
             }
 
             $user = $currentUser;
@@ -94,6 +100,9 @@ class DiscordOAuthAuthenticator extends OAuth2Authenticator
         } else {
             $user = $this->userManager->findOrCreateUserForExternalAccount(
                 self::EXTERNAL_ACCOUNT_KIND, $userInfo['id'], $displayName, $userInfo['username']);
+            if ($this->userAccessManager->isInteractiveLoginBlocked($user)) {
+                throw new CustomUserMessageAuthenticationException('This account is blocked from signing in.');
+            }
         }
 
         return new SelfValidatingPassport(new UserBadge($user->getUserIdentifier(), function () use ($user) {

@@ -23,6 +23,7 @@ final class LocalLoginAuthenticator extends AbstractAuthenticator
         private readonly UserManager $userManager,
         private readonly AuthSettings $authSettings,
         private readonly AuthRedirector $authRedirector,
+        private readonly UserAccessManager $userAccessManager,
     ) {
     }
 
@@ -52,6 +53,9 @@ final class LocalLoginAuthenticator extends AbstractAuthenticator
                 }
                 if (!$user instanceof User || !$user->hasPassword()) {
                     throw new CustomUserMessageAuthenticationException('Invalid email or password.');
+                }
+                if ($this->userAccessManager->isInteractiveLoginBlocked($user)) {
+                    throw new CustomUserMessageAuthenticationException('This account is blocked from signing in.');
                 }
 
                 if (!$user->isEmailVerified() && $user->getContactEmail() !== null && count($user->getExternalAccounts()) === 1) {

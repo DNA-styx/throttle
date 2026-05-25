@@ -37,14 +37,16 @@ class SteamOpenIdAuthenticator extends AbstractAuthenticator
     private AuthSettings $authSettings;
     private SocialLinkManager $socialLinkManager;
     private Security $security;
+    private UserAccessManager $userAccessManager;
 
-    public function __construct(HttpClientInterface $httpClient, UserManager $userManager, AuthSettings $authSettings, SocialLinkManager $socialLinkManager, Security $security, AuthenticationSuccessHandlerInterface $successHandler, AuthenticationFailureHandlerInterface $failureHandler, string $steamApiKey)
+    public function __construct(HttpClientInterface $httpClient, UserManager $userManager, AuthSettings $authSettings, SocialLinkManager $socialLinkManager, Security $security, UserAccessManager $userAccessManager, AuthenticationSuccessHandlerInterface $successHandler, AuthenticationFailureHandlerInterface $failureHandler, string $steamApiKey)
     {
         $this->httpClient = $httpClient;
         $this->userManager = $userManager;
         $this->authSettings = $authSettings;
         $this->socialLinkManager = $socialLinkManager;
         $this->security = $security;
+        $this->userAccessManager = $userAccessManager;
         $this->successHandler = $successHandler;
         $this->failureHandler = $failureHandler;
         $this->steamApiKey = $steamApiKey;
@@ -80,6 +82,9 @@ class SteamOpenIdAuthenticator extends AbstractAuthenticator
             if (!$currentUser instanceof User) {
                 throw new CustomUserMessageAuthenticationException('You must be signed in to link Steam.');
             }
+            if (!$this->userAccessManager->canManageOwnAuthMethods($currentUser)) {
+                throw new CustomUserMessageAuthenticationException('This account cannot manage linked sign-in methods.');
+            }
 
             $user = $currentUser;
             $this->userManager->linkExternalAccount($user, self::EXTERNAL_ACCOUNT_KIND, $steamId, $steamDisplayName);
@@ -87,6 +92,9 @@ class SteamOpenIdAuthenticator extends AbstractAuthenticator
         } else {
             $user = $this->userManager->findOrCreateUserForExternalAccount(
                 self::EXTERNAL_ACCOUNT_KIND, $steamId, $steamDisplayName, $steamDisplayName);
+            if ($this->userAccessManager->isInteractiveLoginBlocked($user)) {
+                throw new CustomUserMessageAuthenticationException('This account is blocked from signing in.');
+            }
         }
 
         return new SelfValidatingPassport(new UserBadge($user->getUserIdentifier(), function () use ($user) {

@@ -567,7 +567,7 @@ function rawAiRenderHistory(items) {
                     rawAiSetHistoryStatus('info', 'Updating visibility...');
                     $.ajax({
                         url: rawAiVisibilityUrlTemplate.replace('__HISTORY__', String(entry.id)),
-                        method: 'POST',
+                        type: 'POST',
                         data: {
                             _token: rawAiToken,
                             is_public: entry.is_public ? '0' : '1'
@@ -683,11 +683,12 @@ $(document).on('mousedown', function(event) {
     rawAiHidePanel();
 });
 
-rawAiPanel.find('.raw-ai-submit').on('click', function() {
+rawAiPanel.find('.raw-ai-submit').on('click', function(event) {
+    event.preventDefault();
     var selected = rawAiSelectedConfig();
     if (!selected) {
         rawAiSetStatus('warning', 'Create an AI config in Profile first.');
-        return;
+        return false;
     }
 
     rawAiSetStatus('info', 'Analyzing raw crash with AI...', true);
@@ -695,7 +696,7 @@ rawAiPanel.find('.raw-ai-submit').on('click', function() {
 
     $.ajax({
         url: rawAiUrl,
-        method: 'POST',
+        type: 'POST',
         data: {
             _token: rawAiToken,
             ai_config_id: selected.id,
@@ -724,6 +725,8 @@ rawAiPanel.find('.raw-ai-submit').on('click', function() {
         }
         rawAiSetStatus('danger', message);
     });
+
+    return false;
 });
 {% endif %}
 
@@ -1162,7 +1165,7 @@ function sendLookupRequest(frame, panel, action, onSuccess) {
 
     $.ajax({
         url: sourceLookupUrl,
-        method: 'POST',
+        type: 'POST',
         data: payload,
         processData: false,
         contentType: false
