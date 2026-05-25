@@ -1,0 +1,141 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}AI Crash Analysis Fallback{% endblock %}
+
+{% block body %}
+    <div class="container py-4">
+        <style>
+            .ai-fallback-shell {
+                background: linear-gradient(180deg, rgba(27, 39, 54, 0.98), rgba(19, 28, 40, 0.98));
+                border: 1px solid rgba(133, 160, 196, 0.22);
+                border-radius: 14px;
+                box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+                color: #e6edf7;
+            }
+            .ai-fallback-shell .text-muted,
+            .ai-fallback-shell .small,
+            .ai-fallback-shell dt {
+                color: #9fb2ca !important;
+            }
+            .ai-fallback-shell code {
+                background: rgba(8, 15, 24, 0.9);
+                color: #f2f6fb;
+                border: 1px solid rgba(133, 160, 196, 0.18);
+            }
+            .ai-fallback-result {
+                background: rgba(12, 20, 30, 0.76);
+                border: 1px solid rgba(133, 160, 196, 0.22);
+                color: #e6edf7;
+            }
+        </style>
+        <div class="row justify-content-center">
+            <div class="col-lg-9">
+                <div class="card shadow-sm ai-fallback-shell">
+                    <div class="card-body p-4">
+                        <h1 class="h3 mb-3">AI crash analysis fallback</h1>
+                        <p class="text-muted mb-4">This page was opened with a direct <code>GET</code> request to <code>/{{ crashId }}/ai-analyze</code>. That usually means the browser or proxy served a stale cached crash page instead of the current AJAX version.</p>
+
+                        <div class="alert alert-warning">
+                            <strong>What happened:</strong> the normal UI should call this endpoint with <code>POST</code> from JavaScript, not navigate to it directly.
+                        </div>
+
+                        <dl class="row small mb-4">
+                            <dt class="col-sm-3">Crash ID</dt>
+                            <dd class="col-sm-9"><code>{{ crashId }}</code></dd>
+                            <dt class="col-sm-3">Detected context</dt>
+                            <dd class="col-sm-9"><code>{{ context }}</code></dd>
+                            <dt class="col-sm-3">Referrer</dt>
+                            <dd class="col-sm-9"><code>{{ referer ?: 'not provided' }}</code></dd>
+                        </dl>
+
+                        <div id="ai-fallback-status" class="alert alert-info">
+                            Preparing a proper POST request...
+                        </div>
+
+                        <div id="ai-fallback-actions" class="d-flex gap-2 mb-4">
+                            <a class="btn btn-outline-secondary" href="{{ backUrl }}">Back to crash</a>
+                        </div>
+
+                        <div id="ai-fallback-result" class="ai-fallback-result border rounded p-3 d-none"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function () {
+        var status = document.getElementById('ai-fallback-status');
+        var result = document.getElementById('ai-fallback-result');
+
+        function setStatus(kind, message) {
+            status.className = 'alert alert-' + kind;
+            status.textContent = message;
+        }
+
+        function showResult(html) {
+            result.classList.remove('d-none');
+            result.innerHTML = html;
+        }
+
+        {% if not aiEnabled %}
+        setStatus('danger', 'AI crash analysis is disabled by the administrator.');
+        return;
+        {% endif %}
+
+        {% if not isAuthenticated %}
+        setStatus('danger', 'Authentication required.');
+        return;
+        {% endif %}
+
+        {% if not canManage %}
+        setStatus('danger', 'You do not have permission to analyze this crash.');
+        return;
+        {% endif %}
+
+        {% if not defaultConfigId %}
+        setStatus('warning', 'No saved AI config is available for this account.');
+        return;
+        {% endif %}
+
+        var payload = new URLSearchParams();
+        payload.set('_token', {{ csrfToken|json_encode|raw }});
+        payload.set('ai_config_id', {{ defaultConfigId|json_encode|raw }});
+        payload.set('context', {{ context|json_encode|raw }});
+        payload.set('prompt', {{ defaultPrompt|json_encode|raw }});
+        payload.set('include_stack_trace', '1');
+        payload.set('include_likely_cause', '1');
+        payload.set('include_modules', '1');
+        payload.set('include_console', '1');
+        payload.set('include_header_metadata', '1');
+        payload.set('include_raw', {{ context == 'raw' ? "'1'" : "'0'" }});
+
+        fetch({{ analysisUrl|json_encode|raw }}, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            credentials: 'same-origin',
+            body: payload.toString()
+        }).then(function (response) {
+            return response.json().then(function (data) {
+                return { ok: response.ok, data: data };
+            }).catch(function () {
+                return { ok: response.ok, data: null };
+            });
+        }).then(function (response) {
+            if (!response.data || response.data.status !== 'ok') {
+                var message = response.data && response.data.reason ? response.data.reason : 'AI analysis failed.';
+                setStatus('danger', message);
+                return;
+            }
+
+            setStatus('success', response.data.provider_label + ' / ' + response.data.model + ' / ' + response.data.duration_ms + ' ms');
+            showResult(response.data.response_html || '<pre>' + (response.data.response_text || '') + '</pre>');
+        }).catch(function () {
+            setStatus('danger', 'AI analysis failed.');
+        });
+    })();
+    </script>
+{% endblock %}

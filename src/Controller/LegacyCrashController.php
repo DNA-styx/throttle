@@ -175,9 +175,13 @@ class LegacyCrashController extends AbstractController
         }
     }
 
-    #[Route('/{id}/ai-analyze', name: 'crash_ai_analyze', methods: ['POST'], requirements: ['id' => '[0-9a-zA-Z]{12}'], priority: -10)]
+    #[Route('/{id}/ai-analyze', name: 'crash_ai_analyze', methods: ['GET', 'POST'], requirements: ['id' => '[0-9a-zA-Z]{12}'], priority: -10)]
     public function aiAnalyze(Request $request, string $id, CrashAiAnalysisManager $crashAiAnalysisManager): Response
     {
+        if ($request->isMethod('GET')) {
+            return $this->renderAiAnalyzeFallback($request, $id);
+        }
+
         if (!$this->isCsrfTokenValid('crash-ai-analyze:'.$id, (string) $request->request->get('_token'))) {
             return $this->jsonUtf8(['status' => 'error', 'reason' => 'Invalid CSRF token.'], Response::HTTP_FORBIDDEN);
         }
@@ -213,6 +217,46 @@ class LegacyCrashController extends AbstractController
                 'reason' => $e->getMessage(),
             ], Response::HTTP_BAD_REQUEST);
         }
+    }
+
+    private function renderAiAnalyzeFallback(Request $request, string $id): Response
+    {
+        $aiEnabled = (UploadSettings::load($this->projectDir)['crash_ai_analysis_enabled'] ?? false) === true;
+        $app = $this->legacyBridgeFactory->createHttp($request);
+        $user = $this->getUser();
+        $ownerId = $this->connection->fetchOne('SELECT owner_id FROM crash WHERE id = ?', [$id]);
+        $canManage = $ownerId !== false
+            && $app['user'] !== null
+            && ($app['user']['admin'] || ($ownerId !== null && in_array((int) $ownerId, $app['user']['owner_ids'], true)));
+
+        $referer = (string) $request->headers->get('referer', '');
+        $context = str_contains($referer, '/'.$id.'/carburetor') ? 'raw' : 'details';
+        $backUrl = $context === 'raw'
+            ? $this->generateUrl('carburetor', ['id' => $id])
+            : $this->generateUrl('details', ['id' => $id]);
+
+        $configs = [];
+        if ($app['user'] !== null && isset($app['user']['ai_configs']) && is_array($app['user']['ai_configs'])) {
+            $configs = array_values(array_filter($app['user']['ai_configs'], static fn ($config) => is_array($config) && isset($config['id'])));
+        }
+
+        $defaultConfig = $configs[0] ?? null;
+        $defaultPrompt = is_array($defaultConfig) ? (string) ($defaultConfig['default_prompt'] ?? '') : '';
+
+        return $this->render('crash/ai_analyze_fallback.html.twig', [
+            'crashId' => $id,
+            'aiEnabled' => $aiEnabled,
+            'isAuthenticated' => $user instanceof \App\Entity\User && $app['user'] !== null,
+            'canManage' => $canManage,
+            'configs' => $configs,
+            'defaultConfigId' => is_array($defaultConfig) ? (string) $defaultConfig['id'] : '',
+            'defaultPrompt' => $defaultPrompt,
+            'context' => $context,
+            'analysisUrl' => $this->generateUrl('crash_ai_analyze', ['id' => $id]),
+            'backUrl' => $backUrl,
+            'csrfToken' => $this->container->get('security.csrf.token_manager')->getToken('crash-ai-analyze:'.$id)->getValue(),
+            'referer' => $referer,
+        ]);
     }
 
     #[Route('/{id}/ai-history', name: 'crash_ai_history', methods: ['GET'], requirements: ['id' => '[0-9a-zA-Z]{12}'], priority: -10)]
@@ -419,7 +463,10 @@ class LegacyCrashController extends AbstractController
             return;
         }
 
-        $tokenUser = $this->userRepository->findOneBy(['uploadToken' => $provided]);
+        $tokenUser = $this->userRepository->findOneBy([
+            'uploadToken' => $provided,
+            'uploadsBlocked' => false,
+        ]);
         $globalTokenValid = $this->isGlobalUploadToken($provided);
         $bytes = 0;
         foreach ($request->files->all() as $file) {
@@ -475,7 +522,10 @@ class LegacyCrashController extends AbstractController
             return true;
         }
 
-        return $this->userRepository->findOneBy(['uploadToken' => $provided]) !== null;
+        return $this->userRepository->findOneBy([
+            'uploadToken' => $provided,
+            'uploadsBlocked' => false,
+        ]) !== null;
     }
 
     private function isGlobalUploadToken(?string $provided): bool

@@ -1,5 +1,6 @@
 # Throttle
-<img width="1899" height="912" alt="image" src="https://github.com/user-attachments/assets/2936ba6f-c91e-4e7c-85cd-6c12ffba94fa" />
+
+<img width="1899" height="912" alt="Throttle dashboard screenshot" src="https://github.com/user-attachments/assets/2936ba6f-c91e-4e7c-85cd-6c12ffba94fa" />
 
 More screenshots: [docs/screenshots](docs/screenshots/)
 
@@ -19,12 +20,11 @@ This 2026 branch includes:
 - `/symbols/submit` symbol uploads with token checks
 - `/binary/submit` binary uploads with token checks and symbol generation
 - crash processing logs per report
-- symbol coverage view for report owners/admins
-- admin tools for manual binary uploads, symbol cache refresh, and stored symbol export
+- symbol coverage views for report owners/admins
 - likely crash cause scoring
 - optional AI crash analysis with per-user API configs, saved history, and public history sharing
 - SourceMod plugin/extension snapshots from Accelerator metadata when available
-- admin health page and systemd timer files for processing
+- `/health` admin tools for processing, uploads, auth, storage, and diagnostics
 
 ### Requirements
 
@@ -34,9 +34,9 @@ This 2026 branch includes:
 - Composer
 - Node.js and npm for asset builds
 - Nginx and PHP-FPM for manual VPS installs
-- Docker Compose for Docker installs
+- Docker Compose for container installs
 
-Required PHP extensions include `ctype`, `iconv`, `intl`, `pdo_mysql`, `bcmath`, `xsl`, `zip`, and common Symfony runtime extensions. Do not enable duplicate PHP extensions in `php.ini`; install them through packages and let PHP load the matching `conf.d` files.
+Required PHP extensions include `ctype`, `iconv`, `intl`, `pdo_mysql`, `bcmath`, `xsl`, `zip`, and the standard Symfony runtime extensions.
 
 ### Docker Compose Install
 
@@ -72,15 +72,15 @@ docker compose --env-file .env.prod.docker -f compose.prod.yaml ps
 docker compose --env-file .env.prod.docker -f compose.prod.yaml exec app php bin/console doctrine:migrations:status --env=prod
 ```
 
-The production compose file starts the web app plus a `processor` service that runs `crash:process --update --limit=10` every minute. Persistent Docker volumes keep the database, Redis data, crash dumps, symbol files, and runtime `var/` data, including `/health` symbol request policy and upload processing settings.
+The production compose file starts the web app plus a `processor` service that runs `crash:process --update --limit=10` every minute.
 
-Open `http://SERVER_IP:18080/` or put Nginx/Traefik/Caddy in front of the container. `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` create the first local user as already verified, so email + password sign-in works even if outgoing mail is not configured yet. This bootstrap user is not an admin automatically; grant admin access separately through `APP_ADMINS`, for example `APP_ADMINS="user:1"` on a clean install.
+Open `http://SERVER_IP:18080/` or place a reverse proxy in front of the container.
+
+`BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` create the first local user as already verified, so email + password sign-in works even if outgoing mail is not configured yet. This bootstrap user is not an admin automatically; grant admin access separately through `APP_ADMINS`, for example `APP_ADMINS="user:1"` on a clean install.
 
 ### Manual Ubuntu/Nginx/PHP-FPM Install
 
-Install PHP 8.4, MariaDB, Redis, Nginx, Composer, Node.js, and npm. Then deploy the source.
-
-On Ubuntu 24.04, the stock archive does not provide PHP 8.4. Add a PHP 8.4 package source first, for example `ppa:ondrej/php`, or use an OS/repository that already ships PHP 8.4.
+Install PHP 8.4, MariaDB, Redis, Nginx, Composer, Node.js, and npm. On Ubuntu 24.04, PHP 8.4 usually requires an additional package source such as `ppa:ondrej/php`.
 
 ```bash
 cd /var/www/throttle
@@ -153,37 +153,35 @@ location ~ \.php$ {
 
 ### SourceMod Accelerator core.cfg
 
-Log in, open **Profile**, generate a token, adjust the `core.cfg` generator, click **Generate settings**, then paste the generated block at the bottom of:
+Log in, open **Profile**, generate a token, adjust the `core.cfg` generator, and paste the generated block at the bottom of:
 
 ```text
 addons/sourcemod/configs/core.cfg
 ```
 
-Example shape:
+Typical shape:
 
 ```text
 "MinidumpSymbolUpload" "3"
 "MinidumpBinaryUpload" "yes"
 "MinidumpPresubmit" "yes"
 
-"MinidumpUrl" "https://crash.example.com/submit?token=YOUR_PROFILE_TOKEN"
-"MinidumpSymbolUrl" "https://crash.example.com/symbols/submit?token=YOUR_PROFILE_TOKEN"
-"MinidumpBinaryUrl" "https://crash.example.com/binary/submit?token=YOUR_PROFILE_TOKEN"
+"MinidumpUrl" "http://crash.example.com/submit?token=YOUR_PROFILE_TOKEN"
+"MinidumpSymbolUrl" "http://crash.example.com/symbols/submit?token=YOUR_PROFILE_TOKEN"
+"MinidumpBinaryUrl" "http://crash.example.com/binary/submit?token=YOUR_PROFILE_TOKEN"
 ```
 
-If the server's libcurl does not support HTTPS, use HTTP behind your own trusted network/reverse proxy setup, or update the server runtime so Accelerator can upload over HTTPS.
+If the upload URLs already contain a profile token, `MinidumpAccount` is optional. Ownership can then be resolved from the token instead of SteamID64.
 
-`MinidumpAccount` is optional when a profile token is present in the generated upload URLs. Token-owned uploads work even if `MinidumpAccount` is blank.
+`MinidumpPresubmit` is used for the early module inventory exchange before the full dump upload. If you disable it, the site can still process dumps, but early binary/symbol auto-request flow will not work.
 
-### Upload Token Behavior
+### Upload Endpoints and Symbol Flow
 
-- `/submit` accepts crash dumps without a token by default so legacy Accelerator crash uploads still work
-- admins can disable anonymous minidump uploads in `/health`; when disabled, `/submit` requires either a profile upload token or the global `SYMBOL_UPLOAD_TOKEN`
-- `/submit?token=PROFILE_TOKEN` records profile token usage for crash uploads
-- `/symbols/submit` requires a profile token, an admin session, or the global `SYMBOL_UPLOAD_TOKEN`
-- `/binary/submit` requires a profile token, an admin session, or the global `SYMBOL_UPLOAD_TOKEN`
-- rejected symbol/binary uploads are written to the token activity audit when possible
-- never publish upload tokens in public docs, plugin source, screenshots, or commits
+- `/submit` accepts crash dumps
+- `/symbols/submit` accepts Breakpad `.sym` uploads
+- `/binary/submit` accepts binaries and can generate `.sym` files from them
+- symbols are ultimately stored and used on the site
+- the game server can upload ready symbols or binaries, but symbol generation for Throttle happens on the site side when binaries are processed with `dump_syms`
 
 ### Crash Processing
 
@@ -203,60 +201,39 @@ Run one processor pass manually:
 sudo -u www-data php8.4 /var/www/throttle/bin/console crash:process --env=prod --no-debug --update --limit=10
 ```
 
-In a crash report, **Processing Runs** are Throttle processor records: status, duration, summary, and processing steps. **Stackwalk stderr** is the raw `minidump_stackwalk` stderr stream with symbol lookup, module parsing, warnings, and stackwalker errors. They can look similar because the processor stores stackwalker output inside the run log for debugging.
+If email login links, confirmation emails, or password reset are enabled, make sure the queue is actually being processed. If needed:
+
+```bash
+sudo -u www-data php8.4 /var/www/throttle/bin/console messenger:consume async --env=prod --no-debug
+```
 
 ### Health and Troubleshooting
 
-- `/health` controls which sign-in methods are enabled: Steam, Discord, email login links, email + password login, email + password registration, password reset, and upload-token login
-- new local accounts use email as the interactive identifier; registration and password login no longer ask for a separate username
-- the Light/Dark/System theme switcher is available before login and stores `light`, `dark`, or `system` in browser local storage; the default is `system`
-- `/health` is admin-only and shows queue, storage, binary, and runtime health
-- `/health` upload processing settings now include:
-  - streaming `.sym` upload processing
-  - upload endpoint memory limit
-  - anonymous minidump upload toggle for `/submit`
-  - upload failure backoff for repeated symbol/binary upload failures on the same `module + identifier`
-  - `crash_ai_analysis_enabled`, which controls whether `Ask AI` is available on crash details and raw pages
-- `/health` binary upload request policy controls which Linux modules Accelerator is asked to upload during presubmit; defaults are intentionally empty, so a fresh install will not request symbol or binary uploads until allow rules are configured
-- `/health` also includes admin tools to:
-  - refresh symbol caches and rescan stored symbols
-  - clear upload failure backoff state
-  - upload binaries manually and generate symbols from them
-  - browse and export stored `.sym.gz` files
-- saved health runtime data is stored in:
-  - `var/symbol-request-policy.json`
-  - `var/upload-settings.json`
-  - `var/upload-failure-backoff.json`
-- AI API keys are stored server-side in encrypted form; set `AI_SETTINGS_KEY` in `.env.local`, `.env.local.php`, Docker env, or another server-side environment source
+- `/health` controls enabled sign-in methods and upload/runtime settings
+- `/health` binary upload request policy controls which modules Accelerator is asked to upload during presubmit
+- `/health` includes upload failure backoff, SMTP/Discord/auth diagnostics, symbol cache tools, binary upload tools, and AI analysis toggle
 - user AI configs live in **Profile -> AI analysis**
-- `Ask AI` is available to crash owners and admins when `/health` has AI analysis enabled
-- grant admin access without editing the database by setting `APP_ADMINS` in `.env.local` or the service environment; accepted values are separated by comma, space, or semicolon: numeric local user ids, `user:<id>`, SteamID64 values, or `steam:<SteamID64>`
-- bootstrap users created from `BOOTSTRAP_ADMIN_EMAIL` are regular users; on a clean install their local id is normally `1`, so `APP_ADMINS="user:1"` is the usual way to promote the first account
-- admins can access `/health`, see global dashboards/audit data, view and manage crash reports they do not own, reprocess/delete crashes, and delete any crash signature note
 - pending crashes usually mean `crash:process` is not running or failed
 - `bin/carburetor`, `bin/minidump_stackwalk`, `bin/dump_syms`, `bin/breakpad_moduleid`, and `bin/nm` must be executable
 - `var/`, `cache/`, `dumps/`, and `symbols/` must be writable by the PHP-FPM user
 - if templates fail with missing Encore entrypoints, run `npm ci && npm run build` and verify `public/build/entrypoints.json` exists
-- if Composer uses PHP 8.1 on a PHP 8.4 project, run Composer through PHP 8.4 and force the production environment during install: `APP_ENV=prod APP_DEBUG=0 php8.4 $(which composer) install --no-dev --optimize-autoloader`
-- if PHP-FPM logs duplicate or missing extensions, fix `/etc/php/8.4/fpm/php.ini` and use package-managed `conf.d` extension files
+- if Composer uses PHP 8.1 on a PHP 8.4 project, run Composer through PHP 8.4
 
 ### Authentication Setup
 
-Throttle can be configured to allow one or several sign-in methods at the same time. The master toggles live in `/health`.
+All sign-in methods are toggled in `/health`.
 
 #### Steam
 
 - enable `Steam login` in `/health`
-- the server must be able to reach `https://steamcommunity.com/openid/login` from the PHP runtime
-- `STEAM_API_KEY` is not required for the OpenID handshake itself, but it is still recommended for Steam profile lookups and related integrations
+- the server must be able to reach `https://steamcommunity.com/openid/login`
+- `STEAM_API_KEY` is not required for the OpenID handshake itself, but is recommended for Steam profile lookups
 
 #### Discord
 
 - set `OAUTH_DISCORD_CLIENT_ID`
 - set `OAUTH_DISCORD_CLIENT_SECRET`
-- open your Discord application OAuth2 page, for example `https://discord.com/developers/applications/BotID/oauth2`
-- take the client id and client secret from that Discord application
-- in the same Discord OAuth2 settings, add the exact callback URL:
+- add the exact callback URL:
   - `https://YOUR_HOST/login/discord`
 - enable `Discord login` in `/health`
 
@@ -265,9 +242,6 @@ Throttle can be configured to allow one or several sign-in methods at the same t
 - set `MAILER_DSN`
 - set `MAILER_FROM`
 - enable `Email login links` in `/health`
-- outgoing mail is queued through Symfony Messenger:
-  - Docker Compose deployments already include the `processor` service
-  - manual installs should also run the documented queue/processor worker path or a dedicated `messenger:consume async` service so queued `SendEmailMessage` jobs are actually delivered
 
 #### Email + password
 
@@ -275,39 +249,38 @@ Throttle can be configured to allow one or several sign-in methods at the same t
 - enable `Email + password registration` in `/health`
 - enable `Password reset` in `/health` if users should be able to recover access by email
 - self-registration requires working outgoing email because new accounts must confirm their email address before normal sign-in is allowed
-- `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` create the first local user only when the user table is empty; this bootstrap account is marked as already verified, so email + password sign-in works immediately even if mail delivery is not configured yet
-- this bootstrap user is not an admin by default; grant admin rights separately with `APP_ADMINS`, for example `APP_ADMINS="user:1"` on a clean install
 
 #### Upload-token login
 
 - enable `Upload-token login` in `/health`
-- this uses the same profile upload token that also owns crash uploads
-- that is convenient, but weaker than a separate dedicated login token, so treat upload tokens like real credentials
+- this reuses the same profile upload token that can also own crash uploads
+- treat upload tokens like real credentials
 
 ### Security Notes
 
 - never commit `.env.local`, `.env.local.php`, real tokens, database passwords, crash dumps, symbols, binaries, or production logs
-- keep `APP_SECRET`, `AI_SETTINGS_KEY`, `DATABASE_URL`, `STEAM_API_KEY`, `SYMBOL_UPLOAD_TOKEN`, and OAuth secrets in server environment files only
-- put the app behind HTTPS in production
+- keep `APP_SECRET`, `AI_SETTINGS_KEY`, `DATABASE_URL`, `STEAM_API_KEY`, `SYMBOL_UPLOAD_TOKEN`, and OAuth secrets in server-side environment files only
+- use HTTPS in production even if a local or legacy setup still relies on HTTP upload URLs internally
 - keep PHP, Composer dependencies, Node dependencies, Breakpad tools, and SourceMod Accelerator updated
 
 ## Русский
 
 ### Что Это
 
-Throttle - это веб-сервис для приёма и анализа crash-report'ов Source engine серверов через SourceMod Accelerator. Он принимает Breakpad minidump'ы, хранит и обрабатывает крэши, принимает `.sym` файлы, умеет генерировать symbols из загруженных бинарников и даёт веб-интерфейс для владельцев серверов и администраторов.
+Throttle — это веб-сервис для приёма и анализа crash-report'ов Source engine серверов через SourceMod Accelerator. Он принимает Breakpad minidump'ы, хранит и обрабатывает крэши, принимает `.sym` файлы, умеет генерировать symbols из загруженных бинарников и даёт веб-интерфейс для владельцев серверов и администраторов.
 
 Актуальная ветка включает:
 
 - вход через Steam, Discord, email-link, email + password и upload token
+- публичный переключатель Light/Dark/System
 - генератор настроек SourceMod Accelerator `core.cfg`
-- ownership по profile token, даже если `MinidumpAccount` пустой
+- `/submit`, `/symbols/submit` и `/binary/submit`
 - `/health` для runtime-настроек, диагностики и админских операций
 - AI-анализ крэшей с пользовательскими provider configs
 
-### Быстрый Старт Через Docker
+### Установка Через Docker Compose
 
-Склонируйте проект, создайте production env-файл и заполните основные переменные:
+Склонируйте проект и создайте production env-файл:
 
 ```bash
 git clone https://github.com/MrPanica/throttle throttle
@@ -315,14 +288,10 @@ cd throttle
 cp .env.prod.docker.example .env.prod.docker
 ```
 
-Минимальный пример:
+Минимальный пример `.env.prod.docker`:
 
 ```dotenv
-APP_ENV=prod
-APP_DEBUG=0
-APP_SECRET=change-this-to-a-long-random-secret
-APP_PORT=18080
-
+APP_SECRET=change-this-to-a-long-random-value
 MARIADB_PASSWORD=change-this
 MARIADB_ROOT_PASSWORD=change-this-too
 STEAM_API_KEY=optional-steam-web-api-key
@@ -331,39 +300,31 @@ SYMBOL_UPLOAD_TOKEN=optional-global-symbol-token
 AI_SETTINGS_KEY=change-this-to-a-long-random-value
 BOOTSTRAP_ADMIN_EMAIL=admin@example.com
 BOOTSTRAP_ADMIN_PASSWORD=change-this-password
+APP_PORT=18080
 AUTO_MIGRATE=1
 ```
 
-Поднимите сервисы:
+Запуск:
 
 ```bash
 docker compose --env-file .env.prod.docker -f compose.prod.yaml up -d --build
+docker compose --env-file .env.prod.docker -f compose.prod.yaml ps
+docker compose --env-file .env.prod.docker -f compose.prod.yaml exec app php bin/console doctrine:migrations:status --env=prod
 ```
 
-Docker-конфиг поднимает веб-приложение, MariaDB, Redis и `processor`, который раз в минуту запускает `crash:process --update --limit=10`.
+Production compose поднимает веб-приложение, MariaDB, Redis и `processor`, который раз в минуту запускает `crash:process --update --limit=10`.
 
-`BOOTSTRAP_ADMIN_EMAIL` и `BOOTSTRAP_ADMIN_PASSWORD` создают первого локального пользователя только если таблица пользователей ещё пуста. Этот bootstrap-пользователь сразу помечается подтверждённым, поэтому вход по email + password работает даже без настроенной почты. Админские права ему нужно выдать отдельно через `APP_ADMINS`, обычно `APP_ADMINS="user:1"` на чистой установке.
+`BOOTSTRAP_ADMIN_EMAIL` и `BOOTSTRAP_ADMIN_PASSWORD` создают первого локального пользователя, если таблица пользователей ещё пуста. Этот bootstrap-пользователь сразу помечается подтверждённым, поэтому вход по email + password работает даже без настроенной почты. Админом он не становится автоматически: права нужно выдать отдельно через `APP_ADMINS`, обычно `APP_ADMINS="user:1"` на чистой установке.
 
 ### Ручная Установка На Ubuntu/Nginx/PHP-FPM
 
-Установите зависимости:
+Установите PHP 8.4, MariaDB, Redis, Nginx, Composer, Node.js и npm. На Ubuntu 24.04 PHP 8.4 обычно требует дополнительного репозитория, например `ppa:ondrej/php`.
+
+Сборка приложения:
 
 ```bash
-sudo apt update
-sudo apt install -y git curl unzip nginx mariadb-server redis-server
-sudo apt install -y php8.4-fpm php8.4-cli php8.4-mysql php8.4-xml php8.4-curl php8.4-mbstring php8.4-intl php8.4-zip php8.4-bcmath
-curl -sS https://getcomposer.org/installer | php
-sudo mv composer.phar /usr/local/bin/composer
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt install -y nodejs
-```
-
-Склонируйте проект и соберите production assets:
-
-```bash
-git clone https://github.com/MrPanica/throttle.git /var/www/throttle
 cd /var/www/throttle
-composer install --no-dev --optimize-autoloader
+APP_ENV=prod APP_DEBUG=0 php8.4 $(which composer) install --no-dev --optimize-autoloader
 npm ci
 npm run build
 ```
@@ -373,18 +334,15 @@ npm run build
 ```dotenv
 APP_ENV=prod
 APP_DEBUG=0
-APP_SECRET=change-this-to-a-long-random-secret
-CODE_EDITOR=phpstorm
-
+APP_SECRET=change-this-to-a-long-random-value
 DATABASE_URL="mysql://throttle:CHANGE_DB_PASSWORD@127.0.0.1:3306/throttle?serverVersion=mariadb-10.11.2&charset=utf8mb4"
 REDIS_URL=redis://127.0.0.1:6379
 MESSENGER_TRANSPORT_DSN=doctrine://default?auto_setup=0
-
 MAILER_DSN=null://null
 MAILER_FROM=throttle@example.com
 SENTRY_DSN=
 STEAM_API_KEY=
-APP_ADMINS="steam:YOUR_STEAMID64"
+APP_ADMINS=steam:YOUR_STEAMID64
 SYMBOL_UPLOAD_TOKEN=optional-global-symbol-token
 AI_SETTINGS_KEY=change-this-to-a-long-random-value
 BOOTSTRAP_ADMIN_EMAIL=admin@example.com
@@ -415,7 +373,7 @@ chmod -R ug+rwX var cache dumps symbols
 systemctl restart php8.4-fpm nginx
 ```
 
-Nginx должен смотреть в `public/` и разрешать крупные uploads:
+Nginx должен смотреть в `public/`, проксировать PHP в PHP-FPM и разрешать крупные uploads:
 
 ```nginx
 client_max_body_size 100M;
@@ -429,65 +387,35 @@ location ~ \.php$ {
 }
 ```
 
-### SourceMod Accelerator И MinidumpAccount
+### SourceMod Accelerator core.cfg
 
-Настройки `core.cfg` генерируются в **Profile**.
+Зайдите в **Profile**, сгенерируйте upload token и используйте генератор `core.cfg`.
 
-Если upload URLs уже содержат profile token, `MinidumpAccount` можно не указывать:
+Типичная форма настроек:
 
 ```text
-"MinidumpUrl" "https://crash.example.com/submit?token=YOUR_PROFILE_TOKEN"
-"MinidumpSymbolUrl" "https://crash.example.com/symbols/submit?token=YOUR_PROFILE_TOKEN"
-"MinidumpBinaryUrl" "https://crash.example.com/binary/submit?token=YOUR_PROFILE_TOKEN"
+"MinidumpSymbolUpload" "3"
+"MinidumpBinaryUpload" "yes"
+"MinidumpPresubmit" "yes"
+
+"MinidumpUrl" "http://crash.example.com/submit?token=YOUR_PROFILE_TOKEN"
+"MinidumpSymbolUrl" "http://crash.example.com/symbols/submit?token=YOUR_PROFILE_TOKEN"
+"MinidumpBinaryUrl" "http://crash.example.com/binary/submit?token=YOUR_PROFILE_TOKEN"
 ```
 
-В таком режиме владелец краша определяется по token, а не по SteamID64.
+Если upload URLs уже содержат profile token, `MinidumpAccount` можно не указывать. В этом режиме владелец крэша определяется по token, а не по SteamID64.
 
-### Настройка Способов Входа
+`MinidumpPresubmit` нужен для раннего обмена списком модулей перед загрузкой самого дампа. Если его выключить, сайт всё ещё сможет обработать сам dump, но ранний auto-request бинарников и symbols работать не будет.
 
-Все методы входа включаются и выключаются в `/health`.
+### Где Формируются Symbols
 
-#### Steam
+- сайт в итоге хранит и использует symbols у себя
+- игровой сервер через Accelerator может прислать готовые `.sym` или сами бинарники
+- если пришли бинарники, символы для Throttle генерируются уже на стороне сайта через `dump_syms`
 
-- включите `Steam login` в `/health`
-- сервер должен иметь исходящий доступ к `https://steamcommunity.com/openid/login`
-- `STEAM_API_KEY` не обязателен для самого OpenID-входа, но полезен для Steam profile lookups и связанных интеграций
+### Обработка Крэшей И Очередь
 
-#### Discord
-
-- задайте `OAUTH_DISCORD_CLIENT_ID`
-- задайте `OAUTH_DISCORD_CLIENT_SECRET`
-- откройте OAuth2-страницу вашего Discord-приложения, например `https://discord.com/developers/applications/BotID/oauth2`
-- возьмите `client id` и `client secret` из этого Discord-приложения
-- в тех же настройках OAuth2 добавьте callback URL:
-  - `https://YOUR_HOST/login/discord`
-- включите `Discord login` в `/health`
-
-#### Email Login Links
-
-- задайте `MAILER_DSN`
-- задайте `MAILER_FROM`
-- включите `Email login links` в `/health`
-- письма отправляются через очередь Symfony Messenger, поэтому delivery требует работающего worker/processor path
-
-#### Email + Password
-
-- включите `Email + password login` в `/health`
-- включите `Email + password registration` в `/health`
-- включите `Password reset` в `/health`, если пользователи должны восстанавливать доступ по почте
-- обычная self-registration требует рабочей исходящей почты, потому что email должен быть подтверждён до обычного входа
-- bootstrap-пользователь через `BOOTSTRAP_ADMIN_EMAIL` + `BOOTSTRAP_ADMIN_PASSWORD` создаётся сразу подтверждённым
-- bootstrap-пользователь не админ по умолчанию; для доступа к `/health` и admin-функциям добавьте его в `APP_ADMINS`, обычно `APP_ADMINS="user:1"` на чистой базе
-
-#### Upload-Token Login
-
-- включите `Upload-token login` в `/health`
-- этот способ использует тот же profile token, что и ownership crash uploads
-- это удобно, но слабее по безопасности, чем отдельный dedicated login token
-
-### Очередь И Почта
-
-Для Docker обработку крэшей делает service `processor`. Для ручной установки нужно включить systemd timer:
+В Docker обработку делает service `processor`. Для ручной установки используйте systemd timer:
 
 ```bash
 cp deploy/systemd/throttle-crash-process.service /etc/systemd/system/
@@ -503,13 +431,13 @@ systemctl list-timers throttle-crash-process.timer
 sudo -u www-data php8.4 /var/www/throttle/bin/console crash:process --env=prod --no-debug --update --limit=10
 ```
 
-Если вы используете email login links, confirmation emails или password reset, убедитесь, что очередь действительно обрабатывается. При необходимости можно отдельно запускать:
+Если используются email login links, confirmation emails или password reset, убедитесь, что очередь действительно обрабатывается. При необходимости можно отдельно запустить:
 
 ```bash
 sudo -u www-data php8.4 /var/www/throttle/bin/console messenger:consume async --env=prod --no-debug
 ```
 
-### Health
+### /health И Администрирование
 
 `/health` доступен только администраторам. Админов можно задать через:
 
@@ -525,9 +453,10 @@ APP_ADMINS="steam:STEAMID64,user:1"
 - runtime-настройки upload processing
 - binary upload request policy
 - upload failure backoff
-- checks по очереди, storage и runtime paths
+- проверки очереди, storage и runtime paths
 - диагностика SMTP / Discord / auth
-- AI crash analysis toggle
+- переключатель AI crash analysis
+- инструменты для symbol cache, экспорта `.sym.gz` и ручной загрузки бинарников
 
 ### AI Analysis
 
@@ -539,11 +468,11 @@ APP_ADMINS="steam:STEAMID64,user:1"
 - OpenRouter
 - Custom OpenAI-compatible
 
-Можно сохранять несколько configs, выбирать default config и default prompt, задавать provider-specific extra request JSON, запускать `Ask AI` на crash details или raw output и управлять history entries.
+Можно хранить несколько configs, выбирать default config и default prompt, задавать provider-specific extra request JSON и запускать `Ask AI` на crash details или raw output.
 
 ### Безопасность
 
 - не коммитьте `.env.local`, `.env.local.php`, реальные токены, database passwords, crash dumps, symbols, binaries и production logs
 - храните `APP_SECRET`, `AI_SETTINGS_KEY`, `DATABASE_URL`, `STEAM_API_KEY`, `SYMBOL_UPLOAD_TOKEN` и OAuth secrets только в server-side env files
-- используйте HTTPS в production
+- используйте HTTPS в production, даже если для внутренних или legacy-конфигов generator сейчас может формировать `http://`
 - регулярно обновляйте PHP, Composer dependencies, Node dependencies, Breakpad tools и SourceMod Accelerator

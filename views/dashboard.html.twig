@@ -46,10 +46,8 @@
                 <td class="monospace"><a href="{{ path('details', {id: crash.id}) }}">{{ crash.id|crashid }}<a></td>
                 <td><span title="{{ crash.timestamp|date }}">{{ crash.timestamp|diffdate }}</span></td>
                     <td class="hidden-xs">
-{% if userid == null and (shared|length > 1 or legacy_app.user.admin) and crash.owner and crash.name %}
-                        {% if crash.avatar %}
-                            <img class="column-identicon" title="{{ crash.name }}" src="{{ crash.avatar }}" width="20" height="20">
-                        {% endif %}
+{% if crash.owner and crash.name %}
+                        <img class="column-identicon" title="{{ crash.name }}" src="{{ crash.avatar ?: (crash.name ~ '-' ~ crash.owner)|identicon }}" width="20" height="20">
 {% endif %}
                     </td>
 {% if crash.module is not empty or crash.module2 is empty %}

@@ -7,6 +7,7 @@ use App\Entity\User;
 use App\Form\UserType;
 use App\Repository\UserRepository;
 use App\Security\Voter\UserVoter;
+use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
@@ -22,12 +23,16 @@ class UserController extends AbstractController
 {
     use TargetPathTrait;
 
+    public function __construct(private readonly Connection $connection)
+    {
+    }
+
     #[Route('/', name: 'user_index', methods: ['GET'])]
     public function index(UserRepository $userRepository): Response
     {
         if (!$this->isGranted(User::ROLE_ADMIN)) {
             return $this->redirectToRoute('user_show', [
-                'id' => $this->getUser()?->getUserIdentifier(),
+                'id' => $this->getUser()?->getId(),
             ]);
         }
 
@@ -40,9 +45,103 @@ class UserController extends AbstractController
     #[IsGranted(UserVoter::VIEW, 'user')]
     public function show(Request $request, User $user): Response
     {
+        $viewer = $this->getUser();
+        $isOwnProfile = $viewer instanceof User && $viewer->getId() === $user->getId();
+        $isAdminViewer = $this->isGranted(User::ROLE_ADMIN);
+        $profileIsPrivate = $user->isProfilePrivate() && !$isOwnProfile && !$isAdminViewer;
+        $offset = $request->query->get('offset');
+        $offset = ctype_digit((string) $offset) ? (int) $offset : null;
+        [$steamId, $discordId] = $this->resolveExternalIds($user);
+        $crashCount = (int) $this->connection->fetchOne(
+            'SELECT COUNT(*) FROM crash WHERE owner_id = :owner',
+            ['owner' => $user->getId()]
+        );
+
+        $recentCrashes = [];
+        if (!$profileIsPrivate) {
+            $sql = <<<'SQL'
+                SELECT
+                    crash.id,
+                    UNIX_TIMESTAMP(crash.timestamp) AS timestamp,
+                    crash.cmdline,
+                    crash.processed,
+                    crash.failed,
+                    frame.module,
+                    frame.rendered,
+                    frame2.module AS module2,
+                    frame2.rendered AS rendered2,
+                    NULL AS notice
+                FROM crash
+                LEFT JOIN frame
+                    ON frame.crash = crash.id
+                   AND frame.thread = crash.thread
+                   AND frame.frame = 0
+                LEFT JOIN frame frame2
+                    ON frame2.crash = crash.id
+                   AND frame2.thread = crash.thread
+                   AND frame2.frame = 1
+                WHERE crash.owner_id = :owner
+            SQL;
+            $params = ['owner' => $user->getId()];
+
+            if ($offset !== null) {
+                $sql .= ' AND crash.timestamp < FROM_UNIXTIME(:offset)';
+                $params['offset'] = $offset;
+            }
+
+            $sql .= ' ORDER BY crash.timestamp DESC LIMIT 20';
+
+            $recentCrashes = $this->connection->fetchAllAssociative($sql, $params);
+        }
+
         return $this->render('user/show.html.twig', [
             'user' => $user,
+            'avatarSeed' => $this->avatarSeed($user),
+            'crashCount' => $crashCount,
+            'steamId' => $steamId,
+            'discordId' => $discordId,
+            'isAdminViewer' => $isAdminViewer,
+            'isOwnProfile' => $isOwnProfile,
+            'profileIsPrivate' => $profileIsPrivate,
+            'offset' => $offset,
+            'recentCrashes' => $recentCrashes,
         ]);
+    }
+
+    private function avatarSeed(User $user): string
+    {
+        [$steamId, $discordId] = $this->resolveExternalIds($user);
+
+        return (string) (
+            $steamId
+            ?? $discordId
+            ?? $user->getContactEmail()
+            ?? $user->getLogin()
+            ?? $user->getName()
+            ?? $user->getId()
+        );
+    }
+
+    /**
+     * @return array{0: ?string, 1: ?string}
+     */
+    private function resolveExternalIds(User $user): array
+    {
+        $steamId = null;
+        $discordId = null;
+
+        foreach ($user->getExternalAccounts() as $account) {
+            $kind = $account->getKind();
+            if ($kind === 'steam' && $steamId === null) {
+                $steamId = $account->getIdentifier();
+            }
+
+            if ($kind === 'discord' && $discordId === null) {
+                $discordId = $account->getIdentifier();
+            }
+        }
+
+        return [$steamId, $discordId];
     }
 
     #[Route('/{id}/edit', name: 'user_edit', methods: ['GET', 'POST'])]
@@ -58,9 +157,19 @@ class UserController extends AbstractController
             return $this->redirectToRoute('user_index', [], Response::HTTP_SEE_OTHER);
         }
 
+        [$steamId, $discordId] = $this->resolveExternalIds($user);
+        $crashCount = (int) $this->connection->fetchOne(
+            'SELECT COUNT(*) FROM crash WHERE owner_id = :owner',
+            ['owner' => $user->getId()]
+        );
+
         return $this->render('user/edit.html.twig', [
             'user' => $user,
             'form' => $form->createView(),
+            'avatarSeed' => $this->avatarSeed($user),
+            'steamId' => $steamId,
+            'discordId' => $discordId,
+            'crashCount' => $crashCount,
         ]);
     }
 

@@ -556,7 +556,7 @@ body.theme-dark .crash-ai-panel code {
 {% endif %}
 {% if can_manage and crash.owner and crash.owner != legacy_app.user.id %}
     <dt>Owner</dt>
-    <dd><a  href="{{ path('dashboard', {'user': crash.owner}) }}">{{ crash.name ?? crash.owner }}</a></dd>
+    <dd><a href="{{ path('user_show', {'id': crash.owner}) }}">{{ crash.name ?? crash.owner }}</a></dd>
 {% endif %}
 {% if crash.cmdline %}
         <dt>Command Line</dt>
@@ -1021,6 +1021,17 @@ body.theme-dark .crash-ai-panel code {
 {% if culprit_candidates|length > 0 %}
 <h2>Likely Cause</h2>
 <p class="muted">This heuristic ranks probable root cause separately from the native failure site, so engine crash frames do not automatically outrank nearby bridge, detour, or plugin evidence.</p>
+{% set likelyCauseSymbolStatus = likely_cause_symbol_status|default({}) %}
+{% if likelyCauseSymbolStatus.has_warning|default(false) %}
+<div class="alert alert-block alert-warning">
+    <strong>Likely-cause confidence is limited by symbol coverage.</strong>
+    Relevant modules with symbols: {{ likelyCauseSymbolStatus.resolved|default(0) }} / {{ likelyCauseSymbolStatus.total|default(0) }}
+    ({{ likelyCauseSymbolStatus.coverage_percent|default(0) }}%).
+{% if likelyCauseSymbolStatus.missing_labels|default([])|length > 0 %}
+    Missing: {{ likelyCauseSymbolStatus.missing_labels|join(', ') }}.
+{% endif %}
+</div>
+{% endif %}
 {% set primary = culprit_candidates[0] %}
 <div class="well">
     <div class="row">
@@ -1855,7 +1866,7 @@ body.theme-dark .crash-ai-panel code {
                         detailsAiSetHistoryStatus('info', 'Updating visibility...');
                         $.ajax({
                             url: detailsAiVisibilityUrlTemplate.replace('__HISTORY__', String(entry.id)),
-                            method: 'POST',
+                            type: 'POST',
                             data: {
                                 _token: detailsAiToken,
                                 is_public: entry.is_public ? '0' : '1'
@@ -1958,14 +1969,15 @@ body.theme-dark .crash-ai-panel code {
         }).observe(detailsAiPanel[0]);
     }
 
-    detailsAiPanel.find('.details-ai-submit').on('click', function() {
+    detailsAiPanel.find('.details-ai-submit').on('click', function(event) {
+        event.preventDefault();
         if (!detailsAiCanAsk) {
-            return;
+            return false;
         }
         var selected = detailsAiSelectedConfig();
         if (!selected) {
             detailsAiSetStatus('warning', 'Create an AI config in Profile first.');
-            return;
+            return false;
         }
 
         detailsAiSetStatus('info', 'Analyzing crash with AI...', true);
@@ -1973,7 +1985,7 @@ body.theme-dark .crash-ai-panel code {
 
         $.ajax({
             url: detailsAiUrl,
-            method: 'POST',
+            type: 'POST',
             data: {
                 _token: detailsAiToken,
                 ai_config_id: selected.id,
@@ -2002,6 +2014,8 @@ body.theme-dark .crash-ai-panel code {
             }
             detailsAiSetStatus('danger', message);
         });
+
+        return false;
     });
 {% endif %}
 

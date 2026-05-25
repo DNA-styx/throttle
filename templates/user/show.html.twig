@@ -1,68 +1,197 @@
 {% extends 'base.html.twig' %}
 
-{% block title %}User{% endblock %}
+{% block title %}{{ user.name ?: ('User #' ~ user.id) }}{% endblock %}
 
 {% block body %}
-    <h1>User</h1>
+    <style>
+        .player-profile-shell .pager {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
 
-    <table class="table">
-        <tbody>
-            <tr>
-                <th>Id</th>
-                <td>{{ user.id }}</td>
-            </tr>
-            <tr>
-                <th>Name</th>
-                <td>{{ user.name }}</td>
-            </tr>
-            <tr>
-                <th>Roles</th>
-                <td>{{ user.roles | map(role => ('role.' ~ role) | trans) | join(', ') }}</td>
-            </tr>
-            <tr>
-                <th>Contact Email</th>
-                <td>{{ (user.contactEmail is not null) ? user.contactEmail : ('form.none' | trans | wrap('em')) }}</td>
-            </tr>
-            <tr>
-                <th>Last Login</th>
-                <td>{{ user.lastLogin ? (user.lastLogin | date('Y-m-d H:i:s')) : ('form.none' | trans | wrap('em')) }}</td>
-            </tr>
-            <tr>
-                <th>Linked Accounts</th>
-                <td>
-                    <table class="table table-sm">
-                        {% for externalAccount in user.externalAccounts %}
+        .player-profile-shell .pager li {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .player-profile-shell .pager li a {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            border: 1px solid rgba(133, 160, 196, 0.22);
+            border-radius: 8px;
+            background: rgba(18, 28, 40, 0.86);
+            color: #dfe9f5;
+            text-decoration: none;
+        }
+
+        .player-profile-shell .pager li a:hover,
+        .player-profile-shell .pager li a:focus {
+            background: rgba(32, 47, 66, 0.96);
+            color: #ffffff;
+        }
+
+        .player-profile-shell .pager li.disabled a {
+            opacity: 0.45;
+            pointer-events: none;
+        }
+    </style>
+    <div class="profile-shell player-profile-shell">
+        <section class="profile-panel">
+            <div class="row g-4 player-profile-grid">
+                <div class="col-lg-8">
+                    <div class="d-flex align-items-center gap-3 mb-3 flex-wrap">
+                        <img
+                            src="{{ avatarSeed|identicon(96) }}"
+                            alt="Avatar for {{ user.name ?: ('user #' ~ user.id) }}"
+                            class="rounded-circle border player-profile-avatar"
+                            width="96"
+                            height="96"
+                        >
+                        <div>
+                            <h1 class="h3 mb-1">{{ user.name ?: ('User #' ~ user.id) }}</h1>
+                            <div class="text-muted">Player profile / User #{{ user.id }}</div>
+                            {% if profileIsPrivate %}
+                                <span class="badge text-bg-secondary mt-2">Private profile</span>
+                            {% elseif isOwnProfile %}
+                                <span class="badge text-bg-primary mt-2">Your profile</span>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    {% if profileIsPrivate %}
+                        <div class="player-private-state">
+                            <div class="player-private-state__copy">
+                                <h2 class="h5 mb-2">Profile is private</h2>
+                                <p class="text-muted mb-0">This player chose to hide their crash history and linked identity details from other users.</p>
+                            </div>
+                        </div>
+                    {% else %}
+                        <div class="profile-stat-grid mb-3">
+                            <div>
+                                <div class="profile-stat-value">{{ crashCount }}</div>
+                                <div class="text-muted">Crashes</div>
+                            </div>
+                            <div>
+                                <div class="profile-stat-value">{{ steamId ?: '-' }}</div>
+                                <div class="text-muted">SteamID64</div>
+                            </div>
+                            <div>
+                                <div class="profile-stat-value">{{ discordId ?: '-' }}</div>
+                                <div class="text-muted">Discord ID</div>
+                            </div>
+                        </div>
+
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <div class="border rounded p-3 h-100">
+                                    <h2 class="h6 mb-2">Profile summary</h2>
+                                    <dl class="mb-0">
+                                        <dt class="small text-muted">Contact email</dt>
+                                        <dd>{{ user.contactEmail ?: 'Hidden or not set' }}</dd>
+                                        <dt class="small text-muted">Roles</dt>
+                                        <dd>{{ user.roles ? user.roles|join(', ') : 'None' }}</dd>
+                                    </dl>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="border rounded p-3 h-100">
+                                    <h2 class="h6 mb-2">Profile visibility</h2>
+                                    <p class="mb-0 text-muted">
+                                        {% if user.profilePrivate %}
+                                            Private for other users.
+                                        {% else %}
+                                            Public to signed-in users.
+                                        {% endif %}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </section>
+
+        {% if not profileIsPrivate %}
+            <section class="profile-panel">
+                <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
+                    <div>
+                        <h2 class="h5 mb-1">Recent crashes</h2>
+                        <div class="text-muted">
+                            Showing {{ recentCrashes|length }} most recent crash{{ recentCrashes|length == 1 ? '' : 'es' }}
+                            {% if offset %}
+                                on this page
+                            {% endif %}
+                            out of {{ crashCount }} total linked to this player.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="well well-tight">
+                    <table class="table table-striped">
+                        <thead>
                             <tr>
-                                <td title="{{ externalAccount.kind | humanize }}">
-                                    <svg class="{{ externalAccount.kind == 'alliedmods' ? 'ti' : 'bi'}} me-1" width="16" height="16" aria-hidden="true">
-                                        <use xlink:href="{{ asset('build/' ~ (externalAccount.kind == 'alliedmods' ? 'throttle' : 'bootstrap') ~ '-icons.svg') }}#{{ externalAccount.kind == 'email' ? 'envelope-fill' : externalAccount.kind }}"></use>
-                                    </svg>
-                                    {{ externalAccount.displayName }}
-                                </td>
-                                <td>{{ externalAccount.lastLogin ? (externalAccount.lastLogin | date('Y-m-d H:i:s')) : ('form.never_used' | trans | wrap('em')) }}</td>
+                                <th></th>
+                                <th>Crash ID</th>
+                                <th>Uploaded</th>
+                                <th class="hidden-xs"></th>
+                                <th class="hidden-xs">Function</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                    {% set last = null %}
+                    {% for crash in recentCrashes %}
+                    {% set last = crash.timestamp %}
+                    {% if crash.module is not empty or crash.module2 is empty %}
+                    {% set frame = {rendered: crash.rendered, first: true} %}
+                    {% else %}
+                    {% set frame = {rendered: crash.rendered2, first: false} %}
+                    {% endif %}
+                            <tr {% if crash.processed == 0 %}class="warning"{% elseif crash.failed == 1 %}class="danger"{% endif %}>
                                 <td>
-                                    {% if app.user == user and externalAccount.kind == 'steam' %}
-                                        <a href="{{ path('user_refresh_login', { id: user.id, externalAccount: externalAccount.id }) }}">refresh</a>
+                                    {% if crash.cmdline %}
+                                        <img class="column-identicon" src="{{ crash.cmdline|identicon }}" width="20" height="20" alt="">
                                     {% endif %}
                                 </td>
+                                <td class="monospace"><a href="{{ path('details', {id: crash.id}) }}">{{ crash.id|crashid }}</a></td>
+                                <td><span title="{{ crash.timestamp|date }}">{{ crash.timestamp|diffdate }}</span></td>
+                                <td class="hidden-xs">
+                                    <img class="column-identicon" title="{{ user.name ?: ('User #' ~ user.id) }}" src="{{ avatarSeed|identicon }}" width="20" height="20" alt="">
+                                </td>
+                                <td title="{{ frame.rendered }}" class="hidden-xs monospace column-stackframe {% if not frame.first %}column-stackframe-fallback{% endif %}">
+                                    {{ frame.rendered }}
+                                </td>
                             </tr>
-                        {% else %}
-                            <em>{{ 'form.none' | trans }}</em>
-                        {% endfor %}
+                    {% else %}
+                            <tr>
+                                <td colspan="5" class="text-center">No Crashes</td>
+                            </tr>
+                    {% endfor %}
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <td colspan="5">
+                                    <ul class="pager">
+                                        <li class="previous {% if not offset %}disabled{% endif %}">
+                                            <a {% if offset %}href="{{ path('user_show', {id: user.id}) }}"{% endif %}>&larr; Newest</a>
+                                        </li>
+                                        <li class="next {% if not last %}disabled{% endif %}">
+                                            <a {% if last %}href="{{ path('user_show', {id: user.id, offset: last}) }}"{% endif %}>Older &rarr;</a>
+                                        </li>
+                                    </ul>
+                                </td>
+                            </tr>
+                        </tfoot>
                     </table>
-                </td>
-            </tr>
-        </tbody>
-    </table>
-
-    <a href="{{ path('user_index') }}">back to list</a>
-
-    <a href="{{ path('user_edit', {'id': user.id}) }}">edit</a>
-
-    {% if is_granted('ROLE_ALLOWED_TO_SWITCH') and app.user.userIdentifier != user.userIdentifier %}
-        {# TODO: Extend Symfony's ImpersonateUrlGenerator to handle this for us. #}
-        <a href="{{ path(app.request.attributes.get('_route'), { _switch_user: user.userIdentifier } + app.request.attributes.get('_route_params') + app.request.query.all()) }}">impersonate</a>
-    {% endif %}
-
-    {{ include('user/_delete_form.html.twig') }}
+                </div>
+            </section>
+        {% endif %}
+    </div>
 {% endblock %}

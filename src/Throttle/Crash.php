@@ -124,7 +124,7 @@ class Crash
             return true;
         }
 
-        $userId = $app['db']->executeQuery('SELECT id FROM user WHERE upload_token = ? LIMIT 1', [$provided])->fetchColumn(0);
+        $userId = $app['db']->executeQuery('SELECT id FROM user WHERE upload_token = ? AND uploads_blocked = 0 LIMIT 1', [$provided])->fetchColumn(0);
 
         return $userId !== false && $userId !== null;
     }
@@ -578,6 +578,85 @@ class Crash
             'missing' => $missing,
             'invalid' => $invalid,
             'percent' => $total > 0 ? (int) round(($withSymbols / $total) * 100) : 0,
+        );
+    }
+
+    /**
+     * @param list<array<string, mixed>> $culpritCandidates
+     * @param list<array<string, mixed>> $stack
+     * @param list<array<string, mixed>> $modules
+     * @return array{matched_modules: int, with_symbols: int, missing: int, invalid: int, percent: int, affected_modules: list<string>, warning: bool}
+     */
+    private static function buildLikelyCauseSymbolStatus(array $culpritCandidates, array $stack, array $modules): array
+    {
+        $modulesByBasename = array();
+        foreach ($modules as $module) {
+            $moduleName = (string) ($module['name'] ?? '');
+            $basename = strtolower(basename(str_replace('\\', '/', $moduleName)));
+            if ($basename === '' || isset($modulesByBasename[$basename])) {
+                continue;
+            }
+
+            $modulesByBasename[$basename] = $module;
+        }
+
+        $relevantModules = array();
+        foreach (array_slice($culpritCandidates, 0, 3) as $candidate) {
+            $label = strtolower(trim((string) ($candidate['label'] ?? '')));
+            if ($label === '' || str_starts_with($label, 'map: ')) {
+                continue;
+            }
+
+            $candidateKey = basename(str_replace('\\', '/', $label));
+            if ($candidateKey !== '' && isset($modulesByBasename[$candidateKey])) {
+                $relevantModules[$candidateKey] = $modulesByBasename[$candidateKey];
+            }
+        }
+
+        foreach (array_slice($stack, 0, 5) as $frame) {
+            $moduleName = (string) ($frame['module'] ?? '');
+            $basename = strtolower(basename(str_replace('\\', '/', $moduleName)));
+            if ($basename !== '' && isset($modulesByBasename[$basename])) {
+                $relevantModules[$basename] = $modulesByBasename[$basename];
+            }
+        }
+
+        $withSymbols = 0;
+        $missing = 0;
+        $invalid = 0;
+        $affectedModules = array();
+
+        foreach ($relevantModules as $module) {
+            $identifier = (string) ($module['identifier'] ?? '');
+            $moduleName = basename(str_replace('\\', '/', (string) ($module['name'] ?? '')));
+
+            if ($identifier === '000000000000000000000000000000000') {
+                $invalid++;
+                continue;
+            }
+
+            if ((int) ($module['present'] ?? 0) === 1) {
+                $withSymbols++;
+                continue;
+            }
+
+            $missing++;
+            if ($moduleName !== '') {
+                $affectedModules[] = $moduleName;
+            }
+        }
+
+        sort($affectedModules, SORT_NATURAL | SORT_FLAG_CASE);
+        $matchedModules = count($relevantModules);
+
+        return array(
+            'matched_modules' => $matchedModules,
+            'with_symbols' => $withSymbols,
+            'missing' => $missing,
+            'invalid' => $invalid,
+            'percent' => $matchedModules > 0 ? (int) round(($withSymbols / $matchedModules) * 100) : 0,
+            'affected_modules' => array_values(array_unique($affectedModules)),
+            'warning' => $matchedModules > 0 && $withSymbols < $matchedModules,
         );
     }
 
@@ -1860,6 +1939,194 @@ class Crash
         return trim($text);
     }
 
+    /**
+     * @param array<string, mixed> $crash
+     * @return array<string, mixed>
+     */
+    private static function buildCrashDiagnosticContext(Application $app, string $id, array $crash): array
+    {
+        if ($crash['thread'] == -1) {
+            $crash['thread'] = 0;
+        }
+
+        $crash['cmdline'] = self::sanitizeCrashCommandLine((string) $crash['cmdline']);
+        $crash['metadata'] = json_decode((string) $crash['metadata'], true);
+        if (!is_array($crash['metadata'])) {
+            $crash['metadata'] = [];
+        }
+
+        $snapshots = self::extractSourceModSnapshots($crash['metadata']);
+
+        if (isset($crash['metadata']['HasConsoleLog'])) {
+            $crash['has_console_log'] = $crash['metadata']['HasConsoleLog'];
+            unset($crash['metadata']['HasConsoleLog']);
+        } else {
+            $crash['has_console_log'] = false;
+        }
+
+        if (isset($crash['metadata']['ExtensionBuild'])) {
+            unset($crash['metadata']['ExtensionBuild']);
+        }
+
+        $consoleCause = self::loadTerminalSourceModCause($app, $id, (bool) $crash['has_console_log']);
+        $terminalConsoleCause = ($consoleCause['terminal'] ?? false) ? $consoleCause : null;
+        $consoleBlaming = $consoleCause['supporting_blaming'] ?? ($terminalConsoleCause['blaming'] ?? null);
+        $crash['dump_available'] = \Filesystem::pathExists($app['root'] . '/dumps/' . substr($id, 0, 2) . '/' . $id . '.dmp');
+
+        ksort($crash['metadata']);
+
+        $notices = $app['db']->executeQuery('SELECT severity, text FROM crashnotice JOIN notice ON notice.id = crashnotice.notice WHERE crash = ?', [$id])->fetchAll();
+        $stack = $app['db']->executeQuery('SELECT frame, module, function, rendered, url FROM frame WHERE crash = ? AND thread = ? ORDER BY frame', [$id, $crash['thread']])->fetchAll();
+        $modules = $app['db']->executeQuery('SELECT name, identifier, processed, present, HEX(base) AS base FROM module WHERE crash = ? ORDER BY name', [$id])->fetchAll();
+        $modules = self::buildModuleCoverageRows($modules, $app['config']);
+        $loadFromAddressNotice = self::buildLoadFromAddressNotice($stack);
+        if ($loadFromAddressNotice !== null) {
+            array_unshift($notices, $loadFromAddressNotice);
+        }
+
+        $verifiedSourceLookupFrames = self::loadVerifiedSourceLookupFrameState($app, $id, $stack);
+        $rawSourcePawnChain = self::loadRawSourcePawnCauseChain($app, $id, $stack, $crash['metadata']);
+        $culpritCandidates = self::buildCulpritCandidates($stack, $modules, $crash['metadata'], $crash['cmdline'], $consoleBlaming, $terminalConsoleCause, $rawSourcePawnChain);
+        $stats = $app['db']->executeQuery('SELECT COUNT(DISTINCT crash.owner_id) AS owners, COUNT(DISTINCT crash.ip) AS ips, COUNT(*) AS crashes FROM crash, (SELECT owner_id, stackhash FROM crash WHERE id = ?) AS this WHERE this.stackhash = crash.stackhash', [$id])->fetch();
+        $processingLog = $app['db']->executeQuery('SELECT created_at, status, duration_ms, message FROM crash_processing_log WHERE crash = ? ORDER BY created_at DESC LIMIT 1', [$id])->fetch();
+        if ($processingLog === false) {
+            $processingLog = null;
+        }
+
+        $outdated = false;
+        if ($app['config']['accelerator']) {
+            $outdated = !isset($crash['metadata']['ExtensionVersion']) || version_compare($crash['metadata']['ExtensionVersion'], $app['config']['accelerator'], '<');
+        }
+
+        $hasErrorString = false;
+        if (isset($stack[0]['rendered'])) {
+            $hasErrorString = preg_match('/^engine(_srv)?\\.so!Sys_Error(_Internal)?\\(/', $stack[0]['rendered']) === 1;
+        }
+
+        $showSourcePawnMessage = false;
+        if (isset($crash['metadata']['SourceModVersion']) && version_compare($crash['metadata']['SourceModVersion'], '1.10.0.6431', '<')) {
+            foreach ($stack as $frame) {
+                if (preg_match('/^sourcepawn\\.jit\\.[^!]+!sp::[^:]+::Invoke/', $frame['rendered']) === 1) {
+                    $showSourcePawnMessage = true;
+                    break;
+                }
+            }
+        }
+
+        return [
+            'crash' => $crash,
+            'notices' => $notices,
+            'stack' => $stack,
+            'modules' => $modules,
+            'stats' => $stats,
+            'processing_log' => $processingLog,
+            'sourcemod_snapshots' => $snapshots,
+            'symbol_coverage' => self::buildSymbolCoverage($modules),
+            'culprit_candidates' => $culpritCandidates,
+            'culprit_groups' => self::groupCulpritCandidates($culpritCandidates),
+            'likely_cause_symbol_status' => self::buildLikelyCauseSymbolStatus($culpritCandidates, $stack, $modules),
+            'symbol_upload_log' => self::loadSymbolUploadLog($app, $modules),
+            'verified_source_lookup_frames' => $verifiedSourceLookupFrames,
+            'outdated' => $outdated,
+            'has_error_string' => $hasErrorString,
+            'show_sourcepawn_message' => $showSourcePawnMessage,
+            'source_lookup_enabled' => (($app['config']['upload-settings']['crash_source_lookup_enabled'] ?? false) === true),
+            'ai_analysis_enabled' => (($app['config']['upload-settings']['crash_ai_analysis_enabled'] ?? false) === true),
+            'public_ai_history_count' => self::countPublicAiHistory($app, $id),
+            'ai_history_items' => $app['crash-ai-history-items'] ?? [],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function buildPresubmitDiagnosticRecord(Application $app, string $rawSignature, ?object $parsedSignature, ?string $response, ?string $category, ?string $error = null): array
+    {
+        $responseFlagCount = null;
+        if (is_string($response) && preg_match('/^[A-Z]\|([^|]*)\|/', $response, $matches) === 1) {
+            $responseFlagCount = strlen($matches[1]);
+        }
+
+        return [
+            'timestamp' => time(),
+            'remote_ip' => $app['request']->getClientIp(),
+            'content_type' => $app['request']->headers->get('Content-Type'),
+            'content_length' => $app['request']->headers->get('Content-Length'),
+            'crash_signature_length' => strlen($rawSignature),
+            'raw_module_count' => substr_count($rawSignature, '|M|'),
+            'raw_frame_count' => substr_count($rawSignature, '|F|'),
+            'first_200' => substr($rawSignature, 0, 200),
+            'last_200' => substr($rawSignature, -200),
+            'parsed_module_count' => $parsedSignature !== null && isset($parsedSignature->modules) && is_array($parsedSignature->modules) ? count($parsedSignature->modules) : 0,
+            'parsed_frame_count' => $parsedSignature !== null && isset($parsedSignature->frames) && is_array($parsedSignature->frames) ? count($parsedSignature->frames) : 0,
+            'platform' => $parsedSignature->platform ?? null,
+            'architecture' => $parsedSignature->architecture ?? null,
+            'response' => $response,
+            'response_mode' => is_string($response) && $response !== '' ? substr($response, 0, 1) : null,
+            'response_flag_count' => $responseFlagCount,
+            'diagnostic_category' => $category,
+            'error' => $error,
+        ];
+    }
+
+    private static function storePresubmitDiagnostic(Application $app, array $record): void
+    {
+        $path = $app['root'] . '/cache/presubmit-debug.jsonl';
+        @mkdir(dirname($path), 0777, true);
+        @file_put_contents($path, json_encode($record, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n", FILE_APPEND | LOCK_EX);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private static function loadRelevantPresubmitDiagnostic(Application $app, ?string $ip, ?int $timestamp): ?array
+    {
+        $path = $app['root'] . '/cache/presubmit-debug.jsonl';
+        if (!\Filesystem::pathExists($path)) {
+            return null;
+        }
+
+        $lines = @file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        if (!is_array($lines) || $lines === []) {
+            return null;
+        }
+
+        $best = null;
+        $bestDistance = PHP_INT_MAX;
+        $windowBefore = 15 * 60;
+        $windowAfter = 2 * 60;
+
+        foreach (array_reverse($lines) as $line) {
+            $decoded = json_decode($line, true);
+            if (!is_array($decoded)) {
+                continue;
+            }
+
+            if ($ip !== null && ($decoded['remote_ip'] ?? null) !== $ip) {
+                continue;
+            }
+
+            if ($timestamp !== null && isset($decoded['timestamp']) && is_numeric($decoded['timestamp'])) {
+                $delta = (int) $timestamp - (int) $decoded['timestamp'];
+                if ($delta < -$windowAfter || $delta > $windowBefore) {
+                    continue;
+                }
+
+                $distance = abs($delta);
+                if ($distance < $bestDistance) {
+                    $best = $decoded;
+                    $bestDistance = $distance;
+                }
+
+                continue;
+            }
+
+            return $decoded;
+        }
+
+        return $best;
+    }
+
     public static function parsePresubmitSignature($signature)
     {
         $signature = array_reverse(explode('|', $signature));
@@ -1925,11 +2192,20 @@ class Crash
     public function presubmit(Application $app, $signature)
     {
         //$app['monolog']->warning('Presubmit: '.$signature);
+        $rawSignature = (string) $signature;
 
         try {
             $signature = self::parsePresubmitSignature($signature);
         } catch (\Exception $e) {
             $app['monolog']->warning('Error parsing presubmit: '.$signature, [$e]);
+            self::storePresubmitDiagnostic($app, self::buildPresubmitDiagnosticRecord(
+                $app,
+                $rawSignature,
+                null,
+                'E|'.$e->getMessage(),
+                'parser_desync',
+                $e->getMessage(),
+            ));
 
             return 'E|'.$e->getMessage();
         }
@@ -1967,6 +2243,25 @@ class Crash
 
         // Stick a random presubmit token on the end for testing.
         $return .= '|'.md5($return);
+        $rawModuleCount = substr_count($rawSignature, '|M|');
+        $parsedModuleCount = isset($signature->modules) && is_array($signature->modules) ? count($signature->modules) : 0;
+        $responseFlagCount = preg_match('/^[A-Z]\|([^|]*)\|/', $return, $matches) === 1 ? strlen($matches[1]) : null;
+        $category = 'ok';
+        if ($rawModuleCount > 0 && $parsedModuleCount === 0) {
+            $category = 'parser_desync';
+        } elseif ($rawModuleCount !== $parsedModuleCount) {
+            $category = 'parsed_modules_mismatch_raw_marker_count';
+        } elseif ($responseFlagCount !== $parsedModuleCount) {
+            $category = 'response_builder_bug';
+        }
+
+        self::storePresubmitDiagnostic($app, self::buildPresubmitDiagnosticRecord(
+            $app,
+            $rawSignature,
+            $signature,
+            $return,
+            $category,
+        ));
 
         return $return;
     }
@@ -2011,7 +2306,7 @@ class Crash
         $ownerId = null;
         $providedUploadToken = self::getProvidedUploadToken($app);
         if (is_string($providedUploadToken) && $providedUploadToken !== '') {
-            $tokenOwnerId = $app['db']->executeQuery('SELECT id FROM user WHERE upload_token = ? LIMIT 1', [$providedUploadToken])->fetchColumn(0);
+            $tokenOwnerId = $app['db']->executeQuery('SELECT id FROM user WHERE upload_token = ? AND uploads_blocked = 0 LIMIT 1', [$providedUploadToken])->fetchColumn(0);
             if ($tokenOwnerId !== false && $tokenOwnerId !== null) {
                 $ownerId = (int) $tokenOwnerId;
             }
@@ -2197,55 +2492,12 @@ class Crash
         if ($crash['lastview'] === null || (time() - $crash['lastview']) > (60 * 60 * 24)) {
             $app['db']->executeUpdate('UPDATE crash SET lastview = NOW() WHERE id = ?', array($id));
         }
-
-        if ($crash['thread'] == -1) {
-            $crash['thread'] = 0;
-        }
-
-        $crash['cmdline'] = preg_replace_callback(array_map(function($v) {
-            return sprintf('/(?<=%s )[^ ]+/', preg_quote($v));
-        }, [
-            '+sv_password',
-            '+rcon_password',
-            '+sv_setsteamaccount',
-        ]), function($matches) {
-            return str_repeat('*', strlen($matches[0]));
-        }, $crash['cmdline']);
-
-        $crash['metadata'] = json_decode($crash['metadata'], true);
-
-        $snapshots = self::extractSourceModSnapshots($crash['metadata']);
-
-        if (isset($crash['metadata']['HasConsoleLog'])) {
-            $crash['has_console_log'] = $crash['metadata']['HasConsoleLog'];
-            unset($crash['metadata']['HasConsoleLog']);
-        } else {
-            $crash['has_console_log'] = false;
-        }
-
-        if (isset($crash['metadata']['ExtensionBuild'])) {
-            unset($crash['metadata']['ExtensionBuild']);
-        }
-
-        $consoleCause = self::loadTerminalSourceModCause($app, $id, (bool) $crash['has_console_log']);
-        $terminalConsoleCause = ($consoleCause['terminal'] ?? false) ? $consoleCause : null;
-        $consoleBlaming = $consoleCause['supporting_blaming'] ?? ($terminalConsoleCause['blaming'] ?? null);
-        $crash['dump_available'] = \Filesystem::pathExists($app['root'] . '/dumps/' . substr($id, 0, 2) . '/' . $id . '.dmp');
-
-        ksort($crash['metadata']);
-
-        $notices = $app['db']->executeQuery('SELECT severity, text FROM crashnotice JOIN notice ON notice.id = crashnotice.notice WHERE crash = ?', array($id))->fetchAll();
-        $stack = $app['db']->executeQuery('SELECT frame, module, function, rendered, url FROM frame WHERE crash = ? AND thread = ? ORDER BY frame', array($id, $crash['thread']))->fetchAll();
-        $modules = $app['db']->executeQuery('SELECT name, identifier, processed, present, HEX(base) AS base FROM module WHERE crash = ? ORDER BY name', array($id))->fetchAll();
-        $modules = self::buildModuleCoverageRows($modules, $app['config']);
-        $loadFromAddressNotice = self::buildLoadFromAddressNotice($stack);
-        if ($loadFromAddressNotice !== null) {
-            array_unshift($notices, $loadFromAddressNotice);
-        }
-        $verifiedSourceLookupFrames = self::loadVerifiedSourceLookupFrameState($app, $id, $stack);
-        $rawSourcePawnChain = self::loadRawSourcePawnCauseChain($app, $id, $stack, $crash['metadata']);
-        $culpritCandidates = self::buildCulpritCandidates($stack, $modules, $crash['metadata'], $crash['cmdline'], $consoleBlaming, $terminalConsoleCause, $rawSourcePawnChain);
-        $stats = $app['db']->executeQuery('SELECT COUNT(DISTINCT crash.owner_id) AS owners, COUNT(DISTINCT crash.ip) AS ips, COUNT(*) AS crashes FROM crash, (SELECT owner_id, stackhash FROM crash WHERE id = ?) AS this WHERE this.stackhash = crash.stackhash', [$id])->fetch();
+        $diagnostics = self::buildCrashDiagnosticContext($app, (string) $id, $crash);
+        $crash = $diagnostics['crash'];
+        $notices = $diagnostics['notices'];
+        $stack = $diagnostics['stack'];
+        $modules = $diagnostics['modules'];
+        $stats = $diagnostics['stats'];
         $signatureNotesPage = self::getSignatureNotesPage($app);
         $signatureNotes = self::loadSignatureNotes($app, $crash['stackhash'] ?? null, $signatureNotesPage);
         $userSignatureNote = null;
@@ -2253,30 +2505,6 @@ class Crash
             foreach ($signatureNotes['items'] as $note) {
                 if ((int) $note['author_id'] === (int) $app['user']['id']) {
                     $userSignatureNote = $note;
-                    break;
-                }
-            }
-        }
-        $processing_log = $app['db']->executeQuery('SELECT created_at, status, duration_ms, message FROM crash_processing_log WHERE crash = ? ORDER BY created_at DESC LIMIT 1', [$id])->fetch();
-        if ($processing_log === false) {
-            $processing_log = null;
-        }
-
-        $outdated = false;
-        if ($app['config']['accelerator']) {
-            $outdated = !isset($crash['metadata']['ExtensionVersion']) || version_compare($crash['metadata']['ExtensionVersion'], $app['config']['accelerator'], '<');
-        }
-
-        $has_error_string = false;
-        if (isset($stack[0]['rendered'])) {
-            $has_error_string = preg_match('/^engine(_srv)?\\.so!Sys_Error(_Internal)?\\(/', $stack[0]['rendered']) === 1;
-        }
-
-        $show_sourcepawn_message = false;
-        if (isset($crash['metadata']['SourceModVersion']) && version_compare($crash['metadata']['SourceModVersion'], '1.10.0.6431', '<')) {
-            foreach ($stack as $frame) {
-                if (preg_match('/^sourcepawn\\.jit\\.[^!]+!sp::[^:]+::Invoke/', $frame['rendered']) === 1) {
-                    $show_sourcepawn_message = true;
                     break;
                 }
             }
@@ -2295,20 +2523,21 @@ class Crash
             'signature_notes_total' => $signatureNotes['total'],
             'user_signature_note' => $userSignatureNote,
             'can_create_signature_note' => $app['user'] !== null && ($app['user']['admin'] || $userSignatureNote === null),
-            'outdated' => $outdated,
-            'has_error_string' => $has_error_string,
-            'show_sourcepawn_message' => $show_sourcepawn_message,
-            'symbol_coverage' => self::buildSymbolCoverage($modules),
-            'culprit_candidates' => $culpritCandidates,
-            'culprit_groups' => self::groupCulpritCandidates($culpritCandidates),
-            'processing_log' => $processing_log,
-            'sourcemod_snapshots' => $snapshots,
-            'symbol_upload_log' => self::loadSymbolUploadLog($app, $modules),
-            'verified_source_lookup_frames' => $verifiedSourceLookupFrames,
-            'source_lookup_enabled' => (($app['config']['upload-settings']['crash_source_lookup_enabled'] ?? false) === true),
-            'ai_analysis_enabled' => (($app['config']['upload-settings']['crash_ai_analysis_enabled'] ?? false) === true),
-            'public_ai_history_count' => self::countPublicAiHistory($app, (string) $id),
-            'ai_history_items' => $app['crash-ai-history-items'] ?? [],
+            'outdated' => $diagnostics['outdated'],
+            'has_error_string' => $diagnostics['has_error_string'],
+            'show_sourcepawn_message' => $diagnostics['show_sourcepawn_message'],
+            'symbol_coverage' => $diagnostics['symbol_coverage'],
+            'culprit_candidates' => $diagnostics['culprit_candidates'],
+            'culprit_groups' => $diagnostics['culprit_groups'],
+            'likely_cause_symbol_status' => $diagnostics['likely_cause_symbol_status'],
+            'processing_log' => $diagnostics['processing_log'],
+            'sourcemod_snapshots' => $diagnostics['sourcemod_snapshots'],
+            'symbol_upload_log' => $diagnostics['symbol_upload_log'],
+            'verified_source_lookup_frames' => $diagnostics['verified_source_lookup_frames'],
+            'source_lookup_enabled' => $diagnostics['source_lookup_enabled'],
+            'ai_analysis_enabled' => $diagnostics['ai_analysis_enabled'],
+            'public_ai_history_count' => $diagnostics['public_ai_history_count'],
+            'ai_history_items' => $diagnostics['ai_history_items'],
         ));
     }
 
@@ -3318,6 +3547,28 @@ class Crash
         ));
     }
 
+    public function analyze_dump(Application $app, $id)
+    {
+        if ($app['user'] === null) {
+            $app->abort(401);
+        }
+
+        if (!(($app['user']['admin'] ?? false) === true)) {
+            $app->abort(403);
+        }
+
+        $can_manage = self::canUserManage($app, $id);
+        if ($can_manage === null) {
+            $app->abort(404);
+        }
+
+        return $app['twig']->render('analyze_dump.html.twig', array(
+            'id' => $id,
+            'source_lookup_enabled' => (($app['config']['upload-settings']['crash_source_lookup_enabled'] ?? false) === true),
+            'ai_analysis_enabled' => (($app['config']['upload-settings']['crash_ai_analysis_enabled'] ?? false) === true),
+        ));
+    }
+
     private static function countPublicAiHistory(Application $app, string $id): int
     {
         return (int) $app['db']->executeQuery(
@@ -3411,6 +3662,96 @@ class Crash
         $data['source_lookup_modules'] = self::loadSourceLookupModuleState($app, $id);
 
         return new \Symfony\Component\HttpFoundation\Response(json_encode($data, JSON_UNESCAPED_SLASHES), 200, array(
+            'Content-Type' => 'application/json',
+        ));
+    }
+
+    public function analyze_dump_data(Application $app, $id)
+    {
+        if ($app['user'] === null) {
+            $app->abort(401);
+        }
+
+        if (!(($app['user']['admin'] ?? false) === true)) {
+            $app->abort(403);
+        }
+
+        $can_manage = self::canUserManage($app, $id);
+        if ($can_manage === null) {
+            $app->abort(404);
+        }
+
+        $crash = $app['db']->executeQuery('SELECT crash.id, UNIX_TIMESTAMP(crash.timestamp) AS timestamp, crash.ip AS ip, crash.owner_id AS owner, crash.server_id, crash.metadata, crash.cmdline, crash.thread, crash.processed, crash.failed, crash.stackhash, UNIX_TIMESTAMP(crash.lastview) AS lastview, server_owner.name FROM crash LEFT JOIN server_owner ON server_owner.id = crash.owner_id WHERE crash.id = ?', [$id])->fetch();
+        $diagnostics = self::buildCrashDiagnosticContext($app, (string) $id, $crash);
+        $rawResponse = $this->carburetor_data($app, $id);
+        $rawPayload = json_decode((string) $rawResponse->getContent(), true);
+        if (!is_array($rawPayload)) {
+            $rawPayload = array(
+                'error' => 'Failed to decode the raw carburetor response.',
+                'raw_stdout' => (string) $rawResponse->getContent(),
+            );
+        }
+        $presubmitDiagnostic = self::loadRelevantPresubmitDiagnostic(
+            $app,
+            isset($diagnostics['crash']['ip']) && is_string($diagnostics['crash']['ip']) ? $diagnostics['crash']['ip'] : null,
+            isset($diagnostics['crash']['timestamp']) ? (int) $diagnostics['crash']['timestamp'] : null,
+        );
+
+        $modulesSentByDump = null;
+        if (isset($rawPayload['modules']) && is_array($rawPayload['modules'])) {
+            $modulesSentByDump = count($rawPayload['modules']);
+        } elseif (isset($rawPayload['loaded_modules']) && is_array($rawPayload['loaded_modules'])) {
+            $modulesSentByDump = count($rawPayload['loaded_modules']);
+        }
+
+        $payload = array(
+            'crash' => array(
+                'id' => $diagnostics['crash']['id'],
+                'timestamp' => $diagnostics['crash']['timestamp'],
+                'owner' => $diagnostics['crash']['owner'],
+                'owner_name' => $diagnostics['crash']['name'] ?? null,
+                'stackhash' => $diagnostics['crash']['stackhash'],
+                'thread' => $diagnostics['crash']['thread'],
+                'cmdline' => $diagnostics['crash']['cmdline'],
+                'metadata' => $diagnostics['crash']['metadata'],
+                'processed' => $diagnostics['crash']['processed'],
+                'failed' => $diagnostics['crash']['failed'],
+                'has_console_log' => $diagnostics['crash']['has_console_log'],
+                'dump_available' => $diagnostics['crash']['dump_available'],
+            ),
+            'notices' => $diagnostics['notices'],
+            'stats' => $diagnostics['stats'],
+            'stack' => $diagnostics['stack'],
+            'modules' => $diagnostics['modules'],
+            'symbol_coverage' => $diagnostics['symbol_coverage'],
+            'culprit_candidates' => $diagnostics['culprit_candidates'],
+            'culprit_groups' => $diagnostics['culprit_groups'],
+            'likely_cause_symbol_status' => $diagnostics['likely_cause_symbol_status'],
+            'processing_log' => $diagnostics['processing_log'],
+            'sourcemod_snapshots' => $diagnostics['sourcemod_snapshots'],
+            'symbol_upload_log' => $diagnostics['symbol_upload_log'],
+            'verified_source_lookup_frames' => $diagnostics['verified_source_lookup_frames'],
+            'source_lookup_enabled' => $diagnostics['source_lookup_enabled'],
+            'raw_analysis' => $rawPayload,
+            'presubmit_diagnostics' => array(
+                'raw_module_count' => $presubmitDiagnostic['raw_module_count'] ?? null,
+                'parsed_module_count' => $presubmitDiagnostic['parsed_module_count'] ?? $modulesSentByDump,
+                'response_flag_count' => $presubmitDiagnostic['response_flag_count'] ?? null,
+                'diagnostic_category' => $presubmitDiagnostic['diagnostic_category'] ?? null,
+                'crash_signature_length' => $presubmitDiagnostic['crash_signature_length'] ?? null,
+                'response_mode' => $presubmitDiagnostic['response_mode'] ?? null,
+                'recorded_at' => $presubmitDiagnostic['timestamp'] ?? null,
+            ),
+            'upload_diagnostics' => array(
+                'modules_sent_by_dump' => $modulesSentByDump,
+                'modules_with_symbols' => $diagnostics['symbol_coverage']['with_symbols'] ?? 0,
+                'missing' => $diagnostics['symbol_coverage']['missing'] ?? 0,
+                'invalid' => $diagnostics['symbol_coverage']['invalid'] ?? 0,
+            ),
+            'presubmit_debug_record' => $presubmitDiagnostic,
+        );
+
+        return new \Symfony\Component\HttpFoundation\Response(json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), 200, array(
             'Content-Type' => 'application/json',
         ));
     }
