@@ -5,12 +5,14 @@ namespace App\Controller;
 use App\Entity\User;
 use App\Runtime\AdminUserManager;
 use App\Runtime\AuthEnvironment;
+use App\Runtime\StorageRetentionManager;
 use App\Runtime\SymbolAdminManager;
 use App\Runtime\SymbolBinaryUpload;
 use App\Runtime\SymbolToolException;
 use App\Runtime\UploadFailureBackoff;
 use App\Runtime\UploadSettings;
 use App\Security\AuthMailer;
+use App\Util\HumanSize;
 use Doctrine\DBAL\Connection;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
@@ -29,7 +31,7 @@ class HealthController extends AbstractController
     private const SYMBOL_REQUEST_POLICY_PATH = '/var/symbol-request-policy.json';
 
     #[Route('/health', name: 'health', methods: ['GET', 'POST'])]
-    public function index(Request $request, Connection $connection, KernelInterface $kernel, SymbolAdminManager $symbolAdminManager, AuthEnvironment $authEnvironment, AdminUserManager $adminUserManager, #[Autowire('%app.legacy%')] array $legacyConfig): Response
+    public function index(Request $request, Connection $connection, KernelInterface $kernel, SymbolAdminManager $symbolAdminManager, StorageRetentionManager $storageRetentionManager, AuthEnvironment $authEnvironment, AdminUserManager $adminUserManager, #[Autowire('%app.legacy%')] array $legacyConfig): Response
     {
         $root = $kernel->getProjectDir();
         $checks = [];
@@ -40,6 +42,7 @@ class HealthController extends AbstractController
         $runtimePolicy = $this->loadRuntimeSymbolRequestPolicy($root);
         $uploadSettings = UploadSettings::load($root);
         $symbolFilter = trim((string) $request->query->get('symbol_filter', ''));
+        $recentUploadOffset = max(0, $request->query->getInt('recent_upload_offset', 0));
 
         if ($request->isMethod('POST')) {
             if ($request->request->get('upload_settings_form') !== null) {
@@ -50,7 +53,7 @@ class HealthController extends AbstractController
                 if ($request->request->get('reset_upload_settings') !== null) {
                     UploadSettings::delete($root);
 
-                    return $this->redirectToRoute('health', ['upload_settings_reset' => 1]);
+                    return $this->redirectToHealth(['upload_settings_reset' => 1], 'upload-processing');
                 }
 
                 $uploadSettings = $this->readUploadSettingsFromRequest($request);
@@ -58,7 +61,7 @@ class HealthController extends AbstractController
                 if ($uploadSettingsErrors === []) {
                     UploadSettings::save($root, $uploadSettings);
 
-                    return $this->redirectToRoute('health', ['upload_settings_saved' => 1]);
+                    return $this->redirectToHealth(['upload_settings_saved' => 1], 'upload-processing');
                 }
             } elseif (!$this->isCsrfTokenValid('symbol-request-policy', (string) $request->request->get('_token'))) {
                 return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
@@ -66,7 +69,7 @@ class HealthController extends AbstractController
                 if ($request->request->get('reset_policy') !== null) {
                     $this->deleteRuntimeSymbolRequestPolicy($root);
 
-                    return $this->redirectToRoute('health', ['policy_reset' => 1]);
+                    return $this->redirectToHealth(['policy_reset' => 1], 'upload-processing');
                 }
 
                 $runtimePolicy = $this->readSymbolRequestPolicyFromRequest($request);
@@ -80,7 +83,7 @@ class HealthController extends AbstractController
                 } elseif ($policyErrors === []) {
                     $this->saveRuntimeSymbolRequestPolicy($root, $runtimePolicy);
 
-                    return $this->redirectToRoute('health', ['policy_saved' => 1]);
+                    return $this->redirectToHealth(['policy_saved' => 1], 'upload-processing');
                 }
             }
         }
@@ -121,8 +124,16 @@ class HealthController extends AbstractController
         foreach ($symbolGroups as $group) {
             $symbolEntriesCount += count($group['entries']);
         }
+        $symbolDiagnostics = $symbolAdminManager->buildDiagnostics($recentUploadOffset, 15);
+        $storageCleanupSummary = $storageRetentionManager->getLastRunSummary();
+        $storageCleanupUsage = $storageRetentionManager->getUsageSummary();
+        $storageCleanupMegabytes = [];
+        foreach ($uploadSettings['storage_cleanup'] as $category => $categorySettings) {
+            $storageCleanupMegabytes[$category] = $this->sizeLimitToMegabytes((string) ($categorySettings['max_total_size'] ?? '0'));
+        }
         $backoffStats = UploadFailureBackoff::stats($root);
         $symbolsOpen = $symbolFilter !== '' || $request->query->getBoolean('symbols_open');
+        $symbolUploadsOpen = $request->query->getBoolean('symbol_uploads_open');
         $symbolRequestPolicy = \Throttle\Crash::getSymbolRequestPolicy($effectiveLegacyConfig);
         $policyEmpty = true;
         foreach ($symbolRequestPolicy as $values) {
@@ -157,9 +168,14 @@ class HealthController extends AbstractController
             'policyTest' => $policyTest,
             'symbolGroups' => $symbolGroups,
             'symbolEntriesCount' => $symbolEntriesCount,
+            'symbolDiagnostics' => $symbolDiagnostics,
             'symbolFilter' => $symbolFilter,
             'symbolsOpen' => $symbolsOpen,
+            'symbolUploadsOpen' => $symbolUploadsOpen,
             'backoffStats' => $backoffStats,
+            'storageCleanupSummary' => $storageCleanupSummary,
+            'storageCleanupUsage' => $storageCleanupUsage,
+            'storageCleanupMegabytes' => $storageCleanupMegabytes,
             'healthy' => !in_array(false, array_column($checks, 'ok'), true),
         ]);
     }
@@ -172,26 +188,26 @@ class HealthController extends AbstractController
         }
 
         if (!$authEnvironment->isMailerConfigured()) {
-            $this->addFlash('danger', $authEnvironment->mailerNotice());
+            $this->addHealthFlash('auth', 'danger', $authEnvironment->mailerNotice());
 
-            return $this->redirectToRoute('health');
+            return $this->redirectToHealth([], 'auth-mail');
         }
 
         $to = mb_strtolower(trim((string) $request->request->get('email', '')));
         if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
-            $this->addFlash('danger', 'Enter a valid recipient email for the SMTP test.');
+            $this->addHealthFlash('auth', 'danger', 'Enter a valid recipient email for the SMTP test.');
 
-            return $this->redirectToRoute('health');
+            return $this->redirectToHealth([], 'auth-mail');
         }
 
         try {
             $authMailer->sendDiagnostic($to, $request->getSchemeAndHttpHost());
-            $this->addFlash('success', sprintf('Test email sent to %s.', $to));
+            $this->addHealthFlash('auth', 'success', sprintf('Test email sent to %s.', $to));
         } catch (\Throwable $e) {
-            $this->addFlash('danger', 'SMTP test failed: ' . $e->getMessage());
+            $this->addHealthFlash('auth', 'danger', 'SMTP test failed: ' . $e->getMessage());
         }
 
-        return $this->redirectToRoute('health');
+        return $this->redirectToHealth([], 'auth-mail');
     }
 
     #[Route('/health/symbols/refresh', name: 'health_symbols_refresh', methods: ['POST'])]
@@ -202,9 +218,22 @@ class HealthController extends AbstractController
         }
 
         $result = $symbolAdminManager->refreshCaches(true);
-        $this->addFlash('success', sprintf('Symbol cache refreshed. Scanned %d module rows and updated %d entries.', $result['scanned'], $result['updated']));
+        if ($result['scanned'] === 0) {
+            $diagnostics = $symbolAdminManager->buildDiagnostics();
+            $this->addHealthFlash(
+                'symbols',
+                'warning',
+                sprintf(
+                    'Symbol cache refresh scanned 0 module rows. Stored symbols on disk: %d, stored binaries on disk: %d. This means refresh has nothing in the module table to link against yet.',
+                    (int) ($diagnostics['stored_symbol_versions'] ?? 0),
+                    (int) ($diagnostics['stored_binary_versions'] ?? 0),
+                )
+            );
+        } else {
+            $this->addHealthFlash('symbols', 'success', sprintf('Symbol cache refreshed. Scanned %d module rows and updated %d entries.', $result['scanned'], $result['updated']));
+        }
 
-        return $this->redirectToRoute('health');
+        return $this->redirectToHealth(['symbol_uploads_open' => 1], 'symbol-maintenance');
     }
 
     #[Route('/health/symbols/backoff/reset', name: 'health_symbols_backoff_reset', methods: ['POST'])]
@@ -215,47 +244,109 @@ class HealthController extends AbstractController
         }
 
         $cleared = UploadFailureBackoff::clear($kernel->getProjectDir());
-        $this->addFlash('success', sprintf('Upload failure backoff state cleared for %d module(s).', $cleared));
+        $this->addHealthFlash('backoff', 'success', sprintf('Upload failure backoff state cleared for %d module(s).', $cleared));
 
-        return $this->redirectToRoute('health');
+        return $this->redirectToHealth([], 'backoff-state');
     }
 
     #[Route('/health/symbols/upload-binary', name: 'health_symbols_upload_binary', methods: ['POST'])]
-    public function uploadBinary(Request $request, KernelInterface $kernel, SymbolAdminManager $symbolAdminManager): Response
+    public function uploadBinary(Request $request, KernelInterface $kernel, SymbolAdminManager $symbolAdminManager, Connection $connection): Response
     {
         if (!$this->isCsrfTokenValid('health-symbols-upload-binary', (string) $request->request->get('_token'))) {
             return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
         }
 
-        $file = $request->files->get('binary_file');
-        if (!$file instanceof UploadedFile || !$file->isValid() || $file->getSize() <= 0) {
-            $this->addFlash('danger', 'Select a binary file to upload.');
-
-            return $this->redirectToRoute('health', ['symbols_open' => 1]);
+        $files = $request->files->all('binary_files');
+        if (!is_array($files) || $files === []) {
+            $single = $request->files->get('binary_file');
+            $files = $single instanceof UploadedFile ? [$single] : [];
         }
 
-        try {
-            $result = SymbolBinaryUpload::storeUploadedBinary($kernel->getProjectDir(), $file);
-            UploadFailureBackoff::registerSuccess($kernel->getProjectDir(), $result['module'], $result['identifier']);
-            $symbolAdminManager->refreshCaches(false);
-            $message = sprintf('Binary uploaded for %s/%s. ', $result['module'], $result['identifier']);
-            if ($result['degraded']) {
-                $message .= isset($result['warning']) && $result['warning'] !== ''
-                    ? $result['warning'] . '; public symbols were generated via fallback.'
-                    : 'Symbols were generated via nm fallback.';
-            } else {
-                $message .= 'Breakpad symbols are ready.';
+        $files = array_values(array_filter($files, static fn (mixed $file): bool => $file instanceof UploadedFile && $file->isValid() && ($file->getSize() ?? 0) > 0));
+        if ($files === []) {
+            $this->addHealthFlash('symbols', 'danger', 'Select a binary file to upload.');
+
+            return $this->redirectToHealth(['symbols_open' => 1, 'symbol_uploads_open' => 1], 'symbol-maintenance');
+        }
+
+        $projectDir = $kernel->getProjectDir();
+        $successfulUploads = 0;
+        foreach ($files as $file) {
+            try {
+                $result = SymbolBinaryUpload::storeUploadedBinary($projectDir, $file);
+                UploadFailureBackoff::registerSuccess($projectDir, $result['module'], $result['identifier']);
+                StorageRetentionManager::clearVersionMarkers($projectDir, $result['module'], $result['identifier']);
+                $this->recordManualUploadAudit(
+                    $connection,
+                    $request,
+                    'binary',
+                    $result['module'],
+                    $result['identifier'],
+                    (int) $result['bytes'],
+                    200,
+                    $result['degraded'] ? 'accepted-manual-degraded' : 'accepted-manual',
+                    $result['warning'] ?? 'Uploaded from health page'
+                );
+                $successfulUploads++;
+
+                $message = sprintf('Binary uploaded for %s/%s. ', $result['module'], $result['identifier']);
+                if ($result['degraded']) {
+                    $message .= isset($result['warning']) && $result['warning'] !== ''
+                        ? $result['warning'] . '; public symbols were generated via fallback.'
+                        : 'Symbols were generated via nm fallback.';
+                } else {
+                    $message .= 'Breakpad symbols are ready.';
+                }
+
+                $this->addHealthFlash(
+                    'symbols',
+                    $result['degraded'] ? 'warning' : 'success',
+                    $message
+                );
+            } catch (\Throwable $e) {
+                $context = $e instanceof SymbolToolException ? $e->getContext() : [];
+                $name = $file->getClientOriginalName() ?: $file->getFilename();
+                $this->recordManualUploadAudit(
+                    $connection,
+                    $request,
+                    'binary',
+                    null,
+                    null,
+                    (int) ($file->getSize() ?? 0),
+                    500,
+                    'rejected-manual',
+                    $context['summary'] ?? $e->getMessage()
+                );
+                $this->addHealthFlash('symbols', 'danger', sprintf('Binary upload failed for %s: %s', $name, $context['summary'] ?? $e->getMessage()));
             }
-            $this->addFlash(
-                $result['degraded'] ? 'warning' : 'success',
-                $message
-            );
-        } catch (\Throwable $e) {
-            $context = $e instanceof SymbolToolException ? $e->getContext() : [];
-            $this->addFlash('danger', 'Binary upload failed: ' . ($context['summary'] ?? $e->getMessage()));
         }
 
-        return $this->redirectToRoute('health', ['symbols_open' => 1]);
+        if ($successfulUploads > 0) {
+            $symbolAdminManager->refreshCaches(false);
+        }
+
+        return $this->redirectToHealth(['symbols_open' => 1, 'symbol_uploads_open' => 1], 'symbol-maintenance');
+    }
+
+    #[Route('/health/storage-cleanup/run', name: 'health_storage_cleanup_run', methods: ['POST'])]
+    public function runStorageCleanup(Request $request, StorageRetentionManager $storageRetentionManager): Response
+    {
+        if (!$this->isCsrfTokenValid('health-storage-cleanup-run', (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        $summary = $storageRetentionManager->runCleanup('manual');
+        $this->addHealthFlash(
+            'storage_cleanup',
+            'success',
+            sprintf(
+                'Storage cleanup finished. Deleted %d file(s) and reclaimed %s.',
+                (int) ($summary['deleted_files'] ?? 0),
+                HumanSize::format((int) ($summary['reclaimed_bytes'] ?? 0))
+            )
+        );
+
+        return $this->redirectToHealth([], 'upload-processing');
     }
 
     #[Route('/health/symbols/export', name: 'health_symbols_export', methods: ['POST'])]
@@ -267,31 +358,31 @@ class HealthController extends AbstractController
 
         $selected = $request->request->all('selected_symbols');
         if (!is_array($selected) || $selected === []) {
-            $this->addFlash('danger', $request->request->has('delete_selected') ? 'Select at least one symbol entry to delete.' : 'Select at least one symbol entry to export.');
+            $this->addHealthFlash('symbols', 'danger', $request->request->has('delete_selected') ? 'Select at least one symbol entry to delete.' : 'Select at least one symbol entry to export.');
 
-            return $this->redirectToRoute('health', ['symbols_open' => 1]);
+            return $this->redirectToHealth(['symbols_open' => 1], 'stored-symbols');
         }
 
         if ($request->request->has('delete_selected')) {
             try {
                 $result = $symbolAdminManager->deleteSelectedStoredSymbols(array_values(array_filter($selected, 'is_string')));
                 if ($result['deleted_versions'] === 0) {
-                    $this->addFlash('danger', 'No stored symbols matched the selected entries.');
+                    $this->addHealthFlash('symbols', 'danger', 'No stored symbols matched the selected entries.');
                 } else {
-                    $this->addFlash('success', sprintf('Deleted %d stored symbol version(s).', $result['deleted_versions']));
+                    $this->addHealthFlash('symbols', 'success', sprintf('Deleted %d stored symbol version(s).', $result['deleted_versions']));
                 }
             } catch (\Throwable $e) {
-                $this->addFlash('danger', 'Failed to delete stored symbols: ' . $e->getMessage());
+                $this->addHealthFlash('symbols', 'danger', 'Failed to delete stored symbols: ' . $e->getMessage());
             }
 
-            return $this->redirectToRoute('health', ['symbols_open' => 1]);
+            return $this->redirectToHealth(['symbols_open' => 1], 'stored-symbols');
         }
 
         $response = $symbolAdminManager->exportSelectedSymbols(array_values(array_filter($selected, 'is_string')));
         if (!$response instanceof BinaryFileResponse) {
-            $this->addFlash('danger', 'No stored symbols matched the selected entries.');
+            $this->addHealthFlash('symbols', 'danger', 'No stored symbols matched the selected entries.');
 
-            return $this->redirectToRoute('health', ['symbols_open' => 1]);
+            return $this->redirectToHealth(['symbols_open' => 1], 'stored-symbols');
         }
 
         return $response;
@@ -307,19 +398,19 @@ class HealthController extends AbstractController
         $module = trim((string) $request->request->get('module', ''));
         $identifier = trim((string) $request->request->get('identifier', ''));
         if ($module === '' || $identifier === '') {
-            $this->addFlash('danger', 'Select a stored symbol version to delete.');
+            $this->addHealthFlash('symbols', 'danger', 'Select a stored symbol version to delete.');
 
-            return $this->redirectToRoute('health', ['symbols_open' => 1]);
+            return $this->redirectToHealth(['symbols_open' => 1], 'stored-symbols');
         }
 
         try {
             $result = $symbolAdminManager->deleteStoredSymbolVersion($module, $identifier);
-            $this->addFlash('success', sprintf('Deleted stored symbols for %s/%s.', $result['module'], $result['identifier']));
+            $this->addHealthFlash('symbols', 'success', sprintf('Deleted stored symbols for %s/%s.', $result['module'], $result['identifier']));
         } catch (\Throwable $e) {
-            $this->addFlash('danger', 'Failed to delete stored symbols: ' . $e->getMessage());
+            $this->addHealthFlash('symbols', 'danger', 'Failed to delete stored symbols: ' . $e->getMessage());
         }
 
-        return $this->redirectToRoute('health', ['symbols_open' => 1]);
+        return $this->redirectToHealth(['symbols_open' => 1], 'stored-symbols');
     }
 
     /**
@@ -445,6 +536,15 @@ class HealthController extends AbstractController
      */
     private function readUploadSettingsFromRequest(Request $request): array
     {
+        $storageCleanup = [];
+        foreach (array_keys(StorageRetentionManager::defaults()) as $category) {
+            $storageCleanup[$category] = [
+                'enabled' => $request->request->getBoolean('storage_cleanup_' . $category . '_enabled'),
+                'max_total_size' => $this->megabytesToSizeLimit((string) $request->request->get('storage_cleanup_' . $category . '_max_total_size', '0')),
+                'max_age_days' => (int) $request->request->get('storage_cleanup_' . $category . '_max_age_days', 0),
+            ];
+        }
+
         return [
             'streaming_symbols_enabled' => $request->request->getBoolean('streaming_symbols_enabled'),
             'upload_memory_limit' => strtoupper(trim((string) $request->request->get('upload_memory_limit', '256M'))),
@@ -461,6 +561,7 @@ class HealthController extends AbstractController
             'auth_enable_password_registration' => $request->request->getBoolean('auth_enable_password_registration'),
             'auth_enable_password_reset' => $request->request->getBoolean('auth_enable_password_reset'),
             'auth_enable_token_login' => $request->request->getBoolean('auth_enable_token_login'),
+            'storage_cleanup' => $storageCleanup,
         ];
     }
 
@@ -489,6 +590,63 @@ class HealthController extends AbstractController
             $errors[] = 'At least one sign-in method must remain enabled.';
         }
 
+        foreach (($settings['storage_cleanup'] ?? []) as $category => $categorySettings) {
+            if (!StorageRetentionManager::isValidSizeLimit((string) ($categorySettings['max_total_size'] ?? '0'))) {
+                $errors[] = sprintf('Invalid max total size for %s cleanup. Use values like 0, 500M, 2G, or 1T.', str_replace('_', ' ', $category));
+            }
+            if ((int) ($categorySettings['max_age_days'] ?? 0) < 0) {
+                $errors[] = sprintf('Max age for %s cleanup must be 0 or greater.', str_replace('_', ' ', $category));
+            }
+        }
+
         return $errors;
+    }
+
+    private function addHealthFlash(string $section, string $level, string $message): void
+    {
+        $this->addFlash($section . '_' . $level, $message);
+    }
+
+    private function redirectToHealth(array $parameters = [], ?string $fragment = null): Response
+    {
+        if ($fragment !== null && $fragment !== '') {
+            $parameters['_fragment'] = $fragment;
+        }
+
+        return $this->redirectToRoute('health', $parameters);
+    }
+
+    private function recordManualUploadAudit(Connection $connection, Request $request, string $endpoint, ?string $module, ?string $identifier, int $bytes, int $statusCode, string $result, ?string $reason): void
+    {
+        $user = $this->getUser();
+        $connection->insert('upload_token_audit', [
+            'owner_id' => $user instanceof User ? $user->getId() : null,
+            'created_at' => (new \DateTimeImmutable())->format('Y-m-d H:i:s'),
+            'endpoint' => $endpoint,
+            'remote_addr' => $request->getClientIp(),
+            'account' => null,
+            'module' => $module,
+            'identifier' => $identifier,
+            'bytes' => $bytes,
+            'status_code' => $statusCode,
+            'result' => $result,
+            'reason' => $reason !== null ? mb_substr($reason, 0, 255) : null,
+            'token_suffix' => null,
+            'user_agent' => mb_substr((string) $request->headers->get('User-Agent'), 0, 255),
+        ]);
+    }
+
+    private function megabytesToSizeLimit(string $value): string
+    {
+        $megabytes = max(0, (int) trim($value));
+
+        return $megabytes > 0 ? ($megabytes . 'M') : '0';
+    }
+
+    private function sizeLimitToMegabytes(string $value): int
+    {
+        $bytes = StorageRetentionManager::parseSizeLimit($value);
+
+        return $bytes > 0 ? (int) floor($bytes / (1024 * 1024)) : 0;
     }
 }

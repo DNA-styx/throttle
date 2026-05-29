@@ -608,6 +608,20 @@ body.theme-dark .crash-ai-panel code {
 <div class="alert alert-block alert-warning">This crash is missing a module list and will not have symbol information.</div>
 {% endif %}
 
+{% if crash.retention.has_deleted_artifacts|default(false) %}
+<div class="alert alert-block alert-warning">
+{% if crash.retention.dump_deleted|default(false) %}
+    The stored minidump was deleted by storage cleanup, so raw dump download and low-level re-analysis are no longer available.
+{% endif %}
+{% if crash.retention.dump_deleted|default(false) and crash.retention.stackwalk_deleted|default(false) %}
+    <br>
+{% endif %}
+{% if crash.retention.stackwalk_deleted|default(false) %}
+    The stackwalk stderr file was deleted by storage cleanup, so legacy processing logs may be incomplete.
+{% endif %}
+</div>
+{% endif %}
+
 <div class="alert alert-block alert-info">
 {% if stats['crashes'] != 1 %}
     <a class="alert-link" href="{{ path('stats', {module: crash.stackhash}) }}">{{ stats['crashes'] }} reports share this crash signature.</a> ({{ stats['owners'] }} owner{% if stats['owners'] != 1 %}s{% endif %} / {{ stats['ips'] }} ip{% if stats['ips'] != 1 %}s{% endif %})

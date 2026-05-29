@@ -33,6 +33,15 @@ class LegacyDbalConnection
         return $this->connection->executeStatement($sql, $params, $this->normalizeTypes($types));
     }
 
+    /**
+     * @param array<int, mixed> $params
+     * @param array<int, mixed> $types
+     */
+    public function fetchOne(string $sql, array $params = [], array $types = []): mixed
+    {
+        return $this->connection->fetchOne($sql, $params, $this->normalizeTypes($types));
+    }
+
     public function transactional(callable $callback): mixed
     {
         return $this->connection->transactional(fn () => $callback($this));

@@ -11,6 +11,11 @@
     <button type="button" class="btn btn-default pull-right" id="ask-ai-raw" style="margin-right: 8px;"><i class="icon-magic"></i> Ask AI</button>
 {% endif %}
 </div>
+{% if retention is defined and retention.dump_deleted %}
+<div class="alert alert-block alert-warning">
+    The stored minidump was deleted by storage cleanup. Raw carburetor analysis may be unavailable or limited to previously cached data.
+</div>
+{% endif %}
 <style>
     .raw-stack-shell { position: relative; }
     .raw-stack-output { margin-top: 0; padding-right: 72px; }

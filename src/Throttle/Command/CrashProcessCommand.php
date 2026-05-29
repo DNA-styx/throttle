@@ -3,6 +3,8 @@
 namespace Throttle\Command;
 
 use App\Legacy\LegacyBridgeFactory;
+use App\Runtime\StorageRetentionManager;
+use App\Util\HumanSize;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -12,11 +14,13 @@ use Symfony\Component\Console\Helper\ProgressBar;
 class CrashProcessCommand extends Command
 {
     private LegacyBridgeFactory $legacyBridgeFactory;
+    private StorageRetentionManager $storageRetentionManager;
 
-    public function __construct(LegacyBridgeFactory $legacyBridgeFactory)
+    public function __construct(LegacyBridgeFactory $legacyBridgeFactory, StorageRetentionManager $storageRetentionManager)
     {
         parent::__construct();
         $this->legacyBridgeFactory = $legacyBridgeFactory;
+        $this->storageRetentionManager = $storageRetentionManager;
     }
 
     protected function configure(): void
@@ -40,6 +44,19 @@ class CrashProcessCommand extends Command
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $app = $this->legacyBridgeFactory->createConsole();
+
+        try {
+            $cleanupSummary = $this->storageRetentionManager->runAutomaticCleanup();
+            if (is_array($cleanupSummary) && ((int) ($cleanupSummary['deleted_files'] ?? 0) > 0 || (int) ($cleanupSummary['reclaimed_bytes'] ?? 0) > 0)) {
+                $output->writeln(sprintf(
+                    'Automatic storage cleanup removed %d file(s) and reclaimed %s.',
+                    (int) ($cleanupSummary['deleted_files'] ?? 0),
+                    HumanSize::format((int) ($cleanupSummary['reclaimed_bytes'] ?? 0))
+                ));
+            }
+        } catch (\Throwable $e) {
+            $output->writeln('Automatic storage cleanup failed: ' . $e->getMessage());
+        }
 
         $limit = $input->getOption('limit');
 

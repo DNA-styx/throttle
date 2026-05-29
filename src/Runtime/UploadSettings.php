@@ -6,9 +6,6 @@ final class UploadSettings
 {
     public const PATH = '/var/upload-settings.json';
 
-    /**
-     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int, crash_source_lookup_enabled: bool, crash_ai_analysis_enabled: bool, auth_enable_steam: bool, auth_enable_discord: bool, auth_enable_email_login_link: bool, auth_enable_password_login: bool, auth_enable_password_registration: bool, auth_enable_password_reset: bool, auth_enable_token_login: bool}
-     */
     public static function defaults(): array
     {
         return [
@@ -27,12 +24,10 @@ final class UploadSettings
             'auth_enable_password_registration' => true,
             'auth_enable_password_reset' => true,
             'auth_enable_token_login' => true,
+            'storage_cleanup' => StorageRetentionManager::defaults(),
         ];
     }
 
-    /**
-     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int, crash_source_lookup_enabled: bool, crash_ai_analysis_enabled: bool, auth_enable_steam: bool, auth_enable_discord: bool, auth_enable_email_login_link: bool, auth_enable_password_login: bool, auth_enable_password_registration: bool, auth_enable_password_reset: bool, auth_enable_token_login: bool}
-     */
     public static function load(string $root): array
     {
         $path = self::path($root);
@@ -77,9 +72,6 @@ final class UploadSettings
         return $root . self::PATH;
     }
 
-    /**
-     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int, crash_source_lookup_enabled: bool, crash_ai_analysis_enabled: bool, auth_enable_steam: bool, auth_enable_discord: bool, auth_enable_email_login_link: bool, auth_enable_password_login: bool, auth_enable_password_registration: bool, auth_enable_password_reset: bool, auth_enable_token_login: bool}
-     */
     public static function normalize(array $settings): array
     {
         $defaults = self::defaults();
@@ -145,6 +137,7 @@ final class UploadSettings
             'auth_enable_token_login' => array_key_exists('auth_enable_token_login', $settings)
                 ? filter_var($settings['auth_enable_token_login'], FILTER_VALIDATE_BOOL)
                 : $defaults['auth_enable_token_login'],
+            'storage_cleanup' => StorageRetentionManager::normalizeSettings($settings['storage_cleanup'] ?? null),
         ];
     }
 

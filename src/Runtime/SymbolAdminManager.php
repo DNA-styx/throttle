@@ -130,6 +130,7 @@ final class SymbolAdminManager
                         'file' => $file,
                         'file_path' => $filePath,
                         'binary_path' => $binaryPath,
+                        'binary_retention' => StorageRetentionManager::getBinaryRetentionStatus($this->projectDir, $module, $identifier),
                         'bytes' => is_file($filePath) ? (int) filesize($filePath) : 0,
                         'modified_at' => is_file($filePath) ? (int) filemtime($filePath) : 0,
                     ];
@@ -163,6 +164,86 @@ final class SymbolAdminManager
         }
 
         return array_values($groups);
+    }
+
+    public function buildDiagnostics(int $recentUploadOffset = 0, int $recentUploadLimit = 15): array
+    {
+        $app = $this->legacyBridgeFactory->createConsole();
+        $recentUploadOffset = max(0, $recentUploadOffset);
+        $recentUploadLimit = max(1, $recentUploadLimit);
+
+        $moduleRows = (int) $app['db']->fetchOne('SELECT COUNT(*) FROM module');
+        $moduleVersions = (int) $app['db']->fetchOne('SELECT COUNT(*) FROM (SELECT DISTINCT name, identifier FROM module) AS versions');
+        $crashesWithModules = (int) $app['db']->fetchOne('SELECT COUNT(DISTINCT crash) FROM module');
+        $processedCrashes = (int) $app['db']->fetchOne('SELECT COUNT(*) FROM crash WHERE processed = 1');
+        $storedSymbolVersions = $this->countStoredSymbolVersions();
+        $storedBinaryVersions = $this->countStoredBinaryVersions();
+        $lastProcessedAt = $app['db']->fetchOne('SELECT MAX(created_at) FROM crash_processing_log');
+        $lastUploadAt = $app['db']->fetchOne(
+            'SELECT MAX(created_at) FROM upload_token_audit WHERE endpoint IN (\'symbols\', \'binary\') AND status_code IS NOT NULL AND status_code < 400'
+        );
+        $recentUploadRows = $app['db']->executeQuery(
+            'SELECT created_at, endpoint, module, identifier, status_code, result, reason
+             FROM upload_token_audit
+             WHERE endpoint IN (\'symbols\', \'binary\')
+             ORDER BY created_at DESC
+             LIMIT ? OFFSET ?',
+            [$recentUploadLimit + 1, $recentUploadOffset],
+            [\PDO::PARAM_INT, \PDO::PARAM_INT]
+        )->fetchAll();
+        $hasMoreUploads = count($recentUploadRows) > $recentUploadLimit;
+        $recentUploads = array_slice($recentUploadRows, 0, $recentUploadLimit);
+
+        $summary = [
+            'has_warning' => false,
+            'title' => null,
+            'body' => null,
+        ];
+
+        if ($moduleRows === 0 && $storedSymbolVersions > 0) {
+            $summary = [
+                'has_warning' => true,
+                'title' => 'Symbols are present on disk, but the database has no module inventory.',
+                'body' => 'Refresh only syncs known module rows with the filesystem. It cannot link symbol files when the module table is empty.',
+            ];
+        } elseif ($moduleRows === 0 && $processedCrashes > 0) {
+            $summary = [
+                'has_warning' => true,
+                'title' => 'Processed crashes exist, but module inventory is empty.',
+                'body' => 'This usually means crashes were processed on another system, module rows were lost during migration, or the processing pipeline has not rebuilt module data yet.',
+            ];
+        } elseif ($moduleRows > 0 && $storedSymbolVersions === 0) {
+            $summary = [
+                'has_warning' => true,
+                'title' => 'No stored symbols were found on disk.',
+                'body' => 'Throttle knows about crash modules, but there are no stored symbol versions to match against them.',
+            ];
+        } elseif ($moduleRows === 0 && $lastUploadAt !== false && $lastProcessedAt !== false && strtotime((string) $lastUploadAt) > strtotime((string) $lastProcessedAt)) {
+            $summary = [
+                'has_warning' => true,
+                'title' => 'Uploads happened after the last processing run.',
+                'body' => 'Symbols or binaries were uploaded, but crashes have not been reprocessed since then, so module-to-symbol linkage is still stale.',
+            ];
+        }
+
+        return [
+            'module_rows' => $moduleRows,
+            'module_versions' => $moduleVersions,
+            'crashes_with_modules' => $crashesWithModules,
+            'processed_crashes' => $processedCrashes,
+            'stored_symbol_versions' => $storedSymbolVersions,
+            'stored_binary_versions' => $storedBinaryVersions,
+            'last_processed_at' => $lastProcessedAt,
+            'last_successful_upload_at' => $lastUploadAt,
+            'recent_uploads' => $recentUploads,
+            'recent_upload_pager' => [
+                'offset' => $recentUploadOffset,
+                'newest_offset' => $recentUploadOffset > 0 ? 0 : null,
+                'older_offset' => $hasMoreUploads ? $recentUploadOffset + $recentUploadLimit : null,
+                'limit' => $recentUploadLimit,
+            ],
+            'summary' => $summary,
+        ];
     }
 
     /**
@@ -326,5 +407,62 @@ final class SymbolAdminManager
         }
 
         return null;
+    }
+
+    private function countStoredSymbolVersions(): int
+    {
+        $root = $this->projectDir . '/symbols/public';
+        if (!is_dir($root)) {
+            return 0;
+        }
+
+        $count = 0;
+        foreach (\Filesystem::listDirectory($root, false) as $module) {
+            $modulePath = $root . '/' . $module;
+            if (!is_dir($modulePath)) {
+                continue;
+            }
+
+            foreach (\Filesystem::listDirectory($modulePath, false) as $identifier) {
+                $identifierPath = $modulePath . '/' . $identifier;
+                if (!is_dir($identifierPath)) {
+                    continue;
+                }
+
+                foreach (\Filesystem::listDirectory($identifierPath, false) as $file) {
+                    if (str_ends_with($file, '.sym.gz')) {
+                        $count++;
+                        break;
+                    }
+                }
+            }
+        }
+
+        return $count;
+    }
+
+    private function countStoredBinaryVersions(): int
+    {
+        $root = $this->projectDir . '/symbols/binaries';
+        if (!is_dir($root)) {
+            return 0;
+        }
+
+        $count = 0;
+        foreach (\Filesystem::listDirectory($root, false) as $module) {
+            $modulePath = $root . '/' . $module;
+            if (!is_dir($modulePath)) {
+                continue;
+            }
+
+            foreach (\Filesystem::listDirectory($modulePath, false) as $identifier) {
+                $identifierPath = $modulePath . '/' . $identifier;
+                if (is_dir($identifierPath) && StorageRetentionManager::getBinaryRetentionStatus($this->projectDir, $module, $identifier)['deleted'] === false && $this->findStoredBinaryPath($module, $identifier) !== null) {
+                    $count++;
+                }
+            }
+        }
+
+        return $count;
     }
 }

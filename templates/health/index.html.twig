@@ -12,12 +12,6 @@
             <a href="{{ path('dashboard') }}" class="btn btn-outline-secondary">Dashboard</a>
         </div>
 
-        {% for label, messages in app.flashes %}
-            {% for message in messages %}
-                <div class="alert alert-{{ label == 'danger' ? 'danger' : (label == 'warning' ? 'warning' : 'success') }}">{{ message }}</div>
-            {% endfor %}
-        {% endfor %}
-
         <section class="profile-panel mb-3">
             <h2 class="h5 mb-3">Queue</h2>
             <div class="profile-stat-grid">
@@ -100,13 +94,23 @@
             </div>
         </section>
 
-        <section class="profile-panel mt-3">
+        <section id="auth-mail" class="profile-panel mt-3">
             <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
                 <div>
                     <h2 class="h5 mb-1">Authentication & Mail</h2>
                     <div class="text-muted">Quick diagnostics for SMTP delivery plus Steam and Discord sign-in configuration.</div>
                 </div>
             </div>
+
+            {% for message in app.flashes('auth_danger') %}
+                <div class="alert alert-danger">{{ message }}</div>
+            {% endfor %}
+            {% for message in app.flashes('auth_warning') %}
+                <div class="alert alert-warning">{{ message }}</div>
+            {% endfor %}
+            {% for message in app.flashes('auth_success') %}
+                <div class="alert alert-success">{{ message }}</div>
+            {% endfor %}
 
             <div class="table-responsive">
                 <table class="table table-sm align-middle mb-0">
@@ -200,6 +204,11 @@
                 <input type="hidden" name="upload_failure_backoff_enabled" value="{{ uploadSettings.upload_failure_backoff_enabled ? '1' : '0' }}">
                 <input type="hidden" name="upload_failure_backoff_threshold" value="{{ uploadSettings.upload_failure_backoff_threshold }}">
                 <input type="hidden" name="upload_failure_backoff_ttl" value="{{ uploadSettings.upload_failure_backoff_ttl }}">
+                {% for category, categorySettings in uploadSettings.storage_cleanup %}
+                    <input type="hidden" name="storage_cleanup_{{ category }}_enabled" value="{{ categorySettings.enabled ? '1' : '0' }}">
+                    <input type="hidden" name="storage_cleanup_{{ category }}_max_total_size" value="{{ storageCleanupMegabytes[category] }}">
+                    <input type="hidden" name="storage_cleanup_{{ category }}_max_age_days" value="{{ categorySettings.max_age_days }}">
+                {% endfor %}
 
                 <div class="row g-3">
                     <div class="col-md-6">
@@ -252,7 +261,7 @@
             </form>
         </section>
 
-        <section class="profile-panel mt-3">
+        <section id="upload-processing" class="profile-panel mt-3">
             <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
                 <div>
                     <h2 class="h5 mb-1">Upload processing settings</h2>
@@ -274,6 +283,13 @@
             <form method="post" class="health-settings-stack">
                 <input type="hidden" name="_token" value="{{ csrf_token('upload-settings') }}">
                 <input type="hidden" name="upload_settings_form" value="1">
+                <input type="hidden" name="auth_enable_steam" value="{{ uploadSettings.auth_enable_steam ? '1' : '0' }}">
+                <input type="hidden" name="auth_enable_discord" value="{{ uploadSettings.auth_enable_discord ? '1' : '0' }}">
+                <input type="hidden" name="auth_enable_email_login_link" value="{{ uploadSettings.auth_enable_email_login_link ? '1' : '0' }}">
+                <input type="hidden" name="auth_enable_password_login" value="{{ uploadSettings.auth_enable_password_login ? '1' : '0' }}">
+                <input type="hidden" name="auth_enable_password_registration" value="{{ uploadSettings.auth_enable_password_registration ? '1' : '0' }}">
+                <input type="hidden" name="auth_enable_password_reset" value="{{ uploadSettings.auth_enable_password_reset ? '1' : '0' }}">
+                <input type="hidden" name="auth_enable_token_login" value="{{ uploadSettings.auth_enable_token_login ? '1' : '0' }}">
                 <div class="mb-3">
                     <div class="form-check form-switch">
                         <input class="form-check-input" type="checkbox" role="switch" id="streaming-symbols-enabled" name="streaming_symbols_enabled" value="1"{% if uploadSettings.streaming_symbols_enabled %} checked{% endif %}>
@@ -326,6 +342,70 @@
                     <label class="form-label" for="upload-failure-backoff-ttl">Backoff TTL (sec)</label>
                     <input id="upload-failure-backoff-ttl" name="upload_failure_backoff_ttl" type="number" min="60" step="60" class="form-control" value="{{ uploadSettings.upload_failure_backoff_ttl }}">
                 </div>
+                <hr class="my-4">
+                <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
+                    <div>
+                        <h3 class="h6 mb-1">Storage cleanup</h3>
+                        <div class="text-muted">Automatic retention rules for heavy crash artifacts, stored symbols, and stored binaries.</div>
+                    </div>
+                    <button type="submit" class="btn btn-outline-secondary" form="storage-cleanup-run-form">Run cleanup now</button>
+                </div>
+                {% for message in app.flashes('storage_cleanup_danger') %}
+                    <div class="alert alert-danger">{{ message }}</div>
+                {% endfor %}
+                {% for message in app.flashes('storage_cleanup_warning') %}
+                    <div class="alert alert-warning">{{ message }}</div>
+                {% endfor %}
+                {% for message in app.flashes('storage_cleanup_success') %}
+                    <div class="alert alert-success">{{ message }}</div>
+                {% endfor %}
+                {% if storageCleanupSummary %}
+                    <div class="alert alert-info">
+                        Last {{ storageCleanupSummary.mode }} cleanup ran at {{ storageCleanupSummary.ran_at|date('Y-m-d H:i:s') }}.
+                        Deleted {{ storageCleanupSummary.deleted_files }} file(s) and reclaimed {{ storageCleanupSummary.reclaimed_bytes|human_size }}.
+                    </div>
+                {% endif %}
+                <div class="table-responsive mb-3">
+                    <table class="table table-sm align-middle">
+                        <thead>
+                            <tr>
+                                <th>Category</th>
+                                <th>Enabled</th>
+                                <th>Max total size</th>
+                                <th>Max age</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for category, categorySettings in uploadSettings.storage_cleanup %}
+                                <tr>
+                                    <td>
+                                        <div>{{ category|replace({'_': ' '})|title }}</div>
+                                        <div class="small text-muted mt-1">
+                                            {{ storageCleanupUsage[category].files }} file(s) · {{ storageCleanupUsage[category].bytes|human_size }}
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="form-check form-switch mb-0">
+                                            <input class="form-check-input" type="checkbox" role="switch" id="cleanup-{{ category }}-enabled" name="storage_cleanup_{{ category }}_enabled" value="1"{% if categorySettings.enabled %} checked{% endif %}>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="input-group input-group-sm">
+                                            <input id="cleanup-{{ category }}-size" name="storage_cleanup_{{ category }}_max_total_size" type="number" min="0" step="1" class="form-control cleanup-size-helper" value="{{ storageCleanupMegabytes[category] }}" placeholder="0">
+                                            <span class="input-group-text">MB</span>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="input-group input-group-sm">
+                                            <input name="storage_cleanup_{{ category }}_max_age_days" type="number" min="0" step="1" class="form-control" value="{{ categorySettings.max_age_days }}">
+                                            <span class="input-group-text">days</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
                 <div class="d-flex gap-2">
                     <button type="submit" class="btn btn-primary">Save</button>
                     <button type="submit" name="reset_upload_settings" value="1" class="btn btn-outline-secondary">Reset</button>
@@ -333,7 +413,7 @@
             </form>
         </section>
 
-        <section class="profile-panel mt-3">
+        <section id="backoff-state" class="profile-panel mt-3">
             <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
                 <div>
                     <h2 class="h5 mb-1">Upload failure backoff state</h2>
@@ -344,6 +424,16 @@
                     <button type="submit" class="btn btn-outline-secondary">Clear backoff state</button>
                 </form>
             </div>
+
+            {% for message in app.flashes('backoff_danger') %}
+                <div class="alert alert-danger">{{ message }}</div>
+            {% endfor %}
+            {% for message in app.flashes('backoff_warning') %}
+                <div class="alert alert-warning">{{ message }}</div>
+            {% endfor %}
+            {% for message in app.flashes('backoff_success') %}
+                <div class="alert alert-success">{{ message }}</div>
+            {% endfor %}
 
             <div class="profile-stat-grid mb-3">
                 <div>
@@ -392,7 +482,7 @@
             </div>
         </section>
 
-        <section class="profile-panel mt-3">
+        <section id="symbol-request-policy" class="profile-panel mt-3">
             <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
                 <div>
                     <h2 class="h5 mb-1">Binary upload request policy</h2>
@@ -479,7 +569,7 @@
             </div>
         </section>
 
-        <section class="profile-panel mt-3">
+        <section id="symbol-maintenance" class="profile-panel mt-3">
             <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
                 <div>
                     <h2 class="h5 mb-1">Symbol maintenance</h2>
@@ -491,22 +581,106 @@
                 </form>
             </div>
 
-            <form method="post" action="{{ path('health_symbols_upload_binary') }}" enctype="multipart/form-data" class="row g-3">
+            {% for message in app.flashes('symbols_danger') %}
+                <div class="alert alert-danger">{{ message }}</div>
+            {% endfor %}
+            {% for message in app.flashes('symbols_warning') %}
+                <div class="alert alert-warning">{{ message }}</div>
+            {% endfor %}
+            {% for message in app.flashes('symbols_success') %}
+                <div class="alert alert-success">{{ message }}</div>
+            {% endfor %}
+
+            {% if symbolDiagnostics.summary.has_warning %}
+                <div class="alert alert-warning">
+                    <strong>{{ symbolDiagnostics.summary.title }}</strong>
+                    <div>{{ symbolDiagnostics.summary.body }}</div>
+                </div>
+            {% endif %}
+
+            <div class="profile-stat-grid mb-3">
+                <div>
+                    <div class="profile-stat-value">{{ symbolDiagnostics.module_rows }}</div>
+                    <div class="text-muted">Module rows</div>
+                </div>
+                <div>
+                    <div class="profile-stat-value">{{ symbolDiagnostics.crashes_with_modules }}</div>
+                    <div class="text-muted">Crashes with modules</div>
+                </div>
+                <div>
+                    <div class="profile-stat-value">{{ symbolDiagnostics.stored_symbol_versions }}</div>
+                    <div class="text-muted">Stored symbol versions</div>
+                </div>
+                <div>
+                    <div class="profile-stat-value">{{ symbolDiagnostics.stored_binary_versions }}</div>
+                    <div class="text-muted">Stored binary versions</div>
+                </div>
+            </div>
+
+            <form method="post" action="{{ path('health_symbols_upload_binary') }}" enctype="multipart/form-data" class="row g-3" id="binary-upload-form">
                 <input type="hidden" name="_token" value="{{ csrf_token('health-symbols-upload-binary') }}">
-                <div class="col-lg">
-                    <label class="form-label" for="binary-file">Upload binary and generate symbols</label>
-                    <input id="binary-file" type="file" name="binary_file" class="form-control" required>
+                <div class="col-12">
+                    <label class="form-label" for="binary-file">Upload binaries and generate symbols</label>
+                    <div id="binary-drop-zone" class="border rounded p-4 text-center health-drop-zone">
+                        <input id="binary-file" type="file" name="binary_files[]" class="d-none" multiple>
+                        <div class="fw-semibold mb-2">Drag and drop binaries here</div>
+                        <div class="text-muted mb-3">or click this panel to choose one or more files</div>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="binary-file-trigger">Choose files</button>
+                        <div class="small text-muted mt-3" id="binary-file-selection">No files selected.</div>
+                        <div class="mt-2 d-flex flex-wrap justify-content-center gap-2" id="binary-file-list"></div>
+                    </div>
                 </div>
                 <div class="col-auto d-flex align-items-end">
                     <button type="submit" class="btn btn-success">Upload binary</button>
                 </div>
-                <div class="col-12">
-                    <div class="form-text">Uses <code>dump_syms</code> when possible and falls back to <code>nm</code> for degraded public-symbol output.</div>
-                </div>
             </form>
+
+            <div class="mt-3">
+                <a class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" href="#symbol-upload-details-panel" role="button" aria-expanded="{{ symbolUploadsOpen ? 'true' : 'false' }}" aria-controls="symbol-upload-details-panel">Upload details</a>
+            </div>
+
+            <div id="symbol-upload-details-panel" class="collapse{% if symbolUploadsOpen %} show{% endif %} mt-3">
+                <div class="form-text mb-3">Uses <code>dump_syms</code> when possible and falls back to <code>nm</code> for degraded public-symbol output. Recent entries also include manual uploads from this page.</div>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Endpoint</th>
+                                <th>Module</th>
+                                <th>Identifier</th>
+                                <th>Status</th>
+                                <th>Result</th>
+                                <th>Reason</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for entry in symbolDiagnostics.recent_uploads %}
+                                <tr class="{{ entry.status_code >= 400 ? 'table-danger' : '' }}">
+                                    <td>{{ entry.created_at }}</td>
+                                    <td>{{ entry.endpoint }}</td>
+                                    <td class="font-monospace">{{ entry.module ?: '-' }}</td>
+                                    <td class="font-monospace">{{ entry.identifier ?: '-' }}</td>
+                                    <td>{{ entry.status_code ?: '-' }}</td>
+                                    <td>{{ entry.result ?: '-' }}</td>
+                                    <td>{{ entry.reason ?: '-' }}</td>
+                                </tr>
+                            {% else %}
+                                <tr>
+                                    <td colspan="7" class="text-muted">No recent symbol or binary upload audit entries were found.</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mt-3">
+                    <a class="btn btn-outline-secondary btn-sm{% if symbolDiagnostics.recent_upload_pager.newest_offset is null %} disabled{% endif %}" {% if symbolDiagnostics.recent_upload_pager.newest_offset is not null %}href="{{ path('health', {recent_upload_offset: symbolDiagnostics.recent_upload_pager.newest_offset, symbol_uploads_open: 1, _fragment: 'symbol-maintenance'}) }}"{% else %}aria-disabled="true"{% endif %}>&larr; Newest</a>
+                    <a class="btn btn-outline-secondary btn-sm{% if symbolDiagnostics.recent_upload_pager.older_offset is null %} disabled{% endif %}" {% if symbolDiagnostics.recent_upload_pager.older_offset is not null %}href="{{ path('health', {recent_upload_offset: symbolDiagnostics.recent_upload_pager.older_offset, symbol_uploads_open: 1, _fragment: 'symbol-maintenance'}) }}"{% else %}aria-disabled="true"{% endif %}>Older &rarr;</a>
+                </div>
+            </div>
         </section>
 
-        <section class="profile-panel mt-3">
+        <section id="stored-symbols" class="profile-panel mt-3">
             <div class="table-more module-log-toggle mb-3">
                 <a href="#stored-symbols-panel" data-bs-toggle="collapse" aria-expanded="{{ symbolsOpen ? 'true' : 'false' }}" aria-controls="stored-symbols-panel">
                     <svg class="bi me-1" width="16" height="16" aria-hidden="true">
@@ -576,9 +750,17 @@
                                                 {% endif %}
                                             </td>
                                             <td class="font-monospace">{{ primaryEntry.identifier }}</td>
-                                            <td>{{ primaryEntry.bytes|number_format }}</td>
+                                            <td>{{ primaryEntry.bytes|human_size }}</td>
                                             <td>{{ primaryEntry.modified_at|date('Y-m-d H:i:s') }}</td>
-                                            <td>{{ primaryEntry.binary_path ? 'Available' : 'Missing' }}</td>
+                                            <td>
+                                                {% if primaryEntry.binary_path %}
+                                                    Available
+                                                {% elseif primaryEntry.binary_retention.deleted %}
+                                                    Deleted by cleanup
+                                                {% else %}
+                                                    Missing
+                                                {% endif %}
+                                            </td>
                                             <td class="text-end">
                                                 <button type="submit" form="delete-symbol-{{ groupIndex }}-1" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete stored symbols for {{ primaryEntry.module }}/{{ primaryEntry.identifier }}?');">Delete</button>
                                             </td>
@@ -605,9 +787,17 @@
                                                                             <td><input type="checkbox" name="selected_symbols[]" value="{{ entry.module }}|{{ entry.identifier }}"></td>
                                                                             <td class="font-monospace"></td>
                                                                             <td class="font-monospace">{{ entry.identifier }}</td>
-                                                                            <td>{{ entry.bytes|number_format }}</td>
+                                                                            <td>{{ entry.bytes|human_size }}</td>
                                                                             <td>{{ entry.modified_at|date('Y-m-d H:i:s') }}</td>
-                                                                            <td>{{ entry.binary_path ? 'Available' : 'Missing' }}</td>
+                                                                            <td>
+                                                                                {% if entry.binary_path %}
+                                                                                    Available
+                                                                                {% elseif entry.binary_retention.deleted %}
+                                                                                    Deleted by cleanup
+                                                                                {% else %}
+                                                                                    Missing
+                                                                                {% endif %}
+                                                                            </td>
                                                                             <td class="text-end">
                                                                                 <button type="submit" form="{{ deleteFormId }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete stored symbols for {{ entry.module }}/{{ entry.identifier }}?');">Delete</button>
                                                                             </td>
@@ -641,4 +831,107 @@
             </div>
         </section>
     </div>
+    <form id="storage-cleanup-run-form" method="post" action="{{ path('health_storage_cleanup_run') }}" class="d-none">
+        <input type="hidden" name="_token" value="{{ csrf_token('health-storage-cleanup-run') }}">
+    </form>
+    <script>
+        (() => {
+            const dropZone = document.getElementById('binary-drop-zone');
+            const input = document.getElementById('binary-file');
+            const trigger = document.getElementById('binary-file-trigger');
+            const selection = document.getElementById('binary-file-selection');
+            const fileList = document.getElementById('binary-file-list');
+            if (!dropZone || !input || !trigger || !selection || !fileList) {
+                return;
+            }
+
+            const updateSelection = () => {
+                if (!input.files || input.files.length === 0) {
+                    selection.textContent = 'No files selected.';
+                    fileList.innerHTML = '';
+                    return;
+                }
+
+                const files = Array.from(input.files);
+                selection.textContent = `${files.length} file(s) selected.`;
+                fileList.innerHTML = '';
+                files.forEach((file, index) => {
+                    const chip = document.createElement('span');
+                    chip.className = 'd-inline-flex align-items-center gap-2 border rounded px-2 py-1';
+
+                    const label = document.createElement('span');
+                    label.className = 'small text-muted';
+                    label.textContent = file.name;
+
+                    const remove = document.createElement('button');
+                    remove.type = 'button';
+                    remove.className = 'btn-close btn-close-white opacity-75';
+                    remove.setAttribute('aria-label', `Remove ${file.name}`);
+                    remove.addEventListener('click', (event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        const nextFiles = files.filter((_, fileIndex) => fileIndex !== index);
+                        const dataTransfer = new DataTransfer();
+                        nextFiles.forEach((nextFile) => dataTransfer.items.add(nextFile));
+                        input.files = dataTransfer.files;
+                        updateSelection();
+                    });
+
+                    chip.appendChild(label);
+                    chip.appendChild(remove);
+                    fileList.appendChild(chip);
+                });
+            };
+
+            const assignFiles = (files) => {
+                if (!files || files.length === 0) {
+                    return;
+                }
+
+                const dataTransfer = new DataTransfer();
+                Array.from(files).forEach((file) => dataTransfer.items.add(file));
+                input.files = dataTransfer.files;
+                updateSelection();
+            };
+
+            const openPicker = () => input.click();
+
+            trigger.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                openPicker();
+            });
+            dropZone.addEventListener('click', (event) => {
+                if (event.target.closest('#binary-file-trigger') || event.target.closest('#binary-file-list') || event.target.closest('button')) {
+                    return;
+                }
+                openPicker();
+            });
+            input.addEventListener('change', updateSelection);
+            ['dragenter', 'dragover'].forEach((eventName) => {
+                dropZone.addEventListener(eventName, (event) => {
+                    event.preventDefault();
+                    dropZone.classList.add('border-primary');
+                });
+            });
+            ['dragleave', 'drop'].forEach((eventName) => {
+                dropZone.addEventListener(eventName, (event) => {
+                    event.preventDefault();
+                    dropZone.classList.remove('border-primary');
+                });
+            });
+            dropZone.addEventListener('drop', (event) => {
+                assignFiles(event.dataTransfer ? event.dataTransfer.files : null);
+            });
+
+            if (window.location.hash === '#symbol-maintenance') {
+                const target = document.getElementById('symbol-maintenance');
+                if (target) {
+                    window.requestAnimationFrame(() => {
+                        target.scrollIntoView({block: 'start'});
+                    });
+                }
+            }
+        })();
+    </script>
 {% endblock %}

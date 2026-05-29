@@ -2,6 +2,7 @@
 
 namespace App\Twig;
 
+use App\Util\HumanSize;
 use Twig\Extension\AbstractExtension;
 use Twig\TwigFilter;
 
@@ -16,6 +17,7 @@ class AppExtension extends AbstractExtension
             new TwigFilter('crashid', [$this, 'formatCrashId']),
             new TwigFilter('format_metadata_key', [$this, 'formatMetadataKey']),
             new TwigFilter('address', [$this, 'formatAddress']),
+            new TwigFilter('human_size', [$this, 'formatHumanSize']),
             new TwigFilter('wrap', [$this, 'wrapTag'], [
                 'pre_escape' => 'html',
                 'is_safe' => ['html'],
@@ -140,6 +142,11 @@ class AppExtension extends AbstractExtension
     public function formatAddress(string $string): string
     {
         return sprintf('0x%08s', $string);
+    }
+
+    public function formatHumanSize(int $bytes): string
+    {
+        return HumanSize::format($bytes);
     }
 
     public function wrapTag(string $child, string $tag): string

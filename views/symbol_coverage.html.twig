@@ -57,7 +57,7 @@
                 <th>Type</th>
                 <th>Module</th>
                 <th>Identifier</th>
-                <th>Bytes</th>
+                <th>Size</th>
                 <th>Status</th>
                 <th>Reason</th>
                 <th>Remote</th>
@@ -71,7 +71,7 @@
                 <td>{{ event.endpoint }}</td>
                 <td class="monospace">{{ event.module }}</td>
                 <td class="monospace">{{ event.identifier }}</td>
-                <td>{{ event.bytes|number_format }}</td>
+                <td>{{ event.bytes|human_size }}</td>
                 <td>{{ event.status_code }}</td>
                 <td>{{ event.reason ?: '-' }}</td>
                 <td>{{ event.remote_addr ?: event.account ?: '-' }}</td>

@@ -7,6 +7,17 @@
 <div class="clearfix" style="margin-bottom: 20px;">
     <a class="btn btn-default pull-left" href="{{ path('details', {'id': id}) }}"><i class="icon-chevron-left"></i> Back to Details</a>
 </div>
+{% if retention is defined and retention.has_deleted_artifacts %}
+<div class="alert alert-block alert-warning">
+{% if retention.stackwalk_deleted %}
+    Stored stackwalk stderr was deleted by storage cleanup, so only database-backed processing logs remain.
+{% endif %}
+{% if retention.dump_deleted %}
+    {% if retention.stackwalk_deleted %}<br>{% endif %}
+    The original minidump was also deleted by storage cleanup, so raw re-analysis is unavailable.
+{% endif %}
+</div>
+{% endif %}
 {% if processing_logs is defined and processing_logs is not empty %}
 <h2>Processing Runs</h2>
 <p class="text-muted">

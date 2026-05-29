@@ -31,8 +31,8 @@
                     <div class="text-muted">Binary uploads</div>
                 </div>
                 <div>
-                    <div class="profile-stat-value">{{ tokenStats.bytes|number_format }}</div>
-                    <div class="text-muted">Bytes uploaded</div>
+                    <div class="profile-stat-value">{{ tokenStats.bytes|human_size }}</div>
+                    <div class="text-muted">Data uploaded</div>
                 </div>
             </div>
         </section>
@@ -46,7 +46,7 @@
                             <th>Server</th>
                             <th>Remote IP</th>
                             <th>Uses</th>
-                            <th>Bytes</th>
+                            <th>Size</th>
                             <th>Last used</th>
                         </tr>
                     </thead>
@@ -56,7 +56,7 @@
                                 <td>{{ server.account ?: 'Unknown account' }}</td>
                                 <td>{{ server.remote_addr ?: 'Unknown IP' }}</td>
                                 <td>{{ server.uses }}</td>
-                                <td>{{ server.bytes|number_format }}</td>
+                                <td>{{ server.bytes|human_size }}</td>
                                 <td>{{ server.last_used }}</td>
                             </tr>
                         {% else %}
@@ -85,7 +85,7 @@
                             <th>Server</th>
                             <th>Module</th>
                             <th>Identifier</th>
-                            <th>Bytes</th>
+                            <th>Size</th>
                             <th>Status</th>
                         </tr>
                     </thead>
@@ -103,7 +103,7 @@
                                         <code>{{ usage.identifier ?: '-' }}</code>
                                     {% endif %}
                                 </td>
-                                <td>{{ usage.bytes|number_format }}</td>
+                                <td>{{ usage.bytes|human_size }}</td>
                                 <td>{{ usage.status_code }}</td>
                             </tr>
                         {% else %}

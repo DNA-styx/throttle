@@ -3,6 +3,7 @@
 namespace Throttle;
 
 use App\Runtime\CrashSourceLookupManager;
+use App\Runtime\StorageRetentionManager;
 use App\Runtime\UploadFailureBackoff;
 use App\Legacy\LegacyDbalConnection;
 use Silex\Application;
@@ -1972,6 +1973,7 @@ class Crash
         $terminalConsoleCause = ($consoleCause['terminal'] ?? false) ? $consoleCause : null;
         $consoleBlaming = $consoleCause['supporting_blaming'] ?? ($terminalConsoleCause['blaming'] ?? null);
         $crash['dump_available'] = \Filesystem::pathExists($app['root'] . '/dumps/' . substr($id, 0, 2) . '/' . $id . '.dmp');
+        $crash['retention'] = StorageRetentionManager::getCrashArtifactStatus($app['root'], $id);
 
         ksort($crash['metadata']);
 
@@ -1979,6 +1981,16 @@ class Crash
         $stack = $app['db']->executeQuery('SELECT frame, module, function, rendered, url FROM frame WHERE crash = ? AND thread = ? ORDER BY frame', [$id, $crash['thread']])->fetchAll();
         $modules = $app['db']->executeQuery('SELECT name, identifier, processed, present, HEX(base) AS base FROM module WHERE crash = ? ORDER BY name', [$id])->fetchAll();
         $modules = self::buildModuleCoverageRows($modules, $app['config']);
+        foreach ($modules as &$module) {
+            $module['symbol_retention'] = StorageRetentionManager::getSymbolRetentionStatus($app['root'], (string) ($module['name'] ?? ''), (string) ($module['identifier'] ?? ''));
+            $module['binary_retention'] = StorageRetentionManager::getBinaryRetentionStatus($app['root'], (string) ($module['name'] ?? ''), (string) ($module['identifier'] ?? ''));
+            if (($module['symbol_retention']['deleted'] ?? false) === true) {
+                $module['policy_hint'] = trim((string) ($module['policy_hint'] ?? '') . ' Deleted by cleanup.');
+            } elseif (($module['binary_retention']['deleted'] ?? false) === true && (int) ($module['present'] ?? 0) !== 1) {
+                $module['policy_hint'] = trim((string) ($module['policy_hint'] ?? '') . ' Binary was deleted by cleanup.');
+            }
+        }
+        unset($module);
         $loadFromAddressNotice = self::buildLoadFromAddressNotice($stack);
         if ($loadFromAddressNotice !== null) {
             array_unshift($notices, $loadFromAddressNotice);
@@ -3065,7 +3077,8 @@ class Crash
         $path = $app['root'] . '/dumps/' . substr($id, 0, 2) . '/' . $id . '.dmp';
 
         if (!\Filesystem::pathExists($path)) {
-            $app->abort(404);
+            $retention = StorageRetentionManager::getCrashArtifactStatus($app['root'], (string) $id);
+            $app->abort(($retention['dump_deleted'] ?? false) ? 410 : 404, ($retention['dump_deleted'] ?? false) ? 'Minidump was deleted by storage cleanup.' : null);
         }
 
         return $app->sendFile($path)->setContentDisposition(\Symfony\Component\HttpFoundation\ResponseHeaderBag::DISPOSITION_ATTACHMENT, 'crash_' . $id . '.dmp');
@@ -3115,7 +3128,12 @@ class Crash
             $logs = \Filesystem::readFile($path);
         }
 
-        return $app['twig']->render('logs.html.twig', array('id' => $id, 'logs' => $logs, 'processing_logs' => $processing_logs));
+        return $app['twig']->render('logs.html.twig', array(
+            'id' => $id,
+            'logs' => $logs,
+            'processing_logs' => $processing_logs,
+            'retention' => StorageRetentionManager::getCrashArtifactStatus($app['root'], (string) $id),
+        ));
     }
 
     public function metadata(Application $app, $id)
@@ -3539,6 +3557,7 @@ class Crash
             'id' => $id,
             'scan' => $app['request']->get('scan', null),
             'symbols' => $app['request']->get('symbols', null),
+            'retention' => StorageRetentionManager::getCrashArtifactStatus($app['root'], (string) $id),
             'source_lookup_enabled' => (($app['config']['upload-settings']['crash_source_lookup_enabled'] ?? false) === true),
             'source_lookup_local_allowed' => (($app['user']['admin'] ?? false) === true),
             'ai_analysis_enabled' => (($app['config']['upload-settings']['crash_ai_analysis_enabled'] ?? false) === true),
@@ -3609,8 +3628,11 @@ class Crash
         $path = $app['root'] . '/dumps/' . substr($id, 0, 2) . '/' . $id . '.dmp';
 
         if (!\Filesystem::pathExists($path)) {
+            $retention = StorageRetentionManager::getCrashArtifactStatus($app['root'], (string) $id);
             return new \Symfony\Component\HttpFoundation\Response(json_encode([
-                'error' => 'Minidump file is unavailable.',
+                'error' => ($retention['dump_deleted'] ?? false)
+                    ? 'Minidump file was deleted by storage cleanup.'
+                    : 'Minidump file is unavailable.',
             ]), 200, array(
                 'Content-Type' => 'application/json',
             ));

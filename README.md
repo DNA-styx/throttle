@@ -73,6 +73,7 @@ docker compose --env-file .env.prod.docker -f compose.prod.yaml exec app php bin
 ```
 
 The production compose file starts the web app plus a `processor` service that runs `crash:process --update --limit=10` every minute.
+That processor pass also runs automatic `/health` storage cleanup when retention rules are enabled.
 
 Open `http://SERVER_IP:18080/` or place a reverse proxy in front of the container.
 
@@ -211,9 +212,11 @@ sudo -u www-data php8.4 /var/www/throttle/bin/console messenger:consume async --
 
 - `/health` controls enabled sign-in methods and upload/runtime settings
 - `/health` binary upload request policy controls which modules Accelerator is asked to upload during presubmit
-- `/health` includes upload failure backoff, SMTP/Discord/auth diagnostics, symbol cache tools, binary upload tools, and AI analysis toggle
+- `/health` includes upload failure backoff, SMTP/Discord/auth diagnostics, symbol cache tools, binary upload tools, storage cleanup/retention, and AI analysis toggle
+- `Storage cleanup` can delete old crash artifacts, stored symbols, and stored binaries by age or total size; manual runs are available in `/health`
 - user AI configs live in **Profile -> AI analysis**
 - pending crashes usually mean `crash:process` is not running or failed
+- automatic storage cleanup runs inside `crash:process`; on manual installs you therefore need the timer/service or another scheduler that actually runs that command
 - `bin/carburetor`, `bin/minidump_stackwalk`, `bin/dump_syms`, `bin/breakpad_moduleid`, and `bin/nm` must be executable
 - `var/`, `cache/`, `dumps/`, and `symbols/` must be writable by the PHP-FPM user
 - if templates fail with missing Encore entrypoints, run `npm ci && npm run build` and verify `public/build/entrypoints.json` exists
@@ -313,6 +316,7 @@ docker compose --env-file .env.prod.docker -f compose.prod.yaml exec app php bin
 ```
 
 Production compose поднимает веб-приложение, MariaDB, Redis и `processor`, который раз в минуту запускает `crash:process --update --limit=10`.
+Этот проход `processor` также запускает automatic storage cleanup из `/health`, если retention rules включены.
 
 `BOOTSTRAP_ADMIN_EMAIL` и `BOOTSTRAP_ADMIN_PASSWORD` создают первого локального пользователя, если таблица пользователей ещё пуста. Этот bootstrap-пользователь сразу помечается подтверждённым, поэтому вход по email + password работает даже без настроенной почты. Админом он не становится автоматически: права нужно выдать отдельно через `APP_ADMINS`, обычно `APP_ADMINS="user:1"` на чистой установке.
 
@@ -457,6 +461,9 @@ APP_ADMINS="steam:STEAMID64,user:1"
 - диагностика SMTP / Discord / auth
 - переключатель AI crash analysis
 - инструменты для symbol cache, экспорта `.sym.gz` и ручной загрузки бинарников
+- storage cleanup / retention для crash artifacts, symbols и binaries
+
+`Storage cleanup` можно запускать вручную из `/health`. Автоматическая очистка выполняется внутри `crash:process`, поэтому для обычной VPS-установки timer или другой scheduler, запускающий `crash:process`, нужен не только для обработки крэшей, но и для retention cleanup.
 
 ### AI Analysis
 
