@@ -1981,6 +1981,7 @@ class Crash
         $stack = $app['db']->executeQuery('SELECT frame, module, function, rendered, url FROM frame WHERE crash = ? AND thread = ? ORDER BY frame', [$id, $crash['thread']])->fetchAll();
         $modules = $app['db']->executeQuery('SELECT name, identifier, processed, present, HEX(base) AS base FROM module WHERE crash = ? ORDER BY name', [$id])->fetchAll();
         $modules = self::buildModuleCoverageRows($modules, $app['config']);
+        $reprocessPendingModules = array();
         foreach ($modules as &$module) {
             $module['symbol_retention'] = StorageRetentionManager::getSymbolRetentionStatus($app['root'], (string) ($module['name'] ?? ''), (string) ($module['identifier'] ?? ''));
             $module['binary_retention'] = StorageRetentionManager::getBinaryRetentionStatus($app['root'], (string) ($module['name'] ?? ''), (string) ($module['identifier'] ?? ''));
@@ -1989,8 +1990,16 @@ class Crash
             } elseif (($module['binary_retention']['deleted'] ?? false) === true && (int) ($module['present'] ?? 0) !== 1) {
                 $module['policy_hint'] = trim((string) ($module['policy_hint'] ?? '') . ' Binary was deleted by cleanup.');
             }
+            if ((int) ($module['present'] ?? 0) === 1 && (int) ($module['processed'] ?? 0) === 0) {
+                $reprocessPendingModules[] = basename(str_replace('\\', '/', (string) ($module['name'] ?? '')));
+            }
         }
         unset($module);
+        $reprocessPendingModules = array_values(array_unique(array_filter($reprocessPendingModules, static fn ($name): bool => is_string($name) && $name !== '')));
+        sort($reprocessPendingModules, SORT_NATURAL | SORT_FLAG_CASE);
+        $crash['reprocess_pending'] = count($reprocessPendingModules) > 0;
+        $crash['reprocess_pending_module_count'] = count($reprocessPendingModules);
+        $crash['reprocess_pending_modules'] = $reprocessPendingModules;
         $loadFromAddressNotice = self::buildLoadFromAddressNotice($stack);
         if ($loadFromAddressNotice !== null) {
             array_unshift($notices, $loadFromAddressNotice);

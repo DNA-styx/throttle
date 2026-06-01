@@ -2,6 +2,7 @@
 
 namespace Throttle;
 
+use App\Runtime\CrashReprocessMarker;
 use Silex\Application;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 
@@ -168,12 +169,18 @@ class Symbols
 
             $app['redis']->hIncrBy('throttle:stats', 'symbols:submitted', 1);
             $app['redis']->hIncrBy('throttle:stats', 'symbols:submitted:bytes', $bytes);
-            $this->markModuleSymbolsPresent($app, $info['name'], $info['id']);
+            $reprocess = $this->markModuleSymbolsPresent($app, $info['name'], $info['id']);
             $app['redis']->hIncrBy('throttle:stats', 'symbols:accepted', 1);
             $this->setUploadInfo($app, $info['name'], $info['id'], $bytes);
 
+            $message = null;
+            if (($reprocess['stale_crashes'] ?? 0) > 0) {
+                $message = 'Marked ' . (int) $reprocess['stale_crashes'] . ' crash report(s) for reprocessing.';
+            }
+
             return $app['twig']->render('submit-symbols.txt.twig', array(
                 'module' => $info,
+                'message' => $message,
             ));
         } finally {
             if (is_resource($gzip)) {
@@ -188,20 +195,19 @@ class Symbols
         }
     }
 
-    private function markModuleSymbolsPresent(Application $app, string $module, string $identifier): void
+    private function markModuleSymbolsPresent(Application $app, string $module, string $identifier): array
     {
         if (!isset($app['db'])) {
-            return;
+            return ['updated_modules' => 0, 'stale_crashes' => 0];
         }
 
-        $updated = $app['db']->executeUpdate(
-            'UPDATE module SET present = 1 WHERE name = ? AND identifier = ? AND present = 0',
-            array($module, $identifier)
-        );
+        $result = CrashReprocessMarker::markModuleSymbolsPresentAndScheduleReprocess($app['db'], $module, $identifier);
 
-        if ($updated > 0) {
-            $app['redis']->hIncrBy('throttle:stats', 'symbols:module-present-updates', $updated);
+        if (($result['updated_modules'] ?? 0) > 0) {
+            $app['redis']->hIncrBy('throttle:stats', 'symbols:module-present-updates', (int) $result['updated_modules']);
         }
+
+        return $result;
     }
 
     private function findUploadedSymbolFile(Application $app): ?UploadedFile

@@ -3,6 +3,7 @@
 namespace App\Runtime;
 
 use App\Legacy\LegacyBridgeFactory;
+use App\Runtime\CrashReprocessMarker;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\ResponseHeaderBag;
 
@@ -175,6 +176,7 @@ final class SymbolAdminManager
         $moduleRows = (int) $app['db']->fetchOne('SELECT COUNT(*) FROM module');
         $moduleVersions = (int) $app['db']->fetchOne('SELECT COUNT(*) FROM (SELECT DISTINCT name, identifier FROM module) AS versions');
         $crashesWithModules = (int) $app['db']->fetchOne('SELECT COUNT(DISTINCT crash) FROM module');
+        $staleCrashes = CrashReprocessMarker::countCrashesAwaitingReprocess($app['db']);
         $processedCrashes = (int) $app['db']->fetchOne('SELECT COUNT(*) FROM crash WHERE processed = 1');
         $storedSymbolVersions = $this->countStoredSymbolVersions();
         $storedBinaryVersions = $this->countStoredBinaryVersions();
@@ -212,6 +214,12 @@ final class SymbolAdminManager
                 'title' => 'Processed crashes exist, but module inventory is empty.',
                 'body' => 'This usually means crashes were processed on another system, module rows were lost during migration, or the processing pipeline has not rebuilt module data yet.',
             ];
+        } elseif ($staleCrashes > 0) {
+            $summary = [
+                'has_warning' => true,
+                'title' => 'Symbols now exist, but some crashes still await reprocessing.',
+                'body' => sprintf('Throttle has %d crash report(s) with symbols available in the module table but stale processed output. The next crash:process --update pass should rebuild their stack and symbol coverage.', $staleCrashes),
+            ];
         } elseif ($moduleRows > 0 && $storedSymbolVersions === 0) {
             $summary = [
                 'has_warning' => true,
@@ -230,6 +238,7 @@ final class SymbolAdminManager
             'module_rows' => $moduleRows,
             'module_versions' => $moduleVersions,
             'crashes_with_modules' => $crashesWithModules,
+            'stale_crashes' => $staleCrashes,
             'processed_crashes' => $processedCrashes,
             'stored_symbol_versions' => $storedSymbolVersions,
             'stored_binary_versions' => $storedBinaryVersions,

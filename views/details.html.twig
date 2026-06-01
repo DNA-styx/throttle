@@ -608,6 +608,17 @@ body.theme-dark .crash-ai-panel code {
 <div class="alert alert-block alert-warning">This crash is missing a module list and will not have symbol information.</div>
 {% endif %}
 
+{% if crash.reprocess_pending|default(false) %}
+<div class="alert alert-block alert-info">
+    Symbols are now available for {{ crash.reprocess_pending_module_count }} module{{ crash.reprocess_pending_module_count == 1 ? '' : 's' }}, but this crash is still waiting for reprocessing.
+    Current stack output and likely-cause analysis may still reflect the older symbol state.
+{% if crash.reprocess_pending_modules|default([])|length > 0 %}
+    <br>
+    Pending modules: <code>{{ crash.reprocess_pending_modules|join(', ') }}</code>
+{% endif %}
+</div>
+{% endif %}
+
 {% if crash.retention.has_deleted_artifacts|default(false) %}
 <div class="alert alert-block alert-warning">
 {% if crash.retention.dump_deleted|default(false) %}

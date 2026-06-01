@@ -2,6 +2,7 @@
 
 namespace Throttle;
 
+use App\Runtime\CrashReprocessMarker;
 use App\Runtime\SymbolBinaryUpload;
 use App\Runtime\SymbolToolException;
 use App\Runtime\UploadFailureBackoff;
@@ -47,13 +48,16 @@ class Binary
         try {
             $result = SymbolBinaryUpload::storeUploadedBinary($app['root'], $file, $moduleHint, $identifierHint);
             $this->setUploadInfo($app, $result['module'], $result['identifier'], (int) $file->getSize());
-            $this->markModuleSymbolsPresent($app, $result['module'], $result['identifier']);
+            $reprocess = $this->markModuleSymbolsPresent($app, $result['module'], $result['identifier']);
             UploadFailureBackoff::registerSuccess($app['root'], $result['module'], $result['identifier']);
             $app['redis']->hIncrBy('throttle:stats', 'binaries:accepted', 1);
 
             $message = $result['message'];
             if ($result['degraded']) {
                 $message .= !empty($result['warning']) ? ' (' . $result['warning'] . '; public symbols generated via fallback)' : ' (degraded fallback)';
+            }
+            if (($reprocess['stale_crashes'] ?? 0) > 0) {
+                $message .= ' Marked ' . (int) $reprocess['stale_crashes'] . ' crash report(s) for reprocessing.';
             }
 
             return new Response($message . "\n");
@@ -88,20 +92,19 @@ class Binary
         return null;
     }
 
-    private function markModuleSymbolsPresent(Application $app, string $module, string $identifier): void
+    private function markModuleSymbolsPresent(Application $app, string $module, string $identifier): array
     {
         if (!isset($app['db'])) {
-            return;
+            return ['updated_modules' => 0, 'stale_crashes' => 0];
         }
 
-        $updated = $app['db']->executeUpdate(
-            'UPDATE module SET present = 1 WHERE name = ? AND identifier = ? AND present = 0',
-            array($module, $identifier)
-        );
+        $result = CrashReprocessMarker::markModuleSymbolsPresentAndScheduleReprocess($app['db'], $module, $identifier);
 
-        if ($updated > 0) {
-            $app['redis']->hIncrBy('throttle:stats', 'symbols:module-present-updates', $updated);
+        if (($result['updated_modules'] ?? 0) > 0) {
+            $app['redis']->hIncrBy('throttle:stats', 'symbols:module-present-updates', (int) $result['updated_modules']);
         }
+
+        return $result;
     }
 
     private function stringField(Application $app, string $field): ?string

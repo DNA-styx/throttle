@@ -5,6 +5,7 @@ namespace App\Controller;
 use App\Entity\User;
 use App\Runtime\AdminUserManager;
 use App\Runtime\AuthEnvironment;
+use App\Runtime\CrashReprocessMarker;
 use App\Runtime\StorageRetentionManager;
 use App\Runtime\SymbolAdminManager;
 use App\Runtime\SymbolBinaryUpload;
@@ -288,6 +289,7 @@ class HealthController extends AbstractController
                     $result['warning'] ?? 'Uploaded from health page'
                 );
                 $successfulUploads++;
+                $reprocess = CrashReprocessMarker::markModuleSymbolsPresentAndScheduleReprocess($connection, $result['module'], $result['identifier']);
 
                 $message = sprintf('Binary uploaded for %s/%s. ', $result['module'], $result['identifier']);
                 if ($result['degraded']) {
@@ -296,6 +298,9 @@ class HealthController extends AbstractController
                         : 'Symbols were generated via nm fallback.';
                 } else {
                     $message .= 'Breakpad symbols are ready.';
+                }
+                if (($reprocess['stale_crashes'] ?? 0) > 0) {
+                    $message .= ' Marked ' . (int) $reprocess['stale_crashes'] . ' crash report(s) for reprocessing.';
                 }
 
                 $this->addHealthFlash(

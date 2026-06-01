@@ -37,12 +37,27 @@ final class HttpAccessSubscriber implements EventSubscriberInterface
         }
 
         $statusCode = $exception instanceof HttpExceptionInterface ? $exception->getStatusCode() : Response::HTTP_FORBIDDEN;
-        if ($statusCode !== Response::HTTP_UNAUTHORIZED && $statusCode !== Response::HTTP_FORBIDDEN) {
+        if ($statusCode !== Response::HTTP_UNAUTHORIZED
+            && $statusCode !== Response::HTTP_FORBIDDEN
+            && $statusCode !== Response::HTTP_NOT_FOUND
+            && $statusCode !== Response::HTTP_GONE) {
             return;
         }
 
         $request = $event->getRequest();
         if ($request->isXmlHttpRequest()) {
+            return;
+        }
+
+        if (($statusCode === Response::HTTP_NOT_FOUND || $statusCode === Response::HTTP_GONE) && $this->expectsHtml($request)) {
+            $event->setResponse(new Response($this->twig->render('errors/http_status.html.twig', [
+                'status_code' => $statusCode,
+                'title' => $statusCode === Response::HTTP_GONE ? 'Data no longer available' : 'Page not found',
+                'comment' => $statusCode === Response::HTTP_GONE
+                    ? 'The requested crash data was deleted by storage cleanup and can no longer be opened.'
+                    : 'The requested crash or page was not found.',
+            ]), $statusCode));
+
             return;
         }
 
@@ -58,7 +73,20 @@ final class HttpAccessSubscriber implements EventSubscriberInterface
 
             return;
         }
-
         $event->setResponse(new Response($this->twig->render('security/access_denied.html.twig'), Response::HTTP_FORBIDDEN));
+    }
+
+    private function expectsHtml(\Symfony\Component\HttpFoundation\Request $request): bool
+    {
+        if ($request->getMethod() !== 'GET') {
+            return false;
+        }
+
+        $accept = strtolower((string) $request->headers->get('Accept', ''));
+        if ($accept === '') {
+            return true;
+        }
+
+        return str_contains($accept, 'text/html');
     }
 }

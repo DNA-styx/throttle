@@ -174,7 +174,7 @@ Typical shape:
 
 If the upload URLs already contain a profile token, `MinidumpAccount` is optional. Ownership can then be resolved from the token instead of SteamID64.
 
-`MinidumpPresubmit` is used for the early module inventory exchange before the full dump upload. If you disable it, the site can still process dumps, but early binary/symbol auto-request flow will not work.
+`MinidumpPresubmit` is used for the early module inventory exchange before the full dump upload. In this branch it is used to decide which binaries/symbols should be uploaded early; it is not yet used as a full metadata-only or dump-reject gate. If you disable it, the site can still process dumps, but early binary/symbol auto-request flow will not work.
 
 ### Upload Endpoints and Symbol Flow
 
@@ -214,8 +214,10 @@ sudo -u www-data php8.4 /var/www/throttle/bin/console messenger:consume async --
 - `/health` binary upload request policy controls which modules Accelerator is asked to upload during presubmit
 - `/health` includes upload failure backoff, SMTP/Discord/auth diagnostics, symbol cache tools, binary upload tools, storage cleanup/retention, and AI analysis toggle
 - `Storage cleanup` can delete old crash artifacts, stored symbols, and stored binaries by age or total size; manual runs are available in `/health`
+- when cleanup removes heavy crash artifacts, the related raw pages now return a normal `410 Gone` site page instead of a raw exception screen
 - user AI configs live in **Profile -> AI analysis**
 - pending crashes usually mean `crash:process` is not running or failed
+- when symbols or binaries arrive after an earlier crash was already processed, Throttle marks affected crash reports for automatic reprocessing on the next `crash:process --update` pass
 - automatic storage cleanup runs inside `crash:process`; on manual installs you therefore need the timer/service or another scheduler that actually runs that command
 - `bin/carburetor`, `bin/minidump_stackwalk`, `bin/dump_syms`, `bin/breakpad_moduleid`, and `bin/nm` must be executable
 - `var/`, `cache/`, `dumps/`, and `symbols/` must be writable by the PHP-FPM user
@@ -409,7 +411,7 @@ location ~ \.php$ {
 
 Если upload URLs уже содержат profile token, `MinidumpAccount` можно не указывать. В этом режиме владелец крэша определяется по token, а не по SteamID64.
 
-`MinidumpPresubmit` нужен для раннего обмена списком модулей перед загрузкой самого дампа. Если его выключить, сайт всё ещё сможет обработать сам dump, но ранний auto-request бинарников и symbols работать не будет.
+`MinidumpPresubmit` нужен для раннего обмена списком модулей перед загрузкой самого дампа. В этой ветке он используется именно для раннего запроса binaries/symbols и ещё не работает как полноценный metadata-only или dump-reject gate. Если его выключить, сайт всё ещё сможет обработать сам dump, но ранний auto-request бинарников и symbols работать не будет.
 
 ### Где Формируются Symbols
 
@@ -464,6 +466,8 @@ APP_ADMINS="steam:STEAMID64,user:1"
 - storage cleanup / retention для crash artifacts, symbols и binaries
 
 `Storage cleanup` можно запускать вручную из `/health`. Автоматическая очистка выполняется внутри `crash:process`, поэтому для обычной VPS-установки timer или другой scheduler, запускающий `crash:process`, нужен не только для обработки крэшей, но и для retention cleanup.
+Если cleanup удалил тяжёлые crash artifacts, связанные raw-страницы теперь отдают штатную страницу `410 Gone`, а не сырую exception page.
+Если symbols или binaries догрузились уже после первого processing pass, Throttle автоматически помечает затронутые crash reports на переобработку в следующем `crash:process --update`.
 
 ### AI Analysis
 

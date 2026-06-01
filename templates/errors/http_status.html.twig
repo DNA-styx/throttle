@@ -1,14 +1,15 @@
 {% extends 'base.html.twig' %}
 
-{% block title %}Access denied{% endblock %}
+{% block title %}{{ status_code }} {{ title }}{% endblock %}
 
 {% block body %}
     <div class="profile-shell">
         <div class="row justify-content-center">
             <div class="col-lg-8">
                 <section class="profile-panel">
-                    <h1 class="h3 mb-3">Access denied</h1>
-                    <p class="mb-4 text-muted">You do not have access to this page.</p>
+                    <div class="text-muted small mb-2">HTTP {{ status_code }}</div>
+                    <h1 class="h3 mb-3">{{ title }}</h1>
+                    <p class="mb-4 text-muted">{{ comment }}</p>
                     <a href="{{ path('index') }}" class="btn btn-outline-secondary">Back to dashboard</a>
                     {% if not app.user %}
                         <a href="{{ path('login', {'return': app.request.requestUri}) }}" class="btn btn-primary ms-2">

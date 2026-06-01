@@ -615,6 +615,10 @@
                     <div class="profile-stat-value">{{ symbolDiagnostics.stored_binary_versions }}</div>
                     <div class="text-muted">Stored binary versions</div>
                 </div>
+                <div>
+                    <div class="profile-stat-value">{{ symbolDiagnostics.stale_crashes }}</div>
+                    <div class="text-muted">Awaiting reprocess</div>
+                </div>
             </div>
 
             <form method="post" action="{{ path('health_symbols_upload_binary') }}" enctype="multipart/form-data" class="row g-3" id="binary-upload-form">
