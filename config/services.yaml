@@ -20,6 +20,7 @@ parameters:
     app.bootstrap_admin_email: '%env(default:app.bootstrap_admin_email_default:BOOTSTRAP_ADMIN_EMAIL)%'
     app.bootstrap_admin_password_default: ''
     app.bootstrap_admin_password: '%env(default:app.bootstrap_admin_password_default:BOOTSTRAP_ADMIN_PASSWORD)%'
+    app.code_editor_default: ''
     app.mailer_dsn_default: 'null://null'
     app.mailer_dsn: '%env(default:app.mailer_dsn_default:MAILER_DSN)%'
     app.mailer_from_default: 'throttle@example.com'
@@ -68,6 +69,12 @@ services:
         resource: '../src/Throttle/Command/'
         autowire: true
         autoconfigure: true
+
+    Throttle\Command\CrashProcessCommand:
+        arguments:
+            $legacyBridgeFactory: '@App\Legacy\LegacyBridgeFactory'
+            $storageRetentionManager: '@App\Runtime\StorageRetentionManager'
+            $crashDiscordWebhookDeliveryManager: '@App\Runtime\CrashDiscordWebhookDeliveryManager'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones

@@ -5,6 +5,7 @@ namespace App\Security;
 use App\Entity\ExternalAccount;
 use App\Entity\User;
 use App\Repository\UserRepository;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
 
@@ -73,7 +74,13 @@ final class BootstrapAdminManager
         }
         $user->setLastLogin(new \DateTimeImmutable());
 
-        $this->entityManager->persist($user);
-        $this->entityManager->flush();
+        try {
+            $this->entityManager->persist($user);
+            $this->entityManager->flush();
+        } catch (UniqueConstraintViolationException) {
+            // Two first requests can race on a clean install. If another request
+            // created the bootstrap user first, keep the current request alive.
+            $this->entityManager->clear();
+        }
     }
 }

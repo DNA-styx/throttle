@@ -12,6 +12,7 @@ use Symfony\Component\HttpClient\HttpClient;
 class Crash
 {
     private const SIGNATURE_NOTES_PER_PAGE = 5;
+    private const DISCORD_STACK_TRACE_LINE_LIMIT = 18;
 
     private static function getSafeReturnPath(Application $app, ?string $return, string $fallbackRoute): string
     {
@@ -2656,6 +2657,36 @@ class Crash
         ];
     }
 
+    /**
+     * @return array{crash_id: string, stack_trace: string, likely_cause: string, likely_cause_details: string, likely_cause_supporting: string, likely_cause_full: string, console: string}
+     */
+    public function buildDiscordWebhookContext(Application $app, string $id, int $consoleLineLimit = 20, int $stackTraceLineLimit = self::DISCORD_STACK_TRACE_LINE_LIMIT): array
+    {
+        $crash = $app['db']->executeQuery(
+            'SELECT crash.id, UNIX_TIMESTAMP(crash.timestamp) AS timestamp, crash.ip AS ip, crash.owner_id AS owner, crash.server_id, crash.metadata, crash.cmdline, crash.thread, crash.processed, crash.failed, crash.stackhash, UNIX_TIMESTAMP(crash.lastview) AS lastview, server_owner.name
+             FROM crash
+             LEFT JOIN server_owner ON server_owner.id = crash.owner_id
+             WHERE crash.id = ?',
+            [$id]
+        )->fetch();
+        if ($crash === false) {
+            throw new \RuntimeException('Crash not found.');
+        }
+
+        $diagnostics = self::buildCrashDiagnosticContext($app, $id, $crash);
+        $consoleEntries = self::loadConsoleEntriesForAi($app, $id);
+
+        return [
+            'crash_id' => strtoupper(implode('-', str_split($id, 4))),
+            'stack_trace' => self::buildAiStackSection($diagnostics['stack'], $stackTraceLineLimit),
+            'likely_cause' => self::buildAiLikelyCauseSummary($diagnostics['culprit_candidates']),
+            'likely_cause_details' => self::buildAiLikelyCauseDetails($diagnostics['culprit_candidates']),
+            'likely_cause_supporting' => self::buildAiLikelyCauseSupportingSection($diagnostics['culprit_candidates']),
+            'likely_cause_full' => self::buildAiLikelyCauseFullSection($diagnostics['culprit_candidates']),
+            'console' => self::buildAiConsoleTailSection($consoleEntries, $consoleLineLimit),
+        ];
+    }
+
     public function symbols(Application $app, $id)
     {
         if ($app['user'] === null) {
@@ -3306,16 +3337,96 @@ class Crash
     /**
      * @param array<int, array<string, mixed>> $stack
      */
-    private static function buildAiStackSection(array $stack): string
+    private static function buildAiStackSection(array $stack, ?int $lineLimit = null): string
     {
         if ($stack === []) {
             return 'No processed stack frames are available.';
         }
 
-        return implode("\n", array_map(
+        $lines = array_map(
             static fn (array $frame): string => sprintf('#%s %s', $frame['frame'] ?? '?', (string) ($frame['rendered'] ?? '[unknown frame]')),
             $stack
-        ));
+        );
+
+        if ($lineLimit !== null && $lineLimit > 0 && count($lines) > $lineLimit) {
+            $lines = array_slice($lines, 0, $lineLimit);
+            $lines[] = '...[truncated]';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $candidates
+     */
+    private static function buildAiLikelyCauseSummary(array $candidates): string
+    {
+        if ($candidates === []) {
+            return 'No likely-cause candidates were produced.';
+        }
+
+        $primary = $candidates[0];
+
+        return sprintf('%s (%s, %d%%)', $primary['label'], $primary['kind'] ?? 'Candidate', (int) ($primary['percent'] ?? 0));
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $candidates
+     */
+    private static function buildAiLikelyCauseDetails(array $candidates): string
+    {
+        if ($candidates === []) {
+            return '';
+        }
+
+        $lines = [];
+        foreach (($candidates[0]['reasons'] ?? []) as $reason) {
+            $lines[] = '- ' . $reason;
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $candidates
+     */
+    private static function buildAiLikelyCauseSupportingSection(array $candidates): string
+    {
+        if (count($candidates) <= 1) {
+            return '';
+        }
+
+        $lines = [];
+        foreach (array_slice($candidates, 1) as $candidate) {
+            $lines[] = sprintf('- %s (%s, %d%%)', $candidate['label'], $candidate['kind'] ?? 'Candidate', (int) ($candidate['percent'] ?? 0));
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $candidates
+     */
+    private static function buildAiLikelyCauseFullSection(array $candidates): string
+    {
+        if ($candidates === []) {
+            return 'No likely-cause candidates were produced.';
+        }
+
+        $summary = self::buildAiLikelyCauseSummary($candidates);
+        $details = self::buildAiLikelyCauseDetails($candidates);
+        $supporting = self::buildAiLikelyCauseSupportingSection($candidates);
+        $parts = [$summary];
+
+        if ($details !== '') {
+            $parts[] = $details;
+        }
+
+        if ($supporting !== '') {
+            $parts[] = $supporting;
+        }
+
+        return implode("\n\n", $parts);
     }
 
     /**
@@ -3323,26 +3434,7 @@ class Crash
      */
     private static function buildAiLikelyCauseSection(array $candidates): string
     {
-        if ($candidates === []) {
-            return 'No likely-cause candidates were produced.';
-        }
-
-        $lines = [];
-        $primary = $candidates[0];
-        $lines[] = sprintf('Primary suspect: %s (%s, %d%%)', $primary['label'], $primary['kind'] ?? 'Candidate', (int) ($primary['percent'] ?? 0));
-        foreach (($primary['reasons'] ?? []) as $reason) {
-            $lines[] = '- ' . $reason;
-        }
-
-        if (count($candidates) > 1) {
-            $lines[] = '';
-            $lines[] = 'Supporting candidates:';
-            foreach (array_slice($candidates, 1) as $candidate) {
-                $lines[] = sprintf('- %s (%s, %d%%)', $candidate['label'], $candidate['kind'] ?? 'Candidate', (int) ($candidate['percent'] ?? 0));
-            }
-        }
-
-        return implode("\n", $lines);
+        return self::buildAiLikelyCauseFullSection($candidates);
     }
 
     /**
@@ -3399,6 +3491,27 @@ class Crash
             $lines[] = '';
             $lines[] = 'SourceMod extensions snapshot:';
             $lines[] = trim($snapshots['extensions']);
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param list<array{tick: string, time: string, message: string, severity: string}> $consoleEntries
+     */
+    private static function buildAiConsoleTailSection(array $consoleEntries, int $limit): string
+    {
+        if ($limit <= 0) {
+            return '';
+        }
+
+        if ($consoleEntries === []) {
+            return 'No console history is available.';
+        }
+
+        $lines = [];
+        foreach (array_slice($consoleEntries, -$limit) as $entry) {
+            $lines[] = sprintf('[tick %s @ %s] %s', $entry['tick'], $entry['time'], $entry['message']);
         }
 
         return implode("\n", $lines);

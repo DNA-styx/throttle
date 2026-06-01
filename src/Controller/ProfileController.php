@@ -6,8 +6,10 @@ use App\Entity\ExternalAccount;
 use App\Entity\User;
 use App\Runtime\AuthEnvironment;
 use App\Runtime\CrashAiProviderCatalog;
+use App\Runtime\CrashDiscordWebhookDeliveryManager;
 use App\Runtime\UploadSettings;
 use App\Runtime\AuthSettings;
+use App\Runtime\UserDiscordWebhookManager;
 use App\Security\UserAccessManager;
 use App\Security\SocialLinkManager;
 use Doctrine\DBAL\Connection;
@@ -28,7 +30,7 @@ class ProfileController extends AbstractController
     private const TOKEN_ACTIVITY_PAGE_SIZE = 50;
 
     #[Route('/profile', name: 'profile', methods: ['GET'])]
-    public function show(Request $request, EntityManagerInterface $entityManager, Connection $connection, UserAiConfigManager $aiConfigManager, KernelInterface $kernel, AuthSettings $authSettings, AuthEnvironment $authEnvironment, UserAccessManager $userAccessManager): Response
+    public function show(Request $request, EntityManagerInterface $entityManager, Connection $connection, UserAiConfigManager $aiConfigManager, UserDiscordWebhookManager $discordWebhookManager, KernelInterface $kernel, AuthSettings $authSettings, AuthEnvironment $authEnvironment, UserAccessManager $userAccessManager): Response
     {
         $user = $this->currentUser();
         if ($user->getUploadToken() === '') {
@@ -75,6 +77,9 @@ class ProfileController extends AbstractController
             'discordConfigured' => $authEnvironment->isDiscordConfigured(),
             'discordNotice' => $authEnvironment->discordNotice(),
             'discordCallbackUrl' => $this->generateUrl('login_discord', [], \Symfony\Component\Routing\Generator\UrlGeneratorInterface::ABSOLUTE_URL),
+            'discordWebhookConfigs' => $discordWebhookManager->listConfigsForUser($user->getId()),
+            'discordWebhookDefaultTemplate' => $discordWebhookManager->defaultTemplate(),
+            'discordWebhookMaxCount' => UserDiscordWebhookManager::MAX_WEBHOOKS_PER_USER,
         ]);
     }
 
@@ -259,6 +264,64 @@ class ProfileController extends AbstractController
         $this->addFlash('success', $hadPassword ? 'Password updated.' : 'Password set.');
 
         return $this->redirectToRoute('profile');
+    }
+
+    #[Route('/profile/discord-webhook/save', name: 'profile_discord_webhook_save', methods: ['POST'])]
+    public function saveDiscordWebhook(Request $request, UserDiscordWebhookManager $discordWebhookManager): Response
+    {
+        if (!$this->isCsrfTokenValid('profile-discord-webhook', (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        try {
+            $config = $discordWebhookManager->saveConfig($this->currentUser(), $request->request->all());
+            $this->addFlash('success', sprintf('Discord webhook "%s" saved.', $config['display_name']));
+        } catch (\Throwable $e) {
+            $this->addFlash('danger', $e->getMessage());
+        }
+
+        return $this->redirect($this->generateUrl('profile') . '#discord-webhooks');
+    }
+
+    #[Route('/profile/discord-webhook/test', name: 'profile_discord_webhook_test', methods: ['POST'])]
+    public function testDiscordWebhook(Request $request, CrashDiscordWebhookDeliveryManager $deliveryManager): Response
+    {
+        if (!$this->isCsrfTokenValid('profile-discord-webhook', (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        try {
+            $deliveryManager->sendTest($this->currentUser(), $request->request->all());
+            $this->addFlash('success', 'Test Discord webhook message sent.');
+        } catch (\Throwable $e) {
+            $this->addFlash('danger', $e->getMessage());
+        }
+
+        return $this->redirect($this->generateUrl('profile') . '#discord-webhooks');
+    }
+
+    #[Route('/profile/discord-webhook/delete', name: 'profile_discord_webhook_delete', methods: ['POST'])]
+    public function deleteDiscordWebhook(Request $request, UserDiscordWebhookManager $discordWebhookManager): Response
+    {
+        if (!$this->isCsrfTokenValid('profile-discord-webhook-delete', (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        $configId = (int) $request->request->get('config_id', 0);
+        if ($configId < 1) {
+            $this->addFlash('danger', 'Select a webhook to delete.');
+
+            return $this->redirect($this->generateUrl('profile') . '#discord-webhooks');
+        }
+
+        try {
+            $discordWebhookManager->deleteConfig($this->currentUser(), $configId);
+            $this->addFlash('success', 'Discord webhook deleted.');
+        } catch (\Throwable $e) {
+            $this->addFlash('danger', $e->getMessage());
+        }
+
+        return $this->redirect($this->generateUrl('profile') . '#discord-webhooks');
     }
 
     #[Route('/profile/link/{kind}', name: 'profile_link_external', methods: ['GET'])]

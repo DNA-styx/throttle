@@ -8,8 +8,10 @@ services:
     build: *prod-build
     image: throttle-prod
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_started
+      redis:
+        condition: service_started
     environment:
       APP_ENV: prod
       APP_DEBUG: 0
@@ -53,9 +55,12 @@ services:
     build: *prod-build
     image: throttle-prod
     depends_on:
-      - app
-      - db
-      - redis
+      app:
+        condition: service_healthy
+      db:
+        condition: service_started
+      redis:
+        condition: service_started
     environment:
       APP_ENV: prod
       APP_DEBUG: 0
@@ -81,6 +86,7 @@ services:
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
       AUTO_MIGRATE: 0
+      APP_WAIT_FOR_DB: 1
     restart: unless-stopped
     command: >
       sh -c 'while true; do

@@ -23,6 +23,7 @@ This 2026 branch includes:
 - symbol coverage views for report owners/admins
 - likely crash cause scoring
 - optional AI crash analysis with per-user API configs, saved history, and public history sharing
+- per-user Discord webhook notifications with message templates and test delivery
 - SourceMod plugin/extension snapshots from Accelerator metadata when available
 - `/health` admin tools for processing, uploads, auth, storage, and diagnostics
 
@@ -85,7 +86,7 @@ Install PHP 8.4, MariaDB, Redis, Nginx, Composer, Node.js, and npm. On Ubuntu 24
 
 ```bash
 cd /var/www/throttle
-APP_ENV=prod APP_DEBUG=0 php8.4 $(which composer) install --no-dev --optimize-autoloader
+sudo -u www-data env APP_ENV=prod APP_DEBUG=0 php8.4 "$(which composer)" install --no-dev --optimize-autoloader
 npm ci
 npm run build
 ```
@@ -224,6 +225,19 @@ sudo -u www-data php8.4 /var/www/throttle/bin/console messenger:consume async --
 - if templates fail with missing Encore entrypoints, run `npm ci && npm run build` and verify `public/build/entrypoints.json` exists
 - if Composer uses PHP 8.1 on a PHP 8.4 project, run Composer through PHP 8.4
 
+### Profile Discord Webhooks
+
+- **Profile** includes per-user Discord webhook notifications for processed crashes
+- each user can store up to 5 webhook targets
+- supported placeholders are `{crash_id}`, `{likely_cause}`, `{likely_cause_details}`, `{likely_cause_supporting}`, `{likely_cause_full}`, `{stack_trace}`, and `{console}`
+- placeholders inject only the raw content they represent; they do not prepend labels like `Likely cause:` or `Stack trace:`
+- `{likely_cause}` is a short one-line summary, while `{likely_cause_details}`, `{likely_cause_supporting}`, and `{likely_cause_full}` expose progressively more detail
+- each webhook can independently limit both the console tail and the number of stack trace lines included in Discord
+- the webhook URL is stored encrypted on the site
+- Discord webhook `content` is limited to 2000 characters, and stack traces are truncated before final delivery when needed
+- the **Test message** button sends a sample payload immediately
+- automatic delivery happens after a successful `crash:process` pass, so it depends on the same processor/timer that handles crash processing
+
 ### Authentication Setup
 
 All sign-in methods are toggled in `/health`.
@@ -282,6 +296,7 @@ Throttle — это веб-сервис для приёма и анализа cr
 - `/submit`, `/symbols/submit` и `/binary/submit`
 - `/health` для runtime-настроек, диагностики и админских операций
 - AI-анализ крэшей с пользовательскими provider configs
+- пользовательские Discord webhook-уведомления после обработки крэшей
 
 ### Установка Через Docker Compose
 
@@ -330,7 +345,7 @@ Production compose поднимает веб-приложение, MariaDB, Redi
 
 ```bash
 cd /var/www/throttle
-APP_ENV=prod APP_DEBUG=0 php8.4 $(which composer) install --no-dev --optimize-autoloader
+sudo -u www-data env APP_ENV=prod APP_DEBUG=0 php8.4 "$(which composer)" install --no-dev --optimize-autoloader
 npm ci
 npm run build
 ```
@@ -467,6 +482,18 @@ APP_ADMINS="steam:STEAMID64,user:1"
 
 `Storage cleanup` можно запускать вручную из `/health`. Автоматическая очистка выполняется внутри `crash:process`, поэтому для обычной VPS-установки timer или другой scheduler, запускающий `crash:process`, нужен не только для обработки крэшей, но и для retention cleanup.
 Если cleanup удалил тяжёлые crash artifacts, связанные raw-страницы теперь отдают штатную страницу `410 Gone`, а не сырую exception page.
+
+### Discord Webhooks В Профиле
+
+- в **Profile** можно сохранить до 5 Discord webhook'ов для уведомлений о новых обработанных крэшах
+- поддерживаются плейсхолдеры `{crash_id}`, `{likely_cause}`, `{likely_cause_details}`, `{likely_cause_supporting}`, `{likely_cause_full}`, `{stack_trace}` и `{console}`
+- плейсхолдеры подставляют только собственное содержимое без служебных заголовков вроде `Likely cause:` или `Stack trace:`
+- `{likely_cause}` теперь даёт короткую однострочную сводку, а `{likely_cause_details}`, `{likely_cause_supporting}` и `{likely_cause_full}` позволяют добавить подробности
+- для каждого webhook можно отдельно ограничить и количество строк консоли, и количество строк stack trace
+- URL webhook'а хранится на сайте в зашифрованном виде
+- Discord webhook `content` ограничен 2000 символами, поэтому длинные stack trace автоматически сокращаются перед отправкой
+- кнопка **Test message** сразу отправляет тестовый payload
+- автоматическая отправка происходит после успешного прохода `crash:process`, поэтому зависит от того же `processor` или timer/service, который обрабатывает крэши
 Если symbols или binaries догрузились уже после первого processing pass, Throttle автоматически помечает затронутые crash reports на переобработку в следующем `crash:process --update`.
 
 ### AI Analysis

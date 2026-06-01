@@ -3,6 +3,7 @@
 namespace Throttle\Command;
 
 use App\Legacy\LegacyBridgeFactory;
+use App\Runtime\CrashDiscordWebhookDeliveryManager;
 use App\Runtime\StorageRetentionManager;
 use App\Util\HumanSize;
 use Symfony\Component\Console\Command\Command;
@@ -15,12 +16,14 @@ class CrashProcessCommand extends Command
 {
     private LegacyBridgeFactory $legacyBridgeFactory;
     private StorageRetentionManager $storageRetentionManager;
+    private CrashDiscordWebhookDeliveryManager $crashDiscordWebhookDeliveryManager;
 
-    public function __construct(LegacyBridgeFactory $legacyBridgeFactory, StorageRetentionManager $storageRetentionManager)
+    public function __construct(LegacyBridgeFactory $legacyBridgeFactory, StorageRetentionManager $storageRetentionManager, CrashDiscordWebhookDeliveryManager $crashDiscordWebhookDeliveryManager)
     {
         parent::__construct();
         $this->legacyBridgeFactory = $legacyBridgeFactory;
         $this->storageRetentionManager = $storageRetentionManager;
+        $this->crashDiscordWebhookDeliveryManager = $crashDiscordWebhookDeliveryManager;
     }
 
     protected function configure(): void
@@ -146,8 +149,9 @@ class CrashProcessCommand extends Command
 
         for ($count = 0; $count < $pending; $count++) {
             $start = microtime(true);
+            $processedCrashId = null;
 
-            $app['db']->transactional(function($db) use ($app, $symbols, $symbolCacheDirectory, &$symbolCache, &$repoCache) {
+            $app['db']->transactional(function($db) use ($app, $symbols, $symbolCacheDirectory, &$symbolCache, &$repoCache, &$processedCrashId) {
                 $id = $app['db']->executeQuery('SELECT id FROM crash WHERE processed = 0 ORDER BY timestamp DESC LIMIT 1')->fetchColumn(0);
                 $minidump = $app['root'] . '/dumps/' . substr($id, 0, 2) . '/' . $id . '.dmp';
                 $logs = $app['root'] . '/dumps/' . substr($id, 0, 2) . '/' . $id . '.txt';
@@ -467,7 +471,17 @@ class CrashProcessCommand extends Command
                 if ($count > 0) {
                     $app['db']->executeUpdate($query, array('crash' => $id));
                 }
+
+                $processedCrashId = is_string($id) ? $id : null;
             });
+
+            if (is_string($processedCrashId) && $processedCrashId !== '') {
+                try {
+                    $this->crashDiscordWebhookDeliveryManager->notifyCrashProcessed($processedCrashId);
+                } catch (\Throwable $e) {
+                    $output->writeln('Crash webhook delivery failed for ' . $processedCrashId . ': ' . $e->getMessage());
+                }
+            }
 
             $duration = microtime(true) - $start;
             $app['redis']->rPush('throttle:stats:processing', time().':'.$duration);

@@ -320,6 +320,175 @@
             </form>
         </section>
 
+        <section class="profile-panel mt-3" id="discord-webhooks">
+            <div class="mb-3">
+                <h2 class="h5 mb-1">Discord webhooks</h2>
+                <div class="text-muted">Send crash notifications to one or more Discord webhooks after a crash is processed. Up to {{ discordWebhookMaxCount }} webhooks per user.</div>
+            </div>
+
+            <div class="alert alert-secondary py-2 mb-3">
+                <div class="mb-1">
+                    Available placeholders:
+                    <code data-bs-toggle="tooltip" data-bs-placement="top" title="Crash ID in the displayed format">{crash_id}</code>,
+                    <code data-bs-toggle="tooltip" data-bs-placement="top" title="Short primary suspect summary">{likely_cause}</code>,
+                    <code data-bs-toggle="tooltip" data-bs-placement="top" title="Detailed reason lines for the primary suspect">{likely_cause_details}</code>,
+                    <code data-bs-toggle="tooltip" data-bs-placement="top" title="Supporting candidates only">{likely_cause_supporting}</code>,
+                    <code data-bs-toggle="tooltip" data-bs-placement="top" title="Full legacy likely-cause block">{likely_cause_full}</code>,
+                    <code data-bs-toggle="tooltip" data-bs-placement="top" title="Processed stack trace">{stack_trace}</code>,
+                    <code data-bs-toggle="tooltip" data-bs-placement="top" title="Last console lines using the configured limit">{console}</code>
+                </div>
+                <div class="small text-muted">Discord webhook content is limited to 2000 characters.</div>
+            </div>
+
+            {% if discordWebhookConfigs|length < discordWebhookMaxCount %}
+                <details class="profile-ai-card mb-3">
+                    <summary class="profile-ai-card-summary">
+                        <div class="profile-ai-card-main">
+                            <div class="fw-semibold">Add webhook</div>
+                            <div class="text-muted small">Create a new Discord delivery target</div>
+                        </div>
+                    </summary>
+                    <div class="profile-ai-card-body">
+                        <form method="post" action="{{ path('profile_discord_webhook_save') }}">
+                            <input type="hidden" name="_token" value="{{ csrf_token('profile-discord-webhook') }}">
+                            <div class="d-flex justify-content-end mb-3">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" role="switch" id="discord-webhook-enabled-new" name="enabled" value="1" checked>
+                                    <label class="form-check-label" for="discord-webhook-enabled-new">Enabled</label>
+                                </div>
+                            </div>
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Display name</label>
+                                    <input class="form-control" name="display_name" value="" maxlength="100" placeholder="Crash alerts">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Discord webhook URL</label>
+                                    <input class="form-control font-monospace" name="webhook_url" value="" placeholder="https://discord.com/api/webhooks/.../...">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label">Last console lines</label>
+                                    <input class="form-control" name="console_line_limit" type="number" min="0" max="200" step="1" value="20">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label">Stack trace lines</label>
+                                    <input class="form-control" name="stack_trace_line_limit" type="number" min="0" max="100" step="1" value="18">
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label">Message template</label>
+                                    <textarea class="form-control" name="message_template" rows="8" placeholder="{{ discordWebhookDefaultTemplate }}"></textarea>
+                                    <div class="form-text">Leave it blank to use the default template shown in the placeholder text. Keep the Discord 2000 character limit in mind.</div>
+                                </div>
+                            </div>
+                            <div class="d-flex gap-2 mt-3">
+                                <button type="submit" class="btn btn-primary">Save webhook</button>
+                                <button
+                                    type="submit"
+                                    class="btn btn-outline-secondary"
+                                    formaction="{{ path('profile_discord_webhook_test') }}"
+                                >
+                                    Test message
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </details>
+            {% else %}
+                <div class="alert alert-warning py-2 mb-3">Webhook limit reached. Delete one of the saved entries to add another.</div>
+            {% endif %}
+
+            {% if discordWebhookConfigs %}
+                <div class="mb-2 d-flex align-items-center justify-content-between gap-2">
+                    <h3 class="h6 mb-0">Saved webhooks</h3>
+                    <div class="text-muted small">{{ discordWebhookConfigs|length }} saved</div>
+                </div>
+
+                <div class="profile-ai-config-list">
+                    {% for config in discordWebhookConfigs %}
+                        <details class="profile-ai-card">
+                            <summary class="profile-ai-card-summary">
+                                <div class="profile-ai-card-main">
+                                    <div class="fw-semibold">{{ config.display_name }}</div>
+                                    <div class="text-muted small">
+                                        {{ config.webhook_mask ?: 'Saved URL' }} &middot; {{ config.console_line_limit }} console lines &middot; {{ config.stack_trace_line_limit }} stack trace lines
+                                    </div>
+                                </div>
+                                <div class="profile-ai-card-meta">
+                                    {% if not config.enabled %}
+                                        <span class="badge text-bg-secondary">Disabled</span>
+                                    {% endif %}
+                                </div>
+                            </summary>
+
+                            <div class="profile-ai-card-body">
+                                <form method="post" action="{{ path('profile_discord_webhook_save') }}">
+                                    <input type="hidden" name="_token" value="{{ csrf_token('profile-discord-webhook') }}">
+                                    <input type="hidden" name="id" value="{{ config.id }}">
+
+                                    <div class="d-flex justify-content-end mb-3">
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" role="switch" id="discord-webhook-enabled-{{ config.id }}" name="enabled" value="1"{% if config.enabled %} checked{% endif %}>
+                                            <label class="form-check-label" for="discord-webhook-enabled-{{ config.id }}">Enabled</label>
+                                        </div>
+                                    </div>
+
+                                    <div class="row g-3">
+                                        <div class="col-md-6">
+                                            <label class="form-label">Display name</label>
+                                            <input class="form-control" name="display_name" value="{{ config.display_name }}" maxlength="100">
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label">Discord webhook URL</label>
+                                            <input class="form-control font-monospace" name="webhook_url" value="" placeholder="Leave blank to keep {{ config.webhook_mask ?: 'the saved URL' }}">
+                                            <div class="form-text">
+                                                {% if config.webhook_configured %}
+                                                    Saved as {{ config.webhook_mask ?: 'hidden value' }}.
+                                                {% else %}
+                                                    No webhook URL saved yet.
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label">Last console lines</label>
+                                            <input class="form-control" name="console_line_limit" type="number" min="0" max="200" step="1" value="{{ config.console_line_limit }}">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label">Stack trace lines</label>
+                                            <input class="form-control" name="stack_trace_line_limit" type="number" min="0" max="100" step="1" value="{{ config.stack_trace_line_limit }}">
+                                        </div>
+                                        <div class="col-12">
+                                            <label class="form-label">Message template</label>
+                                            <textarea class="form-control" name="message_template" rows="8" placeholder="{{ discordWebhookDefaultTemplate }}">{{ config.message_template }}</textarea>
+                                            <div class="form-text">Keep the Discord 2000 character limit in mind.</div>
+                                        </div>
+                                    </div>
+
+                                    <div class="d-flex gap-2 mt-3">
+                                        <button type="submit" class="btn btn-primary">Save webhook</button>
+                                        <button
+                                            type="submit"
+                                            class="btn btn-outline-secondary"
+                                            formaction="{{ path('profile_discord_webhook_test') }}"
+                                        >
+                                            Test message
+                                        </button>
+                                    </div>
+                                </form>
+
+                                <div class="d-flex gap-2 mt-2">
+                                    <form method="post" action="{{ path('profile_discord_webhook_delete') }}" onsubmit="return confirm('Delete this Discord webhook?');">
+                                        <input type="hidden" name="_token" value="{{ csrf_token('profile-discord-webhook-delete') }}">
+                                        <input type="hidden" name="config_id" value="{{ config.id }}">
+                                        <button type="submit" class="btn btn-outline-danger">Delete</button>
+                                    </form>
+                                </div>
+                            </div>
+                        </details>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </section>
+
         <section
             class="profile-panel"
             data-core-config-generator
@@ -622,6 +791,12 @@
     {{ parent() }}
     <script>
         (() => {
+            if (window.bootstrap && typeof window.bootstrap.Tooltip === 'function') {
+                document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach((element) => {
+                    window.bootstrap.Tooltip.getOrCreateInstance(element);
+                });
+            }
+
             const section = document.querySelector('[data-ai-provider-section]');
             if (!section) {
                 return;
