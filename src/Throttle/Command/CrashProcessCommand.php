@@ -404,7 +404,7 @@ class CrashProcessCommand extends Command
                             );
                         }
 
-                        $app['db']->executeUpdate('INSERT INTO frame (crash, thread, frame, module, function, file, line, frame_offset, rendered, url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', array($id, $data[0], $data[1], $data[2], $data[3], $data[4], $data[5], $data[6], $rendered, $url));
+                        $app['db']->executeUpdate('INSERT INTO frame (crash, thread, frame, module, `function`, `file`, line, frame_offset, rendered, url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', array($id, $data[0], $data[1], $data[2], $data[3], $data[4], $data[5], $data[6], $rendered, $url));
                         $framesInserted++;
                     }
                 } catch (\Throwable $e) {

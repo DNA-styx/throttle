@@ -61,9 +61,9 @@ class Stats
 
             if ($function !== null) {
                 if (preg_match('/^0x[0-9a-f]+$/', $function)) {
-                    $query = $app['db']->executeQuery('SELECT DATE(timestamp) AS date, COUNT(*) AS count FROM frame JOIN crash ON id = crash AND crash.thread = frame.thread WHERE timestamp > DATE_SUB(NOW(), INTERVAL 90 DAY) AND frame = 0 AND module LIKE ? AND function = \'\' AND frame_offset = ? GROUP BY DATE(timestamp)', array($module, $function));
+                    $query = $app['db']->executeQuery('SELECT DATE(timestamp) AS date, COUNT(*) AS count FROM frame JOIN crash ON id = crash AND crash.thread = frame.thread WHERE timestamp > DATE_SUB(NOW(), INTERVAL 90 DAY) AND frame = 0 AND module LIKE ? AND `function` = \'\' AND frame_offset = ? GROUP BY DATE(timestamp)', array($module, $function));
                 } else {
-                    $query = $app['db']->executeQuery('SELECT DATE(timestamp) AS date, COUNT(*) AS count FROM frame JOIN crash ON id = crash AND crash.thread = frame.thread WHERE timestamp > DATE_SUB(NOW(), INTERVAL 90 DAY) AND frame = 0 AND module LIKE ? AND function LIKE ? GROUP BY DATE(timestamp)', array($module, $function));
+                    $query = $app['db']->executeQuery('SELECT DATE(timestamp) AS date, COUNT(*) AS count FROM frame JOIN crash ON id = crash AND crash.thread = frame.thread WHERE timestamp > DATE_SUB(NOW(), INTERVAL 90 DAY) AND frame = 0 AND module LIKE ? AND `function` LIKE ? GROUP BY DATE(timestamp)', array($module, $function));
                 }
             } else if ($module !== null) {
                 if (preg_match('/^%?(?:[0-9a-f]{8})+%?$/', $module)) {
@@ -103,9 +103,9 @@ class Stats
 
             if ($function !== null) {
                 if (preg_match('/^0x[0-9a-f]+$/', $function)) {
-                    $query = $app['db']->executeQuery('SELECT DATE(timestamp) AS date, HOUR(timestamp) AS hour, COUNT(*) AS count FROM frame JOIN crash ON id = crash AND crash.thread = frame.thread WHERE timestamp > DATE_SUB(NOW(), INTERVAL 168 HOUR) AND frame = 0 AND module LIKE ? AND function = \'\' AND frame_offset = ? GROUP BY DATE(timestamp), HOUR(timestamp)', array($module, $function));
+                    $query = $app['db']->executeQuery('SELECT DATE(timestamp) AS date, HOUR(timestamp) AS hour, COUNT(*) AS count FROM frame JOIN crash ON id = crash AND crash.thread = frame.thread WHERE timestamp > DATE_SUB(NOW(), INTERVAL 168 HOUR) AND frame = 0 AND module LIKE ? AND `function` = \'\' AND frame_offset = ? GROUP BY DATE(timestamp), HOUR(timestamp)', array($module, $function));
                 } else {
-                    $query = $app['db']->executeQuery('SELECT DATE(timestamp) AS date, HOUR(timestamp) AS hour, COUNT(*) AS count FROM frame JOIN crash ON id = crash AND crash.thread = frame.thread WHERE timestamp > DATE_SUB(NOW(), INTERVAL 168 HOUR) AND frame = 0 AND module LIKE ? AND function LIKE ? GROUP BY DATE(timestamp), HOUR(timestamp)', array($module, $function));
+                    $query = $app['db']->executeQuery('SELECT DATE(timestamp) AS date, HOUR(timestamp) AS hour, COUNT(*) AS count FROM frame JOIN crash ON id = crash AND crash.thread = frame.thread WHERE timestamp > DATE_SUB(NOW(), INTERVAL 168 HOUR) AND frame = 0 AND module LIKE ? AND `function` LIKE ? GROUP BY DATE(timestamp), HOUR(timestamp)', array($module, $function));
                 }
             } else if ($module !== null) {
                 if (preg_match('/^%?(?:[0-9a-f]{8})+%?$/', $module)) {
@@ -155,9 +155,9 @@ class Stats
 
         if ($function !== null) {
             if (preg_match('/^0x[0-9a-f]+$/', $function)) {
-                $data = $app['db']->executeQuery('SELECT rendered, COUNT(*) AS count FROM frame JOIN crash ON id = crash AND crash.thread = frame.thread WHERE frame = 0 AND module LIKE ? AND function = \'\' AND frame_offset = ? '.$scope.' GROUP BY rendered ORDER BY count DESC LIMIT 10', array($module, $function));
+                $data = $app['db']->executeQuery('SELECT rendered, COUNT(*) AS count FROM frame JOIN crash ON id = crash AND crash.thread = frame.thread WHERE frame = 0 AND module LIKE ? AND `function` = \'\' AND frame_offset = ? '.$scope.' GROUP BY rendered ORDER BY count DESC LIMIT 10', array($module, $function));
             } else {
-                $data = $app['db']->executeQuery('SELECT rendered, COUNT(*) AS count FROM frame JOIN crash ON id = crash AND crash.thread = frame.thread WHERE frame = 0 AND module LIKE ? AND function LIKE ? '.$scope.' GROUP BY rendered ORDER BY count DESC LIMIT 10', array($module, $function));
+                $data = $app['db']->executeQuery('SELECT rendered, COUNT(*) AS count FROM frame JOIN crash ON id = crash AND crash.thread = frame.thread WHERE frame = 0 AND module LIKE ? AND `function` LIKE ? '.$scope.' GROUP BY rendered ORDER BY count DESC LIMIT 10', array($module, $function));
             }
 
             while ($row = $data->fetch()) {
@@ -171,14 +171,14 @@ class Stats
                     $output[] = array($app->escape($row['rendered']), $row['count'], false, false);
                 }
             } else {
-                $data = $app['db']->executeQuery('SELECT module, COALESCE(NULLIF(function, \'\'), frame_offset) AS function, COUNT(*) AS count FROM frame JOIN crash ON id = crash AND crash.thread = frame.thread WHERE frame = 0 AND module LIKE ? '.$scope.' GROUP BY COALESCE(NULLIF(function, \'\'), frame_offset) ORDER BY count DESC LIMIT 10', array($module));
+                $data = $app['db']->executeQuery('SELECT module, COALESCE(NULLIF(`function`, \'\'), frame_offset) AS `function`, COUNT(*) AS count FROM frame JOIN crash ON id = crash AND crash.thread = frame.thread WHERE frame = 0 AND module LIKE ? '.$scope.' GROUP BY COALESCE(NULLIF(`function`, \'\'), frame_offset) ORDER BY count DESC LIMIT 10', array($module));
 
                 while ($row = $data->fetch()) {
                     $output[] = array($app->escape($row['function'] ? $row['module'].'!'.$row['function'] : $row['module']), $row['count'], $row['module'], $row['function']);
                 }
             }
         } else {
-            $data = $app['db']->executeQuery('SELECT crashmodule AS module, crashfunction AS function, COUNT(*) AS count FROM crash WHERE 1=1 '.$scope.' GROUP BY module, function ORDER BY count DESC LIMIT 10');
+            $data = $app['db']->executeQuery('SELECT crashmodule AS module, crashfunction AS `function`, COUNT(*) AS count FROM crash WHERE 1=1 '.$scope.' GROUP BY module, `function` ORDER BY count DESC LIMIT 10');
 
             while ($row = $data->fetch()) {
                 $output[] = array($app->escape($row['function'] ? $row['module'].'!'.$row['function'] : $row['module']), $row['count'], $row['module'], $row['function']);
@@ -203,9 +203,9 @@ class Stats
 
         if ($function !== null) {
             if (preg_match('/^0x[0-9a-f]+$/', $function)) {
-                $query = $app['db']->executeQuery('SELECT crash, rendered, cmdline, NULL AS avatar FROM frame JOIN crash ON id = crash AND crash.thread = frame.thread WHERE frame = 0 AND module LIKE ? AND function = \'\' AND frame_offset = ? ORDER BY timestamp DESC LIMIT ' . $limit, array($module, $function));
+                $query = $app['db']->executeQuery('SELECT crash, rendered, cmdline, NULL AS avatar FROM frame JOIN crash ON id = crash AND crash.thread = frame.thread WHERE frame = 0 AND module LIKE ? AND `function` = \'\' AND frame_offset = ? ORDER BY timestamp DESC LIMIT ' . $limit, array($module, $function));
             } else {
-                $query = $app['db']->executeQuery('SELECT crash, rendered, cmdline, NULL AS avatar FROM frame JOIN crash ON id = crash AND crash.thread = frame.thread WHERE frame = 0 AND module LIKE ? AND function LIKE ? ORDER BY timestamp DESC LIMIT ' . $limit, array($module, $function));
+                $query = $app['db']->executeQuery('SELECT crash, rendered, cmdline, NULL AS avatar FROM frame JOIN crash ON id = crash AND crash.thread = frame.thread WHERE frame = 0 AND module LIKE ? AND `function` LIKE ? ORDER BY timestamp DESC LIMIT ' . $limit, array($module, $function));
             }
         } else if ($module !== null) {
             if (preg_match('/^%?(?:[0-9a-f]{8})+%?$/', $module)) {

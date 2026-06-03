@@ -1472,7 +1472,7 @@ class Crash
         }
 
         $stack = $app['db']->executeQuery(
-            'SELECT frame, module, function, rendered, url FROM frame WHERE crash = ? AND thread = ? ORDER BY frame',
+            'SELECT frame, module, `function`, rendered, url FROM frame WHERE crash = ? AND thread = ? ORDER BY frame',
             array($id, $thread)
         )->fetchAll();
 
@@ -1979,7 +1979,7 @@ class Crash
         ksort($crash['metadata']);
 
         $notices = $app['db']->executeQuery('SELECT severity, text FROM crashnotice JOIN notice ON notice.id = crashnotice.notice WHERE crash = ?', [$id])->fetchAll();
-        $stack = $app['db']->executeQuery('SELECT frame, module, function, rendered, url FROM frame WHERE crash = ? AND thread = ? ORDER BY frame', [$id, $crash['thread']])->fetchAll();
+        $stack = $app['db']->executeQuery('SELECT frame, module, `function`, rendered, url FROM frame WHERE crash = ? AND thread = ? ORDER BY frame', [$id, $crash['thread']])->fetchAll();
         $modules = $app['db']->executeQuery('SELECT name, identifier, processed, present, HEX(base) AS base FROM module WHERE crash = ? ORDER BY name', [$id])->fetchAll();
         $modules = self::buildModuleCoverageRows($modules, $app['config']);
         $reprocessPendingModules = array();
@@ -2598,7 +2598,7 @@ class Crash
 
         ksort($crash['metadata']);
 
-        $stack = $app['db']->executeQuery('SELECT frame, module, function, rendered, url FROM frame WHERE crash = ? AND thread = ? ORDER BY frame', array($id, $crash['thread']))->fetchAll();
+        $stack = $app['db']->executeQuery('SELECT frame, module, `function`, rendered, url FROM frame WHERE crash = ? AND thread = ? ORDER BY frame', array($id, $crash['thread']))->fetchAll();
         $modules = $app['db']->executeQuery('SELECT name, identifier, processed, present, HEX(base) AS base FROM module WHERE crash = ? ORDER BY name', array($id))->fetchAll();
         $modules = self::buildModuleCoverageRows($modules, $app['config']);
         $consoleCause = self::loadTerminalSourceModCause($app, $id, (bool) $crash['has_console_log']);
