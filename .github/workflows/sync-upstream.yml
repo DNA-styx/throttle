@@ -43,7 +43,7 @@ jobs:
       - name: Update fork 2026 branch
         if: steps.check.outputs.new_commits == 'true'
         run: |
-          git checkout 2026
+          git checkout -B 2026 origin/2026
           git merge upstream/2026
           git push origin 2026
 
@@ -51,7 +51,7 @@ jobs:
         if: steps.check.outputs.new_commits == 'true'
         id: merge
         run: |
-          git checkout 2026-mysql
+          git checkout -B 2026-mysql origin/2026-mysql
           if git merge origin/2026 --no-commit --no-ff; then
             echo "conflict=false" >> $GITHUB_OUTPUT
           else
