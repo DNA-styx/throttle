@@ -64,8 +64,12 @@ jobs:
       - name: Push clean merge
         if: steps.check.outputs.new_commits == 'true' && steps.merge.outputs.conflict == 'false'
         run: |
-          git commit -m "Merge upstream $(git rev-parse --short upstream/2026) into 2026-mysql"
-          git push origin 2026-mysql
+          if git diff --cached --quiet; then
+            echo "Already up to date, nothing to commit"
+          else
+            git commit -m "Merge upstream $(git rev-parse --short upstream/2026) into 2026-mysql"
+            git push origin 2026-mysql
+          fi
 
       - name: Open conflict PR
         if: steps.check.outputs.new_commits == 'true' && steps.merge.outputs.conflict == 'true'
