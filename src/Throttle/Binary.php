@@ -47,7 +47,7 @@ class Binary
 
         try {
             $result = SymbolBinaryUpload::storeUploadedBinary($app['root'], $file, $moduleHint, $identifierHint);
-            $this->setUploadInfo($app, $result['module'], $result['identifier'], (int) $file->getSize());
+            $this->setUploadInfo($app, $result['module'], $result['identifier'], $result['bytes']);
             $reprocess = $this->markModuleSymbolsPresent($app, $result['module'], $result['identifier']);
             UploadFailureBackoff::registerSuccess($app['root'], $result['module'], $result['identifier']);
             $app['redis']->hIncrBy('throttle:stats', 'binaries:accepted', 1);
