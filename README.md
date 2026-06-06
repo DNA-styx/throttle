@@ -8,7 +8,7 @@ More screenshots: [docs/screenshots](docs/screenshots/)
 
 ### What This Is
 
-Throttle is a Symfony/Silex crash-reporting service for Source engine servers using SourceMod Accelerator. It accepts Breakpad minidumps, stores and processes crash reports, accepts Breakpad symbol files, can generate symbols from uploaded binaries, and provides a web dashboard for owners and admins.
+Throttle is a Symfony/Silex crash-reporting service for Source engine servers using SourceMod Accelerator. It accepts Breakpad minidumps, stores and processes crash reports, accepts Breakpad symbol files, can generate symbols from uploaded binaries, and provides a web dashboard for owners and admins. This branch is maintained as a pragmatic vibe-code project, so the codebase is intentionally iterative and operationally focused rather than polished as a generic product.
 
 This 2026 branch includes:
 
@@ -185,6 +185,16 @@ If the upload URLs already contain a profile token, `MinidumpAccount` is optiona
 - symbols are ultimately stored and used on the site
 - the game server can upload ready symbols or binaries, but symbol generation for Throttle happens on the site side when binaries are processed with `dump_syms`
 
+### Hosted ProGamesZet Instance
+
+The public hosted instance is available at [crash.progameszet.ru](https://crash.progameszet.ru). You can point Accelerator at that site if you do not want to run your own installation.
+
+Important caveats for the hosted service:
+
+- the server is physically located in Russia, so some ISPs or upstream providers may block or degrade connectivity to it
+- storage on that hosted instance is capped at **1 GB** for each category: **Crash Artifacts**, **Symbols**, and **Binaries**
+- when a category reaches its limit, the oldest stored data in that category is removed by retention cleanup
+
 ### Crash Processing
 
 Docker Compose deployments already run the `processor` service. For manual VPS deployments, install the provided systemd files:
@@ -286,7 +296,7 @@ All sign-in methods are toggled in `/health`.
 
 ### Что Это
 
-Throttle — это веб-сервис для приёма и анализа crash-report'ов Source engine серверов через SourceMod Accelerator. Он принимает Breakpad minidump'ы, хранит и обрабатывает крэши, принимает `.sym` файлы, умеет генерировать symbols из загруженных бинарников и даёт веб-интерфейс для владельцев серверов и администраторов.
+Throttle — это веб-сервис для приёма и анализа crash-report'ов Source engine серверов через SourceMod Accelerator. Он принимает Breakpad minidump'ы, хранит и обрабатывает крэши, принимает `.sym` файлы, умеет генерировать symbols из загруженных бинарников и даёт веб-интерфейс для владельцев серверов и администраторов. Эта ветка поддерживается как прагматичный vibe-code проект: кодовая база развивается итеративно и в первую очередь заточена под рабочую эксплуатацию.
 
 Актуальная ветка включает:
 
@@ -433,6 +443,16 @@ location ~ \.php$ {
 - сайт в итоге хранит и использует symbols у себя
 - игровой сервер через Accelerator может прислать готовые `.sym` или сами бинарники
 - если пришли бинарники, символы для Throttle генерируются уже на стороне сайта через `dump_syms`
+
+### Публичный Инстанс ProGamesZet
+
+Публичный инстанс доступен по адресу [crash.progameszet.ru](https://crash.progameszet.ru). К нему можно подключить Accelerator и отправлять крэши, если не хочется поднимать свою установку.
+
+Важно учитывать:
+
+- сервер физически расположен в России, поэтому некоторые провайдеры или апстримы могут блокировать или ухудшать подключение к нему
+- на этом hosted-инстансе хранилище ограничено **1 ГБ** для каждой категории: **Crash Artifacts**, **Symbols** и **Binaries**
+- при достижении лимита в категории retention cleanup удаляет самые старые данные этой категории
 
 ### Обработка Крэшей И Очередь
 
