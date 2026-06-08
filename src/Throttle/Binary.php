@@ -42,12 +42,13 @@ class Binary
             return new Response('Invalid binary identifier', 400);
         }
 
+        $bytes = (int) $file->getSize();
         $app['redis']->hIncrBy('throttle:stats', 'binaries:submitted', 1);
-        $app['redis']->hIncrBy('throttle:stats', 'binaries:submitted:bytes', (int) $file->getSize());
+        $app['redis']->hIncrBy('throttle:stats', 'binaries:submitted:bytes', $bytes);
 
         try {
             $result = SymbolBinaryUpload::storeUploadedBinary($app['root'], $file, $moduleHint, $identifierHint);
-            $this->setUploadInfo($app, $result['module'], $result['identifier'], $result['bytes']);
+            $this->setUploadInfo($app, $result['module'], $result['identifier'], (int) ($result['bytes'] ?? $bytes));
             $reprocess = $this->markModuleSymbolsPresent($app, $result['module'], $result['identifier']);
             UploadFailureBackoff::registerSuccess($app['root'], $result['module'], $result['identifier']);
             $app['redis']->hIncrBy('throttle:stats', 'binaries:accepted', 1);
@@ -63,6 +64,7 @@ class Binary
             return new Response($message . "\n");
         } catch (\Throwable $e) {
             $context = $e instanceof SymbolToolException ? $e->getContext() : [];
+            $this->setUploadInfo($app, $moduleHint, $identifierHint, $bytes);
             $app['monolog']->warning('Binary was stored, but symbol generation failed.', [
                 'module' => $moduleHint,
                 'identifier' => $identifierHint,

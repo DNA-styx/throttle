@@ -74,7 +74,7 @@ jobs:
       - name: Open conflict PR
         if: steps.check.outputs.new_commits == 'true' && steps.merge.outputs.conflict == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
           BRANCH="mysql-conflict-$(date +%Y%m%d)"
           git checkout -b $BRANCH origin/2026-mysql
