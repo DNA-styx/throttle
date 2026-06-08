@@ -137,7 +137,7 @@ class LegacySymbolsController extends AbstractController
 
             $uploaded = $this->findUploadedSymbolFile($request);
             if ($bytes === 0 && $uploaded instanceof UploadedFile) {
-                $bytes = (int) $uploaded->getSize();
+                $bytes = $this->safeUploadedFileSize($uploaded);
             }
 
             if ($module === null || $identifier === null) {
@@ -174,10 +174,9 @@ class LegacySymbolsController extends AbstractController
 
             $file = $this->findUploadedBinaryFile($request);
             if ($bytes === 0 && $file instanceof UploadedFile) {
-                $bytes = (int) $file->getSize();
+                $bytes = $this->safeUploadedFileSize($file);
             }
             if ($module === null && $file instanceof UploadedFile) {
-                $bytes = (int) $file->getSize();
                 $module = basename(str_replace('\\', '/', (string) (
                     $request->request->get('debug_file_path')
                     ?: $request->request->get('code_file_path')
@@ -237,7 +236,7 @@ class LegacySymbolsController extends AbstractController
     {
         foreach (['symbol_file', 'upload_file_symbols', 'upload_file_symbol', 'symbols'] as $field) {
             $file = $request->files->get($field);
-            if ($file instanceof UploadedFile && $file->isValid() && $file->getSize() > 0) {
+            if ($file instanceof UploadedFile && $file->isValid() && $this->safeUploadedFileSize($file) > 0) {
                 return $file;
             }
         }
@@ -249,12 +248,30 @@ class LegacySymbolsController extends AbstractController
     {
         foreach (['code_file', 'upload_file_binary', 'upload_file_code', 'binary_file', 'binary'] as $field) {
             $file = $request->files->get($field);
-            if ($file instanceof UploadedFile && $file->isValid() && $file->getSize() > 0) {
+            if ($file instanceof UploadedFile && $file->isValid() && $this->safeUploadedFileSize($file) > 0) {
                 return $file;
             }
         }
 
         return null;
+    }
+
+    private function safeUploadedFileSize(?UploadedFile $file): int
+    {
+        if (!$file instanceof UploadedFile || !$file->isValid()) {
+            return 0;
+        }
+
+        $pathname = $file->getPathname();
+        if (!is_string($pathname) || $pathname === '' || !is_file($pathname)) {
+            return 0;
+        }
+
+        try {
+            return (int) ($file->getSize() ?? 0);
+        } catch (\Throwable) {
+            return 0;
+        }
     }
 
     private function stringRequestValue(Request $request, string $key): ?string
