@@ -33,6 +33,7 @@ class ProfileController extends AbstractController
     public function show(Request $request, EntityManagerInterface $entityManager, Connection $connection, UserAiConfigManager $aiConfigManager, UserDiscordWebhookManager $discordWebhookManager, KernelInterface $kernel, AuthSettings $authSettings, AuthEnvironment $authEnvironment, UserAccessManager $userAccessManager): Response
     {
         $user = $this->currentUser();
+        $authMethods = $authSettings->all();
         if ($user->getUploadToken() === '') {
             $user->regenerateUploadToken();
             $entityManager->flush();
@@ -67,7 +68,7 @@ class ProfileController extends AbstractController
             'aiProviderTemplates' => $aiConfigManager->providerTemplates(),
             'defaultAiPrompt' => CrashAiProviderCatalog::DEFAULT_PROMPT,
             'aiAnalysisEnabled' => UploadSettings::load($kernel->getProjectDir())['crash_ai_analysis_enabled'],
-            'authMethods' => $authSettings->all(),
+            'authMethods' => $authMethods,
             'contactEmail' => $user->getContactEmail(),
             'canUnlinkSteam' => $steamAccount !== null && $userAccessManager->canManageOwnAuthMethods($user) && $userAccessManager->countUsableLoginMethods($user) > 1,
             'canUnlinkDiscord' => $discordAccount !== null && $userAccessManager->canManageOwnAuthMethods($user) && $userAccessManager->countUsableLoginMethods($user) > 1,
@@ -80,6 +81,8 @@ class ProfileController extends AbstractController
             'discordWebhookConfigs' => $discordWebhookManager->listConfigsForUser($user->getId()),
             'discordWebhookDefaultTemplate' => $discordWebhookManager->defaultTemplate(),
             'discordWebhookMaxCount' => UserDiscordWebhookManager::MAX_WEBHOOKS_PER_USER,
+            'profileVisibilityOptions' => $this->buildProfileVisibilityOptions($user, $authMethods, $steamAccount, $discordAccount),
+            'profileFieldVisibility' => $user->getProfileFieldVisibility(),
         ]);
     }
 
@@ -151,12 +154,27 @@ class ProfileController extends AbstractController
             return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
         }
 
-        $this->currentUser()->setProfilePrivate($request->request->getBoolean('profile_private'));
+        $user = $this->currentUser();
+        $user->setProfilePrivate($request->request->getBoolean('profile_private'));
+
+        $submittedVisibility = $request->request->all('profile_visibility');
+        $visibility = $user->getProfileFieldVisibility();
+        if (is_array($submittedVisibility)) {
+            foreach (User::PROFILE_VISIBILITY_FIELDS as $field) {
+                if (!array_key_exists($field, $submittedVisibility)) {
+                    continue;
+                }
+
+                $visibility[$field] = filter_var($submittedVisibility[$field], FILTER_VALIDATE_BOOL);
+            }
+        }
+
+        $user->setProfileFieldVisibility($visibility);
         $entityManager->flush();
 
         $this->addFlash('success', 'Profile privacy settings saved.');
 
-        return $this->redirectToRoute('profile', [], Response::HTTP_SEE_OTHER);
+        return $this->redirect($this->generateUrl('profile') . '#profile-privacy', Response::HTTP_SEE_OTHER);
     }
 
     #[Route('/profile/email', name: 'profile_email', methods: ['POST'])]
@@ -637,5 +655,48 @@ class ProfileController extends AbstractController
             'previous_page' => $page > 1 ? $page - 1 : null,
             'next_page' => $page < $totalPages ? $page + 1 : null,
         ];
+    }
+
+    /**
+     * @param array<string, bool> $authMethods
+     * @return array<int, array{key: string, label: string, help: string}>
+     */
+    private function buildProfileVisibilityOptions(User $user, array $authMethods, ?ExternalAccount $steamAccount, ?ExternalAccount $discordAccount): array
+    {
+        $options = [];
+
+        if (
+            $user->getContactEmail() !== null
+            && (
+                ($authMethods['email_login_link'] ?? false)
+                || ($authMethods['password_login'] ?? false)
+                || ($authMethods['password_registration'] ?? false)
+                || ($authMethods['password_reset'] ?? false)
+            )
+        ) {
+            $options[] = [
+                'key' => 'email',
+                'label' => 'Show contact email',
+                'help' => 'Visible on your public player profile to other signed-in users.',
+            ];
+        }
+
+        if (($authMethods['steam'] ?? false) && $steamAccount !== null) {
+            $options[] = [
+                'key' => 'steam',
+                'label' => 'Show SteamID64',
+                'help' => 'Visible on your public player profile to other signed-in users.',
+            ];
+        }
+
+        if (($authMethods['discord'] ?? false) && $discordAccount !== null) {
+            $options[] = [
+                'key' => 'discord',
+                'label' => 'Show Discord ID',
+                'help' => 'Visible on your public player profile to other signed-in users.',
+            ];
+        }
+
+        return $options;
     }
 }

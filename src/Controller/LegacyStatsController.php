@@ -3,6 +3,7 @@
 namespace App\Controller;
 
 use App\Legacy\LegacyBridgeFactory;
+use Doctrine\DBAL\Connection;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -13,10 +14,12 @@ class LegacyStatsController extends AbstractController
     use LegacyResponseTrait;
 
     private LegacyBridgeFactory $legacyBridgeFactory;
+    private Connection $connection;
 
-    public function __construct(LegacyBridgeFactory $legacyBridgeFactory)
+    public function __construct(LegacyBridgeFactory $legacyBridgeFactory, Connection $connection)
     {
         $this->legacyBridgeFactory = $legacyBridgeFactory;
+        $this->connection = $connection;
     }
 
     #[Route('/stats/today', name: 'stats_today', methods: ['GET'])]
@@ -35,6 +38,12 @@ class LegacyStatsController extends AbstractController
     public function unique(Request $request): Response
     {
         return $this->legacyResponse((new \Throttle\Stats())->unique($this->legacyBridgeFactory->createHttp($request)));
+    }
+
+    #[Route('/stats/users', name: 'stats_users', methods: ['GET'])]
+    public function users(): Response
+    {
+        return new Response((string) ((int) $this->connection->fetchOne('SELECT COUNT(*) FROM `user`')));
     }
 
     #[Route('/stats/daily/{module}/{function}', name: 'stats_daily', methods: ['GET'], defaults: ['module' => null, 'function' => null])]

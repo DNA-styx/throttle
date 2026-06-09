@@ -3,7 +3,7 @@
 {% block title %}Profile{% endblock %}
 
 {% block body %}
-    <div class="profile-shell">
+    <div class="profile-shell" style="display:flex; flex-direction:column;">
         {% for label, messages in app.flashes %}
             {% for message in messages %}
                 <div class="alert alert-{{ label == 'danger' ? 'danger' : (label == 'warning' ? 'warning' : 'success') }}">{{ message }}</div>
@@ -197,31 +197,61 @@
             </form>
         </section>
 
-        <section class="profile-panel profile-danger-zone mb-3">
+        <section id="profile-privacy" class="profile-panel mb-3">
             <div class="mb-3">
-                <h2 class="h5 mb-1 text-danger">Delete account</h2>
-                <div class="text-muted">This permanently removes your local account, linked login methods, teams, and upload token access. Owned crash reports will stay, but ownership will be cleared.</div>
+                <h2 class="h5 mb-1">Profile privacy</h2>
+                <div class="text-muted">Control what other signed-in users can see on your player profile page.</div>
             </div>
 
-            <form method="post" action="{{ path('profile_delete_account') }}" class="row g-3">
-                <input type="hidden" name="_token" value="{{ csrf_token('profile-delete-account') }}">
-                {% if user.hasPassword %}
-                    <div class="col-md-4">
-                        <label class="form-label">Current password</label>
-                        <input type="password" class="form-control" name="current_password" autocomplete="current-password" required>
+            <form method="post" action="{{ path('profile_privacy') }}">
+                <input type="hidden" name="_token" value="{{ csrf_token('profile-privacy') }}">
+                <div class="form-check form-switch mb-3">
+                    <input
+                        id="profile-private"
+                        class="form-check-input"
+                        type="checkbox"
+                        name="profile_private"
+                        value="1"
+                        {% if user.profilePrivate %}checked{% endif %}
+                    >
+                    <label class="form-check-label" for="profile-private">
+                        Make my player profile private
+                    </label>
+                </div>
+                <div class="form-text mb-3">When enabled, other users will only see your avatar and a privacy notice. Admins and you still see the full profile.</div>
+
+                {% if profileVisibilityOptions %}
+                    <div class="border rounded p-3 mb-3">
+                        <h3 class="h6 mb-2">Identity fields</h3>
+                        <div class="text-muted small mb-3">Choose which linked sign-in details stay visible on your public player profile.</div>
+                        <div class="row g-3">
+                            {% for option in profileVisibilityOptions %}
+                                <div class="col-md-6">
+                                    <input type="hidden" name="profile_visibility[{{ option.key }}]" value="0">
+                                    <div class="form-check form-switch">
+                                        <input
+                                            class="form-check-input"
+                                            type="checkbox"
+                                            role="switch"
+                                            id="profile-visibility-{{ option.key }}"
+                                            name="profile_visibility[{{ option.key }}]"
+                                            value="1"
+                                            {% if profileFieldVisibility[option.key] ?? true %}checked{% endif %}
+                                        >
+                                        <label class="form-check-label" for="profile-visibility-{{ option.key }}">{{ option.label }}</label>
+                                    </div>
+                                    <div class="form-text">{{ option.help }}</div>
+                                </div>
+                            {% endfor %}
+                        </div>
                     </div>
                 {% endif %}
-                <div class="col-md-4">
-                    <label class="form-label">Type DELETE to confirm</label>
-                    <input type="text" class="form-control" name="confirm_delete" autocomplete="off" required>
-                </div>
-                <div class="col-md-4 d-flex align-items-end">
-                    <button type="submit" class="btn btn-outline-danger w-100">Delete account</button>
-                </div>
+
+                <button type="submit" class="btn btn-primary">Save privacy</button>
             </form>
         </section>
 
-        <section class="profile-panel mb-3">
+        <section id="upload-token-section" class="profile-panel mb-3" style="order: 50;">
             <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
                 <h2 class="h5 mb-0">Upload token</h2>
                 <a href="{{ path('profile_token_statistics') }}" class="btn btn-sm btn-outline-secondary">Open statistics</a>
@@ -229,7 +259,20 @@
 
             <label for="upload-token" class="form-label">Token for crash, symbol, and binary uploads</label>
             <div class="input-group mb-3">
-                <input id="upload-token" class="form-control font-monospace" value="{{ user.uploadToken }}" readonly>
+                <input id="upload-token" class="form-control font-monospace" type="password" value="{{ user.uploadToken }}" readonly data-token-field>
+                <button
+                    class="btn btn-outline-primary"
+                    type="button"
+                    data-eye-open="{{ asset('build/bootstrap-icons.svg') }}#eye"
+                    data-eye-closed="{{ asset('build/bootstrap-icons.svg') }}#eye-slash"
+                    aria-label="Show upload token"
+                    title="Show upload token"
+                    onclick="const input=document.getElementById('upload-token');const icon=this.querySelector('use');if(!input){return false;}const visible=input.type==='text';input.type=visible?'password':'text';this.setAttribute('aria-label',visible?'Show upload token':'Hide upload token');this.setAttribute('title',visible?'Show upload token':'Hide upload token');if(icon){const nextIcon=visible?this.dataset.eyeOpen:this.dataset.eyeClosed;icon.setAttribute('href',nextIcon);icon.setAttribute('xlink:href',nextIcon);}return false;"
+                >
+                    <svg width="16" height="16" aria-hidden="true">
+                        <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#eye"></use>
+                    </svg>
+                </button>
                 <button class="btn btn-outline-secondary" type="button" data-copy-token="#upload-token">
                     <svg class="bi me-1" width="16" height="16" aria-hidden="true">
                         <use xlink:href="{{ asset('build/bootstrap-icons.svg') }}#clipboard"></use>
@@ -294,33 +337,31 @@
             </form>
         </section>
 
-        <section class="profile-panel">
+        <section id="delete-account-section" class="profile-panel profile-danger-zone mb-3" style="order: 40;">
             <div class="mb-3">
-                <h2 class="h5 mb-1">Profile privacy</h2>
-                <div class="text-muted">Control what other signed-in users can see on your player profile page.</div>
+                <h2 class="h5 mb-1 text-danger">Delete account</h2>
+                <div class="text-muted">This permanently removes your local account, linked login methods, teams, and upload token access. Owned crash reports will stay, but ownership will be cleared.</div>
             </div>
 
-            <form method="post" action="{{ path('profile_privacy') }}">
-                <input type="hidden" name="_token" value="{{ csrf_token('profile-privacy') }}">
-                <div class="form-check form-switch mb-3">
-                    <input
-                        id="profile-private"
-                        class="form-check-input"
-                        type="checkbox"
-                        name="profile_private"
-                        value="1"
-                        {% if user.profilePrivate %}checked{% endif %}
-                    >
-                    <label class="form-check-label" for="profile-private">
-                        Make my player profile private
-                    </label>
+            <form method="post" action="{{ path('profile_delete_account') }}" class="row g-3">
+                <input type="hidden" name="_token" value="{{ csrf_token('profile-delete-account') }}">
+                {% if user.hasPassword %}
+                    <div class="col-md-4">
+                        <label class="form-label">Current password</label>
+                        <input type="password" class="form-control" name="current_password" autocomplete="current-password" required>
+                    </div>
+                {% endif %}
+                <div class="col-md-4">
+                    <label class="form-label">Type DELETE to confirm</label>
+                    <input type="text" class="form-control" name="confirm_delete" autocomplete="off" required>
                 </div>
-                <div class="form-text mb-3">When enabled, other users will only see your avatar and a privacy notice. Admins and you still see the full profile.</div>
-                <button type="submit" class="btn btn-primary">Save privacy</button>
+                <div class="col-md-4 d-flex align-items-end">
+                    <button type="submit" class="btn btn-outline-danger w-100">Delete account</button>
+                </div>
             </form>
         </section>
 
-        <section class="profile-panel mt-3" id="discord-webhooks">
+        <section class="profile-panel mt-3" id="discord-webhooks" style="order: 80;">
             <div class="mb-3">
                 <h2 class="h5 mb-1">Discord webhooks</h2>
                 <div class="text-muted">Send crash notifications to one or more Discord webhooks after a crash is processed. Up to {{ discordWebhookMaxCount }} webhooks per user.</div>
@@ -414,7 +455,9 @@
                                     </div>
                                 </div>
                                 <div class="profile-ai-card-meta">
-                                    {% if not config.enabled %}
+                                    {% if config.enabled %}
+                                        <span class="badge text-bg-success">Enable</span>
+                                    {% else %}
                                         <span class="badge text-bg-secondary">Disabled</span>
                                     {% endif %}
                                 </div>
@@ -494,6 +537,7 @@
             data-core-config-generator
             data-token="{{ user.uploadToken }}"
             data-default-base-url="{{ coreConfigBaseUrl }}"
+            style="order: 60;"
         >
             <div class="mb-3">
                 <h2 class="h5 mb-1">core.cfg generator</h2>
@@ -593,7 +637,7 @@
             </div>
         </section>
 
-        <section class="profile-panel mt-3" data-ai-provider-section data-ai-provider-definitions="{{ aiProviderTemplates|json_encode|e('html_attr') }}">
+        <section id="ai-analysis" class="profile-panel mt-3" data-ai-provider-section data-ai-provider-definitions="{{ aiProviderTemplates|json_encode|e('html_attr') }}" style="order: 70;">
             <div class="mb-3">
                 <h2 class="h5 mb-1">AI analysis</h2>
                 <div class="text-muted">Save one or more AI API configurations for crash analysis. Keys are stored on the server and encrypted before being written to the database.</div>
@@ -605,11 +649,17 @@
                 <div class="alert alert-warning py-2 mb-3">Ask AI buttons are currently hidden because AI crash analysis is disabled in <a href="{{ path('health') }}" class="alert-link">/health</a>.</div>
             {% endif %}
 
-            <div class="border rounded p-3 mb-3">
-                <h3 class="h6 mb-3">Add AI config</h3>
-                <form method="post" action="{{ path('profile_ai_config_save') }}">
-                    <input type="hidden" name="_token" value="{{ csrf_token('profile-ai-config-save') }}">
-                    <div class="row g-3">
+            <details class="profile-ai-card mb-3">
+                <summary class="profile-ai-card-summary">
+                    <div class="profile-ai-card-main">
+                        <div class="fw-semibold">Add AI config</div>
+                        <div class="text-muted small">Create a new saved provider connection</div>
+                    </div>
+                </summary>
+                <div class="profile-ai-card-body">
+                    <form method="post" action="{{ path('profile_ai_config_save') }}">
+                        <input type="hidden" name="_token" value="{{ csrf_token('profile-ai-config-save') }}">
+                        <div class="row g-3">
                         <div class="col-md-4">
                             <label class="form-label">Display name</label>
                             <input class="form-control" name="display_name" value="" maxlength="100" placeholder="My OpenAI config">
@@ -664,12 +714,13 @@
                             <textarea class="form-control font-monospace" name="extra_options_json" rows="5" placeholder='{"reasoning": {"effort": "high"}}'></textarea>
                             <div class="form-text">Optional provider-specific JSON merged into the request body. Useful for custom OpenAI-compatible APIs and advanced provider knobs.</div>
                         </div>
-                    </div>
-                    <div class="mt-3">
-                        <button type="submit" class="btn btn-primary">Create AI config</button>
-                    </div>
-                </form>
-            </div>
+                        </div>
+                        <div class="mt-3">
+                            <button type="submit" class="btn btn-primary">Create AI config</button>
+                        </div>
+                    </form>
+                </div>
+            </details>
 
             {% if aiConfigs %}
                 <div class="mb-2 d-flex align-items-center justify-content-between gap-2">
