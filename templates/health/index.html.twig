@@ -204,6 +204,9 @@
                 <input type="hidden" name="upload_failure_backoff_enabled" value="{{ uploadSettings.upload_failure_backoff_enabled ? '1' : '0' }}">
                 <input type="hidden" name="upload_failure_backoff_threshold" value="{{ uploadSettings.upload_failure_backoff_threshold }}">
                 <input type="hidden" name="upload_failure_backoff_ttl" value="{{ uploadSettings.upload_failure_backoff_ttl }}">
+                {% for signature in uploadSettings.ignored_crash_signatures %}
+                    <input type="hidden" name="ignored_crash_signatures[]" value="{{ signature }}">
+                {% endfor %}
                 {% for category, categorySettings in uploadSettings.storage_cleanup %}
                     <input type="hidden" name="storage_cleanup_{{ category }}_enabled" value="{{ categorySettings.enabled ? '1' : '0' }}">
                     <input type="hidden" name="storage_cleanup_{{ category }}_max_total_size" value="{{ storageCleanupMegabytes[category] }}">
@@ -341,6 +344,11 @@
                 <div class="mb-3">
                     <label class="form-label" for="upload-failure-backoff-ttl">Backoff TTL (sec)</label>
                     <input id="upload-failure-backoff-ttl" name="upload_failure_backoff_ttl" type="number" min="60" step="60" class="form-control" value="{{ uploadSettings.upload_failure_backoff_ttl }}">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="ignored-crash-signatures">Ignored crash signatures</label>
+                    <textarea id="ignored-crash-signatures" name="ignored_crash_signatures" class="form-control font-monospace" rows="6" placeholder="libsteam_api.so!SteamGameServer_Shutdown + 0x0">{{ uploadSettings.ignored_crash_signatures|join("\n") }}</textarea>
+                    <div class="form-text">One displayed signature per line. Use the same text shown in Top Crashers or Latest Crash Reports. Matching crashes still reach stackwalk, then they are skipped from the remaining follow-up processing path.</div>
                 </div>
                 <hr class="my-4">
                 <div class="d-flex align-items-center justify-content-between gap-3 mb-3">

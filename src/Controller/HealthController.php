@@ -537,10 +537,21 @@ class HealthController extends AbstractController
     }
 
     /**
-     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int, crash_source_lookup_enabled: bool, crash_ai_analysis_enabled: bool, auth_enable_steam: bool, auth_enable_discord: bool, auth_enable_email_login_link: bool, auth_enable_password_login: bool, auth_enable_password_registration: bool, auth_enable_password_reset: bool, auth_enable_token_login: bool}
+     * @return array{streaming_symbols_enabled: bool, upload_memory_limit: string, allow_anonymous_minidump_uploads: bool, upload_failure_backoff_enabled: bool, upload_failure_backoff_threshold: int, upload_failure_backoff_ttl: int, crash_source_lookup_enabled: bool, crash_ai_analysis_enabled: bool, auth_enable_steam: bool, auth_enable_discord: bool, auth_enable_email_login_link: bool, auth_enable_password_login: bool, auth_enable_password_registration: bool, auth_enable_password_reset: bool, auth_enable_token_login: bool, ignored_crash_signatures: array<int, string>, storage_cleanup: array<string, array<string, mixed>>}
      */
     private function readUploadSettingsFromRequest(Request $request): array
     {
+        $requestData = $request->request->all();
+        $ignoredCrashSignatures = $requestData['ignored_crash_signatures'] ?? [];
+        if (!is_array($ignoredCrashSignatures) || $ignoredCrashSignatures === []) {
+            $ignoredCrashSignatures = $this->splitPolicyLines(is_string($ignoredCrashSignatures) ? $ignoredCrashSignatures : '');
+        } else {
+            $ignoredCrashSignatures = array_values(array_unique(array_filter(array_map(
+                static fn (mixed $value): string => is_scalar($value) ? trim((string) $value) : '',
+                $ignoredCrashSignatures
+            ))));
+        }
+
         $storageCleanup = [];
         foreach (array_keys(StorageRetentionManager::defaults()) as $category) {
             $storageCleanup[$category] = [
@@ -566,6 +577,7 @@ class HealthController extends AbstractController
             'auth_enable_password_registration' => $request->request->getBoolean('auth_enable_password_registration'),
             'auth_enable_password_reset' => $request->request->getBoolean('auth_enable_password_reset'),
             'auth_enable_token_login' => $request->request->getBoolean('auth_enable_token_login'),
+            'ignored_crash_signatures' => $ignoredCrashSignatures,
             'storage_cleanup' => $storageCleanup,
         ];
     }
@@ -601,6 +613,13 @@ class HealthController extends AbstractController
             }
             if ((int) ($categorySettings['max_age_days'] ?? 0) < 0) {
                 $errors[] = sprintf('Max age for %s cleanup must be 0 or greater.', str_replace('_', ' ', $category));
+            }
+        }
+
+        foreach (($settings['ignored_crash_signatures'] ?? []) as $signature) {
+            if (strlen($signature) > 255) {
+                $errors[] = 'Ignored crash signatures must be 255 characters or shorter.';
+                break;
             }
         }
 

@@ -31,6 +31,12 @@ class User extends ServerOwner implements UserInterface, PasswordAuthenticatedUs
         self::THEME_SYSTEM,
     ];
 
+    public const PROFILE_VISIBILITY_FIELDS = [
+        'email',
+        'steam',
+        'discord',
+    ];
+
     /** @var array<int, string> */
     #[ORM\Column(type: 'json')]
     protected array $roles = [];
@@ -67,6 +73,10 @@ class User extends ServerOwner implements UserInterface, PasswordAuthenticatedUs
 
     #[ORM\Column(options: ['default' => false])]
     protected bool $profilePrivate = false;
+
+    /** @var array<string, bool> */
+    #[ORM\Column(type: 'json')]
+    protected array $profileFieldVisibility = [];
 
     /** @var Collection<int, ExternalAccount> */
     #[ORM\OneToMany(mappedBy: 'user', targetEntity: ExternalAccount::class, cascade: ['remove'])]
@@ -284,6 +294,64 @@ class User extends ServerOwner implements UserInterface, PasswordAuthenticatedUs
     public function setProfilePrivate(bool $profilePrivate): self
     {
         $this->profilePrivate = $profilePrivate;
+
+        return $this;
+    }
+
+    /**
+     * @return array<string, bool>
+     */
+    public function getProfileFieldVisibility(): array
+    {
+        $visibility = [];
+        foreach (self::PROFILE_VISIBILITY_FIELDS as $field) {
+            $visibility[$field] = true;
+        }
+
+        foreach ($this->profileFieldVisibility as $field => $enabled) {
+            if (!in_array($field, self::PROFILE_VISIBILITY_FIELDS, true)) {
+                continue;
+            }
+
+            $visibility[$field] = (bool) $enabled;
+        }
+
+        return $visibility;
+    }
+
+    /**
+     * @param array<string, mixed> $profileFieldVisibility
+     */
+    public function setProfileFieldVisibility(array $profileFieldVisibility): self
+    {
+        $visibility = [];
+        foreach (self::PROFILE_VISIBILITY_FIELDS as $field) {
+            if (!array_key_exists($field, $profileFieldVisibility)) {
+                continue;
+            }
+
+            $visibility[$field] = (bool) $profileFieldVisibility[$field];
+        }
+
+        $this->profileFieldVisibility = $visibility;
+
+        return $this;
+    }
+
+    public function isProfileFieldVisible(string $field): bool
+    {
+        return $this->getProfileFieldVisibility()[$field] ?? true;
+    }
+
+    public function setProfileFieldVisible(string $field, bool $visible): self
+    {
+        if (!in_array($field, self::PROFILE_VISIBILITY_FIELDS, true)) {
+            throw new \InvalidArgumentException('Unsupported profile visibility field');
+        }
+
+        $visibility = $this->getProfileFieldVisibility();
+        $visibility[$field] = $visible;
+        $this->profileFieldVisibility = $visibility;
 
         return $this;
     }

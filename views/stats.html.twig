@@ -16,14 +16,17 @@
 </div>
 {% else %}
 <div class="row">
-    <div class="col-sm-4 col-md-3 col-md-push-1-5">
+    <div class="col-sm-6 col-md-3">
         <div class="crash-count"><span id="crash-count-servers">&nbsp;</span> Unique servers last 24 hours</div>
     </div>
-    <div class="col-sm-4 col-md-3 col-md-push-1-5">
+    <div class="col-sm-6 col-md-3">
         <div class="crash-count"><span id="crash-count-lifetime">&nbsp;</span> Crash reports received to date</div>
     </div>
-    <div class="col-sm-4 col-md-3 col-md-push-1-5">
+    <div class="col-sm-6 col-md-3">
         <div class="crash-count"><span id="crash-count-today">&nbsp;</span> Last 24 hours (5m average)</div>
+    </div>
+    <div class="col-sm-6 col-md-3">
+        <div class="crash-count"><span id="crash-count-users">&nbsp;</span> Registered users</div>
     </div>
 </div>
 {% endif %}
@@ -88,6 +91,7 @@ $(function() {
   bindLiveCounter($('#crash-count-servers'), '{{ path('stats_unique') }}', 60);
   bindLiveCounter($('#crash-count-lifetime'), '{{ path('stats_lifetime') }}', 10);
   bindLiveCounter($('#crash-count-today'), '{{ path('stats_today') }}', 300);
+  bindLiveCounter($('#crash-count-users'), '{{ path('stats_users') }}', 300);
 
   var darkCharts = document.body.classList.contains('theme-dark');
   if (darkCharts && window.Highcharts) {

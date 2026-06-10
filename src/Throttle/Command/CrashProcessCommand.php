@@ -120,6 +120,7 @@ class CrashProcessCommand extends Command
         unset($path);
 
         $symbolCacheDirectory = \Filesystem::createDirectory($app['root'] . '/cache/symbols', 0777, true);
+        $ignoredSignatures = self::normalizeIgnoredSignatures($app['config']['upload-settings']['ignored_crash_signatures'] ?? []);
 
         $progress = new ProgressBar($output, (int) $pending);
         $progress->start();
@@ -151,7 +152,7 @@ class CrashProcessCommand extends Command
             $start = microtime(true);
             $processedCrashId = null;
 
-            $app['db']->transactional(function($db) use ($app, $symbols, $symbolCacheDirectory, &$symbolCache, &$repoCache, &$processedCrashId) {
+            $app['db']->transactional(function($db) use ($app, $symbols, $symbolCacheDirectory, &$symbolCache, &$repoCache, &$processedCrashId, $ignoredSignatures) {
                 $id = $app['db']->executeQuery('SELECT id FROM crash WHERE processed = 0 ORDER BY timestamp DESC LIMIT 1')->fetchColumn(0);
                 $minidump = $app['root'] . '/dumps/' . substr($id, 0, 2) . '/' . $id . '.dmp';
                 $logs = $app['root'] . '/dumps/' . substr($id, 0, 2) . '/' . $id . '.txt';
@@ -454,6 +455,14 @@ class CrashProcessCommand extends Command
 
                 $app['db']->executeUpdate('UPDATE crash SET stackhash = (SELECT GROUP_CONCAT(SUBSTRING(SHA2(rendered, 256), 1, 8) ORDER BY frame ASC SEPARATOR \'\') AS hash FROM frame WHERE crash = ? AND thread = ? AND frame < 10 AND module != \'\' GROUP BY crash, thread) WHERE id = ?', array($id, $crashThread, $id));
 
+                $stackhash = $app['db']->executeQuery('SELECT stackhash FROM crash WHERE id = ?', [$id])->fetchColumn(0);
+                $ignoredCandidates = self::buildIgnoredSignatureCandidates($app, $id, $crashThread, $stackhash);
+                if (array_intersect($ignoredCandidates, $ignoredSignatures) !== []) {
+                    $app['redis']->hIncrBy('throttle:stats', 'crashes:ignored-signature', 1);
+
+                    return;
+                }
+
                 $app['redis']->hIncrBy('throttle:stats', 'crashes:processed', 1);
 
                 // This isn't as important, so do it after we mark the crash as processed.
@@ -516,6 +525,70 @@ class CrashProcessCommand extends Command
         }
 
         return mb_substr($value, 0, $limit);
+    }
+
+    /**
+     * @param mixed $signatures
+     * @return array<int, string>
+     */
+    private static function normalizeIgnoredSignatures(mixed $signatures): array
+    {
+        if (is_string($signatures)) {
+            $signatures = preg_split('/\R/', $signatures) ?: [];
+        }
+
+        if (!is_array($signatures)) {
+            return [];
+        }
+
+        $normalized = [];
+        foreach ($signatures as $signature) {
+            if (!is_scalar($signature)) {
+                continue;
+            }
+
+            $signature = strtolower(trim((string) $signature));
+            if ($signature === '') {
+                continue;
+            }
+
+            $normalized[] = $signature;
+        }
+
+        return array_values(array_unique($normalized));
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private static function buildIgnoredSignatureCandidates(\Silex\Application $app, string $id, int $crashThread, mixed $stackhash): array
+    {
+        $candidates = [];
+
+        if (is_string($stackhash) && trim($stackhash) !== '') {
+            $candidates[] = $stackhash;
+        }
+
+        $summary = $app['db']->executeQuery('SELECT crashmodule, crashfunction FROM crash WHERE id = ?', [$id])->fetch();
+        if (is_array($summary)) {
+            $module = trim((string) ($summary['crashmodule'] ?? ''));
+            $function = trim((string) ($summary['crashfunction'] ?? ''));
+            if ($module !== '' && $function !== '') {
+                $candidates[] = $module . '!' . $function;
+            } elseif ($module !== '') {
+                $candidates[] = $module;
+            }
+        }
+
+        $rendered = $app['db']->executeQuery(
+            'SELECT rendered FROM frame WHERE crash = ? AND thread = ? AND frame = 0 LIMIT 1',
+            [$id, $crashThread]
+        )->fetchColumn(0);
+        if (is_string($rendered) && trim($rendered) !== '') {
+            $candidates[] = $rendered;
+        }
+
+        return self::normalizeIgnoredSignatures($candidates);
     }
 }
 
