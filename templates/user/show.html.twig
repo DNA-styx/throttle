@@ -42,6 +42,32 @@
             opacity: 0.45;
             pointer-events: none;
         }
+
+        .player-summary-card {
+            border: 1px solid rgba(133, 160, 196, 0.18);
+            border-radius: 12px;
+            padding: 16px 18px;
+            background: rgba(18, 28, 40, 0.72);
+            height: 100%;
+        }
+
+        .player-summary-label {
+            color: #9eb0c7;
+            font-size: 0.82rem;
+            margin-bottom: 6px;
+        }
+
+        .player-summary-value {
+            font-size: 1.15rem;
+            font-weight: 600;
+            word-break: break-word;
+        }
+
+        .player-identity-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 12px;
+        }
     </style>
     <div class="profile-shell player-profile-shell">
         <section class="profile-panel">
@@ -80,37 +106,53 @@
                                 <div class="text-muted">Crashes</div>
                             </div>
                             <div>
-                                <div class="profile-stat-value">{{ steamId ?: '-' }}</div>
+                                <div class="profile-stat-value">{{ showSteam ? (steamId ?: '-') : 'Hidden' }}</div>
                                 <div class="text-muted">SteamID64</div>
                             </div>
                             <div>
-                                <div class="profile-stat-value">{{ discordId ?: '-' }}</div>
+                                <div class="profile-stat-value">{{ showDiscord ? (discordId ?: '-') : 'Hidden' }}</div>
                                 <div class="text-muted">Discord ID</div>
+                            </div>
+                            <div>
+                                <div class="profile-stat-value">{{ showEmail ? (contactEmail ?: '-') : 'Hidden' }}</div>
+                                <div class="text-muted">Contact email</div>
                             </div>
                         </div>
 
                         <div class="row g-3">
-                            <div class="col-md-6">
-                                <div class="border rounded p-3 h-100">
-                                    <h2 class="h6 mb-2">Profile summary</h2>
-                                    <dl class="mb-0">
-                                        <dt class="small text-muted">Contact email</dt>
-                                        <dd>{{ user.contactEmail ?: 'Hidden or not set' }}</dd>
-                                        <dt class="small text-muted">Roles</dt>
-                                        <dd>{{ user.roles ? user.roles|join(', ') : 'None' }}</dd>
-                                    </dl>
+                            <div class="col-lg-8">
+                                <div class="player-summary-card">
+                                    <h2 class="h6 mb-3">Identity visibility</h2>
+                                    <div class="player-identity-list">
+                                        <div>
+                                            <div class="player-summary-label">Contact email</div>
+                                            <div class="player-summary-value">{{ showEmail ? (contactEmail ?: 'Not set') : 'Hidden by player' }}</div>
+                                        </div>
+                                        <div>
+                                            <div class="player-summary-label">SteamID64</div>
+                                            <div class="player-summary-value">{{ showSteam ? (steamId ?: 'Not linked') : 'Hidden by player' }}</div>
+                                        </div>
+                                        <div>
+                                            <div class="player-summary-label">Discord ID</div>
+                                            <div class="player-summary-value">{{ showDiscord ? (discordId ?: 'Not linked') : 'Hidden by player' }}</div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="col-md-6">
-                                <div class="border rounded p-3 h-100">
+                            <div class="col-lg-4">
+                                <div class="player-summary-card">
                                     <h2 class="h6 mb-2">Profile visibility</h2>
-                                    <p class="mb-0 text-muted">
+                                    <p class="mb-2 text-muted">
                                         {% if user.profilePrivate %}
                                             Private for other users.
                                         {% else %}
                                             Public to signed-in users.
                                         {% endif %}
                                     </p>
+                                    {% if isOwnProfile or isAdminViewer %}
+                                        <div class="player-summary-label">Roles</div>
+                                        <div class="player-summary-value">{{ user.roles ? user.roles|join(', ') : 'ROLE_USER' }}</div>
+                                    {% endif %}
                                 </div>
                             </div>
                         </div>
