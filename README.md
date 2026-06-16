@@ -36,8 +36,10 @@ This 2026 branch includes:
 - Node.js and npm for asset builds
 - Nginx and PHP-FPM for manual VPS installs
 - Docker Compose for container installs
+- 32-bit glibc/runtime libraries for Breakpad tools on Linux hosts (`minidump_stackwalk` is shipped as a 32-bit ELF binary)
 
 Required PHP extensions include `ctype`, `iconv`, `intl`, `pdo_mysql`, `bcmath`, `xsl`, `zip`, and the standard Symfony runtime extensions.
+On Debian/Ubuntu amd64 hosts, install the 32-bit runtime packages too: `libc6:i386`, `libstdc++6:i386`, `zlib1g:i386`, and `libgcc-s1:i386`.
 
 ### Docker Compose Install
 
@@ -83,8 +85,13 @@ Open `http://SERVER_IP:18080/` or place a reverse proxy in front of the containe
 ### Manual Ubuntu/Nginx/PHP-FPM Install
 
 Install PHP 8.4, MariaDB, Redis, Nginx, Composer, Node.js, and npm. On Ubuntu 24.04, PHP 8.4 usually requires an additional package source such as `ppa:ondrej/php`.
+If the server is amd64, also enable `i386` packages because the bundled `minidump_stackwalk` binary is 32-bit.
 
 ```bash
+sudo dpkg --add-architecture i386
+sudo apt-get update
+sudo apt-get install -y libc6:i386 libstdc++6:i386 zlib1g:i386 libgcc-s1:i386
+
 cd /var/www/throttle
 sudo -u www-data env APP_ENV=prod APP_DEBUG=0 php8.4 "$(which composer)" install --no-dev --optimize-autoloader
 npm ci
@@ -231,6 +238,7 @@ sudo -u www-data php8.4 /var/www/throttle/bin/console messenger:consume async --
 - when symbols or binaries arrive after an earlier crash was already processed, Throttle marks affected crash reports for automatic reprocessing on the next `crash:process --update` pass
 - automatic storage cleanup runs inside `crash:process`; on manual installs you therefore need the timer/service or another scheduler that actually runs that command
 - `bin/carburetor`, `bin/minidump_stackwalk`, `bin/dump_syms`, `bin/breakpad_moduleid`, and `bin/nm` must be executable
+- if `minidump_stackwalk` fails with `exit 127`, `not found`, or `cannot execute: required file not found`, the binary usually exists but the server is missing 32-bit runtime libraries such as `libc6:i386`
 - `var/`, `cache/`, `dumps/`, and `symbols/` must be writable by the PHP-FPM user
 - if templates fail with missing Encore entrypoints, run `npm ci && npm run build` and verify `public/build/entrypoints.json` exists
 - if Composer uses PHP 8.1 on a PHP 8.4 project, run Composer through PHP 8.4
