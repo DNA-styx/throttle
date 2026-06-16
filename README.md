@@ -146,17 +146,87 @@ chmod -R ug+rwX var cache dumps symbols
 systemctl restart php8.4-fpm nginx
 ```
 
-Nginx must point the virtual host root at `public/`, pass PHP to PHP 8.4 FPM, and allow large uploads:
+Nginx must point the virtual host root at `public/`, pass PHP to PHP 8.4 FPM, allow large uploads, and, if you still use plain `http://` upload URLs for Accelerator, avoid redirecting `/submit`, `/symbols/submit`, and `/binary/submit` away from PHP on port `80`.
 
 ```nginx
-client_max_body_size 100M;
-root /var/www/throttle/public;
-location / {
-    try_files $uri /index.php$is_args$args;
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name crash.example.com;
+
+    root /var/www/throttle/public;
+    index index.php;
+    client_max_body_size 128M;
+
+    ssl_certificate /etc/letsencrypt/live/crash.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/crash.example.com/privkey.pem;
+
+    location / {
+        try_files $uri /index.php$is_args$args;
+    }
+
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/run/php/php8.4-fpm.sock;
+        fastcgi_read_timeout 600s;
+        fastcgi_send_timeout 600s;
+        fastcgi_connect_timeout 600s;
+    }
 }
-location ~ \.php$ {
-    include snippets/fastcgi-php.conf;
-    fastcgi_pass unix:/run/php/php8.4-fpm.sock;
+
+server {
+    listen 80;
+    server_name crash.example.com;
+
+    root /var/www/throttle/public;
+    index index.php;
+    client_max_body_size 128M;
+
+    location = /submit {
+        include fastcgi.conf;
+        fastcgi_pass unix:/run/php/php8.4-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME /var/www/throttle/public/index.php;
+        fastcgi_param SCRIPT_NAME /index.php;
+        fastcgi_param DOCUMENT_ROOT /var/www/throttle/public;
+        fastcgi_param REQUEST_URI $request_uri;
+        fastcgi_param DOCUMENT_URI /index.php;
+        fastcgi_param PATH_INFO "";
+        fastcgi_read_timeout 600s;
+        fastcgi_send_timeout 600s;
+        fastcgi_connect_timeout 600s;
+    }
+
+    location = /symbols/submit {
+        include fastcgi.conf;
+        fastcgi_pass unix:/run/php/php8.4-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME /var/www/throttle/public/index.php;
+        fastcgi_param SCRIPT_NAME /index.php;
+        fastcgi_param DOCUMENT_ROOT /var/www/throttle/public;
+        fastcgi_param REQUEST_URI $request_uri;
+        fastcgi_param DOCUMENT_URI /index.php;
+        fastcgi_param PATH_INFO "";
+        fastcgi_read_timeout 600s;
+        fastcgi_send_timeout 600s;
+        fastcgi_connect_timeout 600s;
+    }
+
+    location = /binary/submit {
+        include fastcgi.conf;
+        fastcgi_pass unix:/run/php/php8.4-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME /var/www/throttle/public/index.php;
+        fastcgi_param SCRIPT_NAME /index.php;
+        fastcgi_param DOCUMENT_ROOT /var/www/throttle/public;
+        fastcgi_param REQUEST_URI $request_uri;
+        fastcgi_param DOCUMENT_URI /index.php;
+        fastcgi_param PATH_INFO "";
+        fastcgi_read_timeout 600s;
+        fastcgi_send_timeout 600s;
+        fastcgi_connect_timeout 600s;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
 }
 ```
 
