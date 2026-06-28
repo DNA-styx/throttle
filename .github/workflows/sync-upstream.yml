@@ -79,8 +79,13 @@ jobs:
           BRANCH="mysql-conflict-$(date +%Y%m%d)"
           git checkout -b $BRANCH origin/2026-mysql
           git push origin $BRANCH
-          gh pr create \
-            --title "MySQL patch conflict - manual review required" \
-            --body "Upstream changes on \`2026\` conflict with MySQL 8.4 patches in \`2026-mysql\`. Manual merge and re-application of patches required before deploying." \
-            --base 2026-mysql \
-            --head $BRANCH
+          HTTP_CODE=$(curl -s -o /tmp/pr_response.json -w "%{http_code}" -X POST \
+            -H "Authorization: token $GH_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/DNA-styx/throttle/pulls \
+            -d "{\"title\":\"MySQL patch conflict - manual review required\",\"body\":\"Upstream changes on \`2026\` conflict with MySQL 8.4 patches in \`2026-mysql\`. Manual merge and re-application of patches required before deploying.\",\"head\":\"$BRANCH\",\"base\":\"2026-mysql\"}")
+          if [ "$HTTP_CODE" != "201" ]; then
+            echo "PR creation failed with HTTP $HTTP_CODE"
+            cat /tmp/pr_response.json
+            exit 1
+          fi
