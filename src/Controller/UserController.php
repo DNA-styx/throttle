@@ -52,6 +52,9 @@ class UserController extends AbstractController
         $offset = $request->query->get('offset');
         $offset = ctype_digit((string) $offset) ? (int) $offset : null;
         [$steamId, $discordId] = $this->resolveExternalIds($user);
+        $canSeeEmail = !$profileIsPrivate && ($isOwnProfile || $isAdminViewer || $user->isProfileFieldVisible('email'));
+        $canSeeSteam = !$profileIsPrivate && ($isOwnProfile || $isAdminViewer || $user->isProfileFieldVisible('steam'));
+        $canSeeDiscord = !$profileIsPrivate && ($isOwnProfile || $isAdminViewer || $user->isProfileFieldVisible('discord'));
         $crashCount = (int) $this->connection->fetchOne(
             'SELECT COUNT(*) FROM crash WHERE owner_id = :owner',
             ['owner' => $user->getId()]
@@ -98,13 +101,18 @@ class UserController extends AbstractController
             'user' => $user,
             'avatarSeed' => $this->avatarSeed($user),
             'crashCount' => $crashCount,
-            'steamId' => $steamId,
-            'discordId' => $discordId,
+            'steamId' => $canSeeSteam ? $steamId : null,
+            'discordId' => $canSeeDiscord ? $discordId : null,
+            'contactEmail' => $canSeeEmail ? $user->getContactEmail() : null,
+            'showEmail' => $canSeeEmail,
+            'showSteam' => $canSeeSteam,
+            'showDiscord' => $canSeeDiscord,
             'isAdminViewer' => $isAdminViewer,
             'isOwnProfile' => $isOwnProfile,
             'profileIsPrivate' => $profileIsPrivate,
             'offset' => $offset,
             'recentCrashes' => $recentCrashes,
+            'profileFieldVisibility' => $user->getProfileFieldVisibility(),
         ]);
     }
 

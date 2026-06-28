@@ -40,6 +40,7 @@ final class HttpAccessSubscriber implements EventSubscriberInterface
         if ($statusCode !== Response::HTTP_UNAUTHORIZED
             && $statusCode !== Response::HTTP_FORBIDDEN
             && $statusCode !== Response::HTTP_NOT_FOUND
+            && $statusCode !== Response::HTTP_METHOD_NOT_ALLOWED
             && $statusCode !== Response::HTTP_GONE) {
             return;
         }
@@ -49,13 +50,24 @@ final class HttpAccessSubscriber implements EventSubscriberInterface
             return;
         }
 
-        if (($statusCode === Response::HTTP_NOT_FOUND || $statusCode === Response::HTTP_GONE) && $this->expectsHtml($request)) {
+        if (
+            ($statusCode === Response::HTTP_NOT_FOUND
+                || $statusCode === Response::HTTP_METHOD_NOT_ALLOWED
+                || $statusCode === Response::HTTP_GONE)
+            && $this->expectsHtml($request, $statusCode)
+        ) {
             $event->setResponse(new Response($this->twig->render('errors/http_status.html.twig', [
                 'status_code' => $statusCode,
-                'title' => $statusCode === Response::HTTP_GONE ? 'Data no longer available' : 'Page not found',
-                'comment' => $statusCode === Response::HTTP_GONE
-                    ? 'The requested crash data was deleted by storage cleanup and can no longer be opened.'
-                    : 'The requested crash or page was not found.',
+                'title' => match ($statusCode) {
+                    Response::HTTP_GONE => 'Data no longer available',
+                    Response::HTTP_METHOD_NOT_ALLOWED => 'Action not available',
+                    default => 'Page not found',
+                },
+                'comment' => match ($statusCode) {
+                    Response::HTTP_GONE => 'The requested crash data was deleted by storage cleanup and can no longer be opened.',
+                    Response::HTTP_METHOD_NOT_ALLOWED => 'This action must be submitted from the site form and cannot be opened directly in the browser.',
+                    default => 'The requested crash or page was not found.',
+                },
             ]), $statusCode));
 
             return;
@@ -76,9 +88,9 @@ final class HttpAccessSubscriber implements EventSubscriberInterface
         $event->setResponse(new Response($this->twig->render('security/access_denied.html.twig'), Response::HTTP_FORBIDDEN));
     }
 
-    private function expectsHtml(\Symfony\Component\HttpFoundation\Request $request): bool
+    private function expectsHtml(\Symfony\Component\HttpFoundation\Request $request, int $statusCode): bool
     {
-        if ($request->getMethod() !== 'GET') {
+        if ($statusCode !== Response::HTTP_METHOD_NOT_ALLOWED && $request->getMethod() !== 'GET') {
             return false;
         }
 

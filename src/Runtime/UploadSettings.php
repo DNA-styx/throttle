@@ -24,6 +24,7 @@ final class UploadSettings
             'auth_enable_password_registration' => true,
             'auth_enable_password_reset' => true,
             'auth_enable_token_login' => true,
+            'ignored_crash_signatures' => [],
             'storage_cleanup' => StorageRetentionManager::defaults(),
         ];
     }
@@ -97,6 +98,8 @@ final class UploadSettings
             $backoffTtl = $defaults['upload_failure_backoff_ttl'];
         }
 
+        $ignoredCrashSignatures = self::normalizeStringList($settings['ignored_crash_signatures'] ?? []);
+
         return [
             'streaming_symbols_enabled' => array_key_exists('streaming_symbols_enabled', $settings)
                 ? filter_var($settings['streaming_symbols_enabled'], FILTER_VALIDATE_BOOL)
@@ -137,6 +140,7 @@ final class UploadSettings
             'auth_enable_token_login' => array_key_exists('auth_enable_token_login', $settings)
                 ? filter_var($settings['auth_enable_token_login'], FILTER_VALIDATE_BOOL)
                 : $defaults['auth_enable_token_login'],
+            'ignored_crash_signatures' => $ignoredCrashSignatures,
             'storage_cleanup' => StorageRetentionManager::normalizeSettings($settings['storage_cleanup'] ?? null),
         ];
     }
@@ -152,5 +156,37 @@ final class UploadSettings
         if ($settings['upload_memory_limit'] !== '') {
             @ini_set('memory_limit', $settings['upload_memory_limit']);
         }
+    }
+
+    /**
+     * @param mixed $value
+     * @return array<int, string>
+     */
+    private static function normalizeStringList(mixed $value): array
+    {
+        $items = [];
+
+        if (is_string($value)) {
+            $value = preg_split('/\R/', $value) ?: [];
+        }
+
+        if (!is_array($value)) {
+            return [];
+        }
+
+        foreach ($value as $item) {
+            if (!is_scalar($item)) {
+                continue;
+            }
+
+            $item = trim((string) $item);
+            if ($item === '') {
+                continue;
+            }
+
+            $items[] = strtolower($item);
+        }
+
+        return array_values(array_unique($items));
     }
 }
