@@ -43,7 +43,7 @@
                     <img class="column-identicon" src="{{ crash.cmdline|identicon }}" width="20" height="20">
 {% endif %}
                 </td>
-                <td class="monospace"><a href="{{ path('details', {id: crash.id}) }}">{{ crash.id|crashid }}<a></td>
+                <td class="monospace"><a href="{{ path('details', {id: crash.id}) }}">{{ crash.id|crashid }}<a>{% if crash.signature_ignored %} <i class="icon-warning-sign" style="color: #f0ad4e;" data-toggle="tooltip" data-container="body" data-placement="top" title="Ignored crash signature policy: this crash keeps only the primary details page. Console history, raw dump access, processing logs, and Discord webhook delivery were skipped.{% if crash.signature_ignored_reason %} Matched signature: {{ crash.signature_ignored_reason }}.{% endif %}"></i>{% endif %}</td>
                 <td><span title="{{ crash.timestamp|date }}">{{ crash.timestamp|diffdate }}</span></td>
                     <td class="hidden-xs">
 {% if crash.owner and crash.name %}
@@ -64,7 +64,7 @@
                         <span class="btn btn-xs disabled btn-{{ notice[1] }}">{{ (notice[0] != 1 ? notice[0] : '&ensp;') | raw }}</span>
 {% endif %}
 {% if legacy_app.user.admin %}
-{% if crash.processed == 1 %}
+{% if crash.processed == 1 and not crash.signature_ignored %}
                         <form action="{{ path('reprocess', {id: crash.id, return: legacy_app.request.pathInfo}) }}" method="post" class="button-form">
                             <input type="hidden" name="_token" value="{{ csrf_token('reprocess-crash:' ~ crash.id) }}">
                             <button type="submit" class="btn btn-xs btn-default" data-toggle="tooltip" data-container="body" data-placement="top" title="Reprocess this crash with the current symbols"><i class="icon-refresh"></i></button>

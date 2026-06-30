@@ -855,7 +855,7 @@ body.theme-dark .crash-ai-panel code {
 {% if can_view_sensitive and crash.dump_available %}
         <a class="btn btn-default" href="{{ path('carburetor', {'id': crash.id}) }}"><i class="icon-eye-open"></i> View Raw</a>
 {% endif %}
-{% if legacy_app.user.admin and crash.processed == 1 %}
+{% if legacy_app.user.admin and crash.processed == 1 and not crash.signature_ignored %}
         <form action="{{ path('reprocess', {id: crash.id, return: legacy_app.request.pathInfo}) }}" method="post" class="button-form">
             <input type="hidden" name="_token" value="{{ csrf_token('reprocess-crash:' ~ crash.id) }}">
             <button type="submit" class="btn btn-default"><i class="icon-refresh"></i> Reprocess</button>
@@ -919,7 +919,7 @@ body.theme-dark .crash-ai-panel code {
     <button type="button" class="btn btn-default btn-sm pull-right" id="copy-stacktrace" style="margin-top: 18px;" title="Copy stack trace" data-toggle="tooltip" data-container="body">
         <i class="icon-copy"></i>
     </button>
-  {% if ai_analysis_enabled and can_view_sensitive %}
+  {% if ai_analysis_enabled and can_view_sensitive and not crash.signature_ignored %}
     <button type="button" class="btn btn-default btn-sm pull-right" id="ask-ai-details" style="margin-top: 18px; margin-right: 8px;" title="{{ legacy_app.user and can_view_sensitive ? 'Ask AI' : 'View AI history' }}" data-toggle="tooltip" data-container="body">
         <i class="icon-magic"></i>
     </button>

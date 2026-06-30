@@ -2021,6 +2021,9 @@ class Crash
             unset($crash['metadata']['ExtensionBuild']);
         }
 
+        $crash['signature_ignored'] = (int) ($crash['signature_ignored'] ?? 0) === 1;
+        $crash['summary_only_reason'] = self::buildIgnoredSignatureSummaryReason($crash);
+
         $consoleCause = self::loadTerminalSourceModCause($app, $id, (bool) $crash['has_console_log']);
         $terminalConsoleCause = ($consoleCause['terminal'] ?? false) ? $consoleCause : null;
         $consoleBlaming = $consoleCause['supporting_blaming'] ?? ($terminalConsoleCause['blaming'] ?? null);
@@ -2057,6 +2060,19 @@ class Crash
         $loadFromAddressNotice = self::buildLoadFromAddressNotice($stack);
         if ($loadFromAddressNotice !== null) {
             array_unshift($notices, $loadFromAddressNotice);
+        }
+
+        if ($crash['signature_ignored']) {
+            $crash['dump_available'] = false;
+            $crash['has_console_log'] = false;
+            $crash['retention']['available'] = false;
+            $crash['retention']['deleted'] = false;
+            $crash['retention']['reason'] = 'ignored-signature';
+            $processingLog = null;
+            array_unshift($notices, [
+                'severity' => 'warning',
+                'text' => self::buildIgnoredSignatureNoticeText($crash),
+            ]);
         }
 
         $verifiedSourceLookupFrames = self::loadVerifiedSourceLookupFrameState($app, $id, $stack);
@@ -2109,8 +2125,37 @@ class Crash
             'ai_analysis_enabled' => (($app['config']['upload-settings']['crash_ai_analysis_enabled'] ?? false) === true),
             'public_ai_history_count' => self::countPublicAiHistory($app, $id),
             'ai_history_items' => $app['crash-ai-history-items'] ?? [],
-            'global_ai_analysis' => self::loadGlobalAiAnalysis($app, is_string($crash['stackhash'] ?? null) ? $crash['stackhash'] : null),
+            'global_ai_analysis' => $crash['signature_ignored'] ? null : self::loadGlobalAiAnalysis($app, is_string($crash['stackhash'] ?? null) ? $crash['stackhash'] : null),
         ];
+    }
+
+    private static function isSignatureIgnoredCrash(Application $app, string $id): bool
+    {
+        return (int) $app['db']->executeQuery('SELECT COALESCE(signature_ignored, 0) FROM crash WHERE id = ?', [$id])->fetchColumn(0) === 1;
+    }
+
+    private static function assertCrashArtifactsAvailable(Application $app, string $id): void
+    {
+        if (!self::isSignatureIgnoredCrash($app, $id)) {
+            return;
+        }
+
+        $app->abort(410, 'This crash keeps only the primary summary page because its signature is configured as ignored.');
+    }
+
+    private static function buildIgnoredSignatureSummaryReason(array $crash): string
+    {
+        $signature = trim((string) ($crash['signature_ignored_reason'] ?? ''));
+        if ($signature === '') {
+            return 'Ignored crash signature policy';
+        }
+
+        return 'Ignored crash signature policy: ' . $signature;
+    }
+
+    private static function buildIgnoredSignatureNoticeText(array $crash): string
+    {
+        return self::buildIgnoredSignatureSummaryReason($crash) . '. This crash keeps only the primary details page. Console history, raw dump access, processing logs, and Discord webhook delivery were skipped.';
     }
 
     /**
@@ -2563,7 +2608,7 @@ class Crash
             return $app->abort(404);
         }
 
-        $crash = $app['db']->executeQuery('SELECT crash.id, UNIX_TIMESTAMP(crash.timestamp) AS timestamp, crash.ip AS ip, crash.owner_id AS owner, crash.server_id, crash.metadata, crash.cmdline, crash.thread, crash.processed, crash.failed, crash.stackhash, UNIX_TIMESTAMP(crash.lastview) AS lastview, server_owner.name, server_owner.kind AS owner_kind FROM crash LEFT JOIN server_owner ON server_owner.id = crash.owner_id WHERE crash.id = ?', [$id])->fetch();
+        $crash = $app['db']->executeQuery('SELECT crash.id, UNIX_TIMESTAMP(crash.timestamp) AS timestamp, crash.ip AS ip, crash.owner_id AS owner, crash.server_id, crash.metadata, crash.cmdline, crash.thread, crash.processed, crash.failed, crash.stackhash, UNIX_TIMESTAMP(crash.lastview) AS lastview, crash.signature_ignored, crash.signature_ignored_reason, server_owner.name, server_owner.kind AS owner_kind FROM crash LEFT JOIN server_owner ON server_owner.id = crash.owner_id WHERE crash.id = ?', [$id])->fetch();
 
         if ($crash['lastview'] === null || (time() - $crash['lastview']) > (60 * 60 * 24)) {
             $app['db']->executeUpdate('UPDATE crash SET lastview = NOW() WHERE id = ?', array($id));
@@ -2625,7 +2670,7 @@ class Crash
      */
     public function buildAiAnalysisPacket(Application $app, string $id, string $context, array $includes): array
     {
-        $crash = $app['db']->executeQuery('SELECT crash.id, UNIX_TIMESTAMP(crash.timestamp) AS timestamp, crash.ip AS ip, crash.owner_id AS owner, crash.server_id, crash.metadata, crash.cmdline, crash.thread, crash.processed, crash.failed, crash.stackhash, UNIX_TIMESTAMP(crash.lastview) AS lastview, server_owner.name, server_owner.kind AS owner_kind FROM crash LEFT JOIN server_owner ON server_owner.id = crash.owner_id WHERE crash.id = ?', [$id])->fetch();
+        $crash = $app['db']->executeQuery('SELECT crash.id, UNIX_TIMESTAMP(crash.timestamp) AS timestamp, crash.ip AS ip, crash.owner_id AS owner, crash.server_id, crash.metadata, crash.cmdline, crash.thread, crash.processed, crash.failed, crash.stackhash, UNIX_TIMESTAMP(crash.lastview) AS lastview, crash.signature_ignored, crash.signature_ignored_reason, server_owner.name, server_owner.kind AS owner_kind FROM crash LEFT JOIN server_owner ON server_owner.id = crash.owner_id WHERE crash.id = ?', [$id])->fetch();
         if ($crash === false) {
             throw new \RuntimeException('Crash not found.');
         }
@@ -3170,6 +3215,8 @@ class Crash
             $app->abort(403);
         }
 
+        self::assertCrashArtifactsAvailable($app, (string) $id);
+
         $path = $app['root'] . '/dumps/' . substr($id, 0, 2) . '/' . $id . '.dmp';
 
         if (!\Filesystem::pathExists($path)) {
@@ -3195,6 +3242,8 @@ class Crash
             $app->abort(403);
         }
 
+        self::assertCrashArtifactsAvailable($app, (string) $id);
+
         return $app['twig']->render('view.html.twig', array('id' => $id));
     }
 
@@ -3212,6 +3261,8 @@ class Crash
         if (!$can_view_sensitive) {
             $app->abort(403);
         }
+
+        self::assertCrashArtifactsAvailable($app, (string) $id);
 
         $processing_logs = $app['db']->executeQuery('SELECT created_at, status, duration_ms, message, log FROM crash_processing_log WHERE crash = ? ORDER BY created_at DESC LIMIT 10', [$id])->fetchAll();
 
@@ -3247,6 +3298,8 @@ class Crash
             $app->abort(403);
         }
 
+        self::assertCrashArtifactsAvailable($app, (string) $id);
+
         $path = $app['root'] . '/dumps/' . substr($id, 0, 2) . '/' . $id . '.meta.txt';
 
         $logs = null;
@@ -3273,6 +3326,8 @@ class Crash
         if (!$can_view_sensitive) {
             $app->abort(403);
         }
+
+        self::assertCrashArtifactsAvailable($app, (string) $id);
 
         $path = $app['root'] . '/dumps/' . substr($id, 0, 2) . '/' . $id . '.meta.txt';
 
@@ -3629,6 +3684,8 @@ class Crash
             $app->abort(403);
         }
 
+        self::assertCrashArtifactsAvailable($app, (string) $id);
+
         $path = $app['root'] . '/dumps/' . substr($id, 0, 2) . '/' . $id . '.dmp';
 
         if (!\Filesystem::pathExists($path)) {
@@ -3731,6 +3788,8 @@ class Crash
             $app->abort(403);
         }
 
+        self::assertCrashArtifactsAvailable($app, (string) $id);
+
         return $app['twig']->render('carburetor.html.twig', array(
             'id' => $id,
             'scan' => $app['request']->get('scan', null),
@@ -3823,6 +3882,8 @@ class Crash
         if (!$can_view_sensitive) {
             $app->abort(403);
         }
+
+        self::assertCrashArtifactsAvailable($app, (string) $id);
 
         $options = [];
         if ($app['request']->get('scan', null) === 'no') {
@@ -3919,7 +3980,7 @@ class Crash
             $app->abort(403);
         }
 
-        $crash = $app['db']->executeQuery('SELECT crash.id, UNIX_TIMESTAMP(crash.timestamp) AS timestamp, crash.ip AS ip, crash.owner_id AS owner, crash.server_id, crash.metadata, crash.cmdline, crash.thread, crash.processed, crash.failed, crash.stackhash, UNIX_TIMESTAMP(crash.lastview) AS lastview, server_owner.name, server_owner.kind AS owner_kind FROM crash LEFT JOIN server_owner ON server_owner.id = crash.owner_id WHERE crash.id = ?', [$id])->fetch();
+        $crash = $app['db']->executeQuery('SELECT crash.id, UNIX_TIMESTAMP(crash.timestamp) AS timestamp, crash.ip AS ip, crash.owner_id AS owner, crash.server_id, crash.metadata, crash.cmdline, crash.thread, crash.processed, crash.failed, crash.stackhash, UNIX_TIMESTAMP(crash.lastview) AS lastview, crash.signature_ignored, crash.signature_ignored_reason, server_owner.name, server_owner.kind AS owner_kind FROM crash LEFT JOIN server_owner ON server_owner.id = crash.owner_id WHERE crash.id = ?', [$id])->fetch();
         $diagnostics = self::buildCrashDiagnosticContext($app, (string) $id, $crash);
         $rawResponse = $this->carburetor_data($app, $id);
         $rawPayload = json_decode((string) $rawResponse->getContent(), true);
@@ -4093,7 +4154,7 @@ class Crash
             }
         }
 
-        $crashes = $app['db']->executeQuery('SELECT crash.id, UNIX_TIMESTAMP(crash.timestamp) as timestamp, crash.owner_id AS owner, crash.cmdline, crash.processed, crash.failed, server_owner.name, NULL AS avatar, frame.module, frame.rendered, frame2.module as module2, frame2.rendered AS rendered2, (SELECT CONCAT(COUNT(*), \'-\', MIN(notice.severity)) FROM crashnotice JOIN notice ON crashnotice.notice = notice.id WHERE crashnotice.crash = crash.id) AS notice FROM crash LEFT JOIN server_owner ON crash.owner_id = server_owner.id LEFT JOIN frame ON crash.id = frame.crash AND crash.thread = frame.thread AND frame.frame = 0 LEFT JOIN frame AS frame2 ON crash.id = frame2.crash AND crash.thread = frame2.thread AND frame2.frame = 1 ' . $where . ' ORDER BY crash.timestamp DESC LIMIT 20', $params, $types)->fetchAll();
+        $crashes = $app['db']->executeQuery('SELECT crash.id, UNIX_TIMESTAMP(crash.timestamp) as timestamp, crash.owner_id AS owner, crash.cmdline, crash.processed, crash.failed, crash.signature_ignored, crash.signature_ignored_reason, server_owner.name, NULL AS avatar, frame.module, frame.rendered, frame2.module as module2, frame2.rendered AS rendered2, (SELECT CONCAT(COUNT(*), \'-\', MIN(notice.severity)) FROM crashnotice JOIN notice ON crashnotice.notice = notice.id WHERE crashnotice.crash = crash.id) AS notice FROM crash LEFT JOIN server_owner ON crash.owner_id = server_owner.id LEFT JOIN frame ON crash.id = frame.crash AND crash.thread = frame.thread AND frame.frame = 0 LEFT JOIN frame AS frame2 ON crash.id = frame2.crash AND crash.thread = frame2.thread AND frame2.frame = 1 ' . $where . ' ORDER BY crash.timestamp DESC LIMIT 20', $params, $types)->fetchAll();
 
         foreach ($crashes as &$crash) {
             foreach ($shared as $owner) {

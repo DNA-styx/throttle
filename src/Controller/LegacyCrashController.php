@@ -108,7 +108,7 @@ class LegacyCrashController extends AbstractController
     public function carburetor(Request $request, string $id, CrashAiAnalysisManager $crashAiAnalysisManager): Response
     {
         $app = $this->legacyBridgeFactory->createHttp($request);
-        $this->attachAiHistoryContext($app, $id, $crashAiAnalysisManager);
+        $this->attachAiHistoryContext($request, $app, $id, $crashAiAnalysisManager);
 
         return $this->legacyResponse((new \Throttle\Crash())->carburetor($app, $id));
     }
@@ -137,6 +137,10 @@ class LegacyCrashController extends AbstractController
         }
         if (!$access['can_view_sensitive']) {
             return $this->json(['status' => 'error', 'reason' => 'Forbidden.'], Response::HTTP_FORBIDDEN);
+        }
+
+        if ((int) $this->connection->fetchOne('SELECT COALESCE(signature_ignored, 0) FROM crash WHERE id = ?', [$id]) === 1) {
+            return $this->json(['status' => 'error', 'reason' => 'This crash keeps only the primary summary page because its signature is configured as ignored.'], Response::HTTP_GONE);
         }
 
         $action = (string) $request->request->get('action', 'lookup');
@@ -200,6 +204,10 @@ class LegacyCrashController extends AbstractController
         }
         if (!$access['can_view_sensitive']) {
             return $this->jsonUtf8(['status' => 'error', 'reason' => 'Forbidden.'], Response::HTTP_FORBIDDEN);
+        }
+
+        if ((int) $this->connection->fetchOne('SELECT COALESCE(signature_ignored, 0) FROM crash WHERE id = ?', [$id]) === 1) {
+            return $this->jsonUtf8(['status' => 'error', 'reason' => 'This crash keeps only the primary summary page because its signature is configured as ignored.'], Response::HTTP_GONE);
         }
 
         try {

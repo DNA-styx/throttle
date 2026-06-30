@@ -348,7 +348,7 @@
                 <div class="mb-3">
                     <label class="form-label" for="ignored-crash-signatures">Ignored crash signatures</label>
                     <textarea id="ignored-crash-signatures" name="ignored_crash_signatures" class="form-control font-monospace" rows="6" placeholder="libsteam_api.so!SteamGameServer_Shutdown + 0x0">{{ uploadSettings.ignored_crash_signatures|join("\n") }}</textarea>
-                    <div class="form-text">One displayed signature per line. Use the same text shown in Top Crashers or Latest Crash Reports. Matching crashes still reach stackwalk, then they are skipped from the remaining follow-up processing path.</div>
+                    <div class="form-text">One displayed signature per line. Use the same text shown in Top Crashers or Latest Crash Reports. Matching crashes still reach stackwalk so the primary details page can be built, then raw dump access, console history, processing logs, Discord webhooks, and other follow-up processing are skipped.</div>
                 </div>
                 <hr class="my-4">
                 <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
