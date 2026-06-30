@@ -156,6 +156,7 @@ class ProfileController extends AbstractController
 
         $user = $this->currentUser();
         $user->setProfilePrivate($request->request->getBoolean('profile_private'));
+        $user->setAllowAdminSensitiveCrashAccess($request->request->getBoolean('allow_admin_sensitive_crash_access'));
 
         $submittedVisibility = $request->request->all('profile_visibility');
         $visibility = $user->getProfileFieldVisibility();

@@ -74,6 +74,9 @@ class User extends ServerOwner implements UserInterface, PasswordAuthenticatedUs
     #[ORM\Column(options: ['default' => false])]
     protected bool $profilePrivate = false;
 
+    #[ORM\Column(options: ['default' => false])]
+    protected bool $allowAdminSensitiveCrashAccess = false;
+
     /** @var array<string, bool> */
     #[ORM\Column(type: 'json')]
     protected array $profileFieldVisibility = [];
@@ -294,6 +297,18 @@ class User extends ServerOwner implements UserInterface, PasswordAuthenticatedUs
     public function setProfilePrivate(bool $profilePrivate): self
     {
         $this->profilePrivate = $profilePrivate;
+
+        return $this;
+    }
+
+    public function getAllowAdminSensitiveCrashAccess(): bool
+    {
+        return $this->allowAdminSensitiveCrashAccess;
+    }
+
+    public function setAllowAdminSensitiveCrashAccess(bool $allowAdminSensitiveCrashAccess): self
+    {
+        $this->allowAdminSensitiveCrashAccess = $allowAdminSensitiveCrashAccess;
 
         return $this;
     }

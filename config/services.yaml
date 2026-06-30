@@ -70,12 +70,6 @@ services:
         autowire: true
         autoconfigure: true
 
-    Throttle\Command\CrashProcessCommand:
-        arguments:
-            $legacyBridgeFactory: '@App\Legacy\LegacyBridgeFactory'
-            $storageRetentionManager: '@App\Runtime\StorageRetentionManager'
-            $crashDiscordWebhookDeliveryManager: '@App\Runtime\CrashDiscordWebhookDeliveryManager'
-
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
 
@@ -164,3 +158,14 @@ services:
     App\Runtime\CrashSourceLookupManager:
         arguments:
             $projectDir: '%kernel.project_dir%'
+
+    App\Runtime\SiteAiConfigManager:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
+    Throttle\Command\CrashProcessCommand:
+        arguments:
+            $legacyBridgeFactory: '@App\Legacy\LegacyBridgeFactory'
+            $storageRetentionManager: '@App\Runtime\StorageRetentionManager'
+            $crashDiscordWebhookDeliveryManager: '@App\Runtime\CrashDiscordWebhookDeliveryManager'
+            $crashAiGlobalAnalysisManager: '@App\Runtime\CrashAiGlobalAnalysisManager'

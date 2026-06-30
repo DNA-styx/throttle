@@ -268,22 +268,73 @@ class Crash
         return false;
     }
 
-    private static function canUserManage($app, $crash)
+    /**
+     * @return array{owner_id: ?int, owner_kind: ?string, owner_name: ?string, can_manage: bool, can_view_sensitive: bool}|null
+     */
+    private static function getCrashAccess(Application $app, string $crash): ?array
     {
-        $ownerId = $app['db']->executeQuery('SELECT owner_id FROM crash WHERE crash.id = ?', [$crash])->fetchColumn(0);
-        if ($ownerId === false) {
+        $row = $app['db']->executeQuery(
+            'SELECT crash.owner_id, server_owner.kind AS owner_kind, server_owner.name AS owner_name, user.allow_admin_sensitive_crash_access
+             FROM crash
+             LEFT JOIN server_owner ON server_owner.id = crash.owner_id
+             LEFT JOIN user ON user.id = crash.owner_id
+             WHERE crash.id = ?',
+            [$crash]
+        )->fetch();
+        if ($row === false) {
             return null;
         }
 
+        $ownerId = ($row['owner_id'] ?? null) !== null ? (int) $row['owner_id'] : null;
+        $ownerKind = ($row['owner_kind'] ?? null) !== null ? (string) $row['owner_kind'] : null;
+        $ownerName = ($row['owner_name'] ?? null) !== null ? (string) $row['owner_name'] : null;
+        $allowAdminSensitiveCrashAccess = !empty($row['allow_admin_sensitive_crash_access']);
+
         if (!$app['user']) {
-            return false;
+            return [
+                'owner_id' => $ownerId,
+                'owner_kind' => $ownerKind,
+                'owner_name' => $ownerName,
+                'can_manage' => false,
+                'can_view_sensitive' => false,
+            ];
         }
 
         if ($app['user']['admin']) {
-            return true;
+            $isOwner = $ownerId !== null && in_array($ownerId, $app['user']['owner_ids'], true);
+
+            return [
+                'owner_id' => $ownerId,
+                'owner_kind' => $ownerKind,
+                'owner_name' => $ownerName,
+                'can_manage' => true,
+                'can_view_sensitive' => $isOwner || $ownerKind !== 'user' || $ownerId === null || $allowAdminSensitiveCrashAccess,
+            ];
         }
 
-        return $ownerId !== null && in_array((int) $ownerId, $app['user']['owner_ids'], true);
+        $canManage = $ownerId !== null && in_array($ownerId, $app['user']['owner_ids'], true);
+
+        return [
+            'owner_id' => $ownerId,
+            'owner_kind' => $ownerKind,
+            'owner_name' => $ownerName,
+            'can_manage' => $canManage,
+            'can_view_sensitive' => $canManage,
+        ];
+    }
+
+    private static function canUserManage($app, $crash)
+    {
+        $access = self::getCrashAccess($app, (string) $crash);
+
+        return $access === null ? null : $access['can_manage'];
+    }
+
+    private static function canUserViewSensitiveCrashData($app, $crash)
+    {
+        $access = self::getCrashAccess($app, (string) $crash);
+
+        return $access === null ? null : $access['can_view_sensitive'];
     }
 
     private static function loadCrashStackhash(Application $app, string $id): ?string
@@ -1975,6 +2026,8 @@ class Crash
         $consoleBlaming = $consoleCause['supporting_blaming'] ?? ($terminalConsoleCause['blaming'] ?? null);
         $crash['dump_available'] = \Filesystem::pathExists($app['root'] . '/dumps/' . substr($id, 0, 2) . '/' . $id . '.dmp');
         $crash['retention'] = StorageRetentionManager::getCrashArtifactStatus($app['root'], $id);
+        $crash['owner_kind'] = ($crash['owner_kind'] ?? null) !== null ? (string) $crash['owner_kind'] : null;
+        $crash['owner_profile_id'] = ($crash['owner_kind'] ?? null) === 'user' && ($crash['owner'] ?? null) !== null ? (int) $crash['owner'] : null;
 
         ksort($crash['metadata']);
 
@@ -2056,6 +2109,7 @@ class Crash
             'ai_analysis_enabled' => (($app['config']['upload-settings']['crash_ai_analysis_enabled'] ?? false) === true),
             'public_ai_history_count' => self::countPublicAiHistory($app, $id),
             'ai_history_items' => $app['crash-ai-history-items'] ?? [],
+            'global_ai_analysis' => self::loadGlobalAiAnalysis($app, is_string($crash['stackhash'] ?? null) ? $crash['stackhash'] : null),
         ];
     }
 
@@ -2498,8 +2552,8 @@ class Crash
 
     public function details(Application $app, $id)
     {
-        $can_manage = self::canUserManage($app, $id);
-        if ($can_manage === null) {
+        $access = self::getCrashAccess($app, (string) $id);
+        if ($access === null) {
             if ($app['session']->getFlashBag()->get('internal')) {
                 $app['session']->getFlashBag()->add('error_crash', 'That Crash ID does not exist.');
 
@@ -2509,7 +2563,7 @@ class Crash
             return $app->abort(404);
         }
 
-        $crash = $app['db']->executeQuery('SELECT crash.id, UNIX_TIMESTAMP(crash.timestamp) AS timestamp, crash.ip AS ip, crash.owner_id AS owner, crash.server_id, crash.metadata, crash.cmdline, crash.thread, crash.processed, crash.failed, crash.stackhash, UNIX_TIMESTAMP(crash.lastview) AS lastview, server_owner.name FROM crash LEFT JOIN server_owner ON server_owner.id = crash.owner_id WHERE crash.id = ?', [$id])->fetch();
+        $crash = $app['db']->executeQuery('SELECT crash.id, UNIX_TIMESTAMP(crash.timestamp) AS timestamp, crash.ip AS ip, crash.owner_id AS owner, crash.server_id, crash.metadata, crash.cmdline, crash.thread, crash.processed, crash.failed, crash.stackhash, UNIX_TIMESTAMP(crash.lastview) AS lastview, server_owner.name, server_owner.kind AS owner_kind FROM crash LEFT JOIN server_owner ON server_owner.id = crash.owner_id WHERE crash.id = ?', [$id])->fetch();
 
         if ($crash['lastview'] === null || (time() - $crash['lastview']) > (60 * 60 * 24)) {
             $app['db']->executeUpdate('UPDATE crash SET lastview = NOW() WHERE id = ?', array($id));
@@ -2534,7 +2588,8 @@ class Crash
 
         return $app['twig']->render('details.html.twig', array(
             'crash' => $crash,
-            'can_manage' => $can_manage,
+            'can_manage' => $access['can_manage'],
+            'can_view_sensitive' => $access['can_view_sensitive'],
             'notices' => $notices,
             'stack' => $stack,
             'modules' => $modules,
@@ -2560,6 +2615,7 @@ class Crash
             'ai_analysis_enabled' => $diagnostics['ai_analysis_enabled'],
             'public_ai_history_count' => $diagnostics['public_ai_history_count'],
             'ai_history_items' => $diagnostics['ai_history_items'],
+            'global_ai_analysis' => $diagnostics['global_ai_analysis'],
         ));
     }
 
@@ -2569,7 +2625,7 @@ class Crash
      */
     public function buildAiAnalysisPacket(Application $app, string $id, string $context, array $includes): array
     {
-        $crash = $app['db']->executeQuery('SELECT crash.id, UNIX_TIMESTAMP(crash.timestamp) AS timestamp, crash.ip AS ip, crash.owner_id AS owner, crash.server_id, crash.metadata, crash.cmdline, crash.thread, crash.processed, crash.failed, crash.stackhash, UNIX_TIMESTAMP(crash.lastview) AS lastview, server_owner.name FROM crash LEFT JOIN server_owner ON server_owner.id = crash.owner_id WHERE crash.id = ?', [$id])->fetch();
+        $crash = $app['db']->executeQuery('SELECT crash.id, UNIX_TIMESTAMP(crash.timestamp) AS timestamp, crash.ip AS ip, crash.owner_id AS owner, crash.server_id, crash.metadata, crash.cmdline, crash.thread, crash.processed, crash.failed, crash.stackhash, UNIX_TIMESTAMP(crash.lastview) AS lastview, server_owner.name, server_owner.kind AS owner_kind FROM crash LEFT JOIN server_owner ON server_owner.id = crash.owner_id WHERE crash.id = ?', [$id])->fetch();
         if ($crash === false) {
             throw new \RuntimeException('Crash not found.');
         }
@@ -2663,7 +2719,7 @@ class Crash
     public function buildDiscordWebhookContext(Application $app, string $id, int $consoleLineLimit = 20, int $stackTraceLineLimit = self::DISCORD_STACK_TRACE_LINE_LIMIT): array
     {
         $crash = $app['db']->executeQuery(
-            'SELECT crash.id, UNIX_TIMESTAMP(crash.timestamp) AS timestamp, crash.ip AS ip, crash.owner_id AS owner, crash.server_id, crash.metadata, crash.cmdline, crash.thread, crash.processed, crash.failed, crash.stackhash, UNIX_TIMESTAMP(crash.lastview) AS lastview, server_owner.name
+            'SELECT crash.id, UNIX_TIMESTAMP(crash.timestamp) AS timestamp, crash.ip AS ip, crash.owner_id AS owner, crash.server_id, crash.metadata, crash.cmdline, crash.thread, crash.processed, crash.failed, crash.stackhash, UNIX_TIMESTAMP(crash.lastview) AS lastview, server_owner.name, server_owner.kind AS owner_kind
              FROM crash
              LEFT JOIN server_owner ON server_owner.id = crash.owner_id
              WHERE crash.id = ?',
@@ -2693,12 +2749,12 @@ class Crash
             $app->abort(401);
         }
 
-        $can_manage = self::canUserManage($app, $id);
-        if ($can_manage === null) {
+        $can_view_sensitive = self::canUserViewSensitiveCrashData($app, $id);
+        if ($can_view_sensitive === null) {
             $app->abort(404);
         }
 
-        if (!$can_manage) {
+        if (!$can_view_sensitive) {
             $app->abort(403);
         }
 
@@ -3105,12 +3161,12 @@ class Crash
             $app->abort(401);
         }
 
-        $can_manage = self::canUserManage($app, $id);
-        if ($can_manage === null) {
+        $can_view_sensitive = self::canUserViewSensitiveCrashData($app, $id);
+        if ($can_view_sensitive === null) {
             $app->abort(404);
         }
 
-        if (!$can_manage) {
+        if (!$can_view_sensitive) {
             $app->abort(403);
         }
 
@@ -3130,12 +3186,12 @@ class Crash
             $app->abort(401);
         }
 
-        $can_manage = self::canUserManage($app, $id);
-        if ($can_manage === null) {
+        $can_view_sensitive = self::canUserViewSensitiveCrashData($app, $id);
+        if ($can_view_sensitive === null) {
             $app->abort(404);
         }
 
-        if (!$can_manage) {
+        if (!$can_view_sensitive) {
             $app->abort(403);
         }
 
@@ -3148,12 +3204,12 @@ class Crash
             $app->abort(401);
         }
 
-        $can_manage = self::canUserManage($app, $id);
-        if ($can_manage === null) {
+        $can_view_sensitive = self::canUserViewSensitiveCrashData($app, $id);
+        if ($can_view_sensitive === null) {
             $app->abort(404);
         }
 
-        if (!$can_manage) {
+        if (!$can_view_sensitive) {
             $app->abort(403);
         }
 
@@ -3182,12 +3238,12 @@ class Crash
             $app->abort(401);
         }
 
-        $can_manage = self::canUserManage($app, $id);
-        if ($can_manage === null) {
+        $can_view_sensitive = self::canUserViewSensitiveCrashData($app, $id);
+        if ($can_view_sensitive === null) {
             $app->abort(404);
         }
 
-        if (!$can_manage) {
+        if (!$can_view_sensitive) {
             $app->abort(403);
         }
 
@@ -3209,12 +3265,12 @@ class Crash
             $app->abort(401);
         }
 
-        $can_manage = self::canUserManage($app, $id);
-        if ($can_manage === null) {
+        $can_view_sensitive = self::canUserViewSensitiveCrashData($app, $id);
+        if ($can_view_sensitive === null) {
             $app->abort(404);
         }
 
-        if (!$can_manage) {
+        if (!$can_view_sensitive) {
             $app->abort(403);
         }
 
@@ -3564,12 +3620,12 @@ class Crash
             $app->abort(401);
         }
 
-        $can_manage = self::canUserManage($app, $id);
-        if ($can_manage === null) {
+        $can_view_sensitive = self::canUserViewSensitiveCrashData($app, $id);
+        if ($can_view_sensitive === null) {
             $app->abort(404);
         }
 
-        if (!$can_manage) {
+        if (!$can_view_sensitive) {
             $app->abort(403);
         }
 
@@ -3666,12 +3722,12 @@ class Crash
             $app->abort(401);
         }
 
-        $can_manage = self::canUserManage($app, $id);
-        if ($can_manage === null) {
+        $can_view_sensitive = self::canUserViewSensitiveCrashData($app, $id);
+        if ($can_view_sensitive === null) {
             $app->abort(404);
         }
 
-        if (!$can_manage) {
+        if (!$can_view_sensitive) {
             $app->abort(403);
         }
 
@@ -3698,8 +3754,8 @@ class Crash
             $app->abort(403);
         }
 
-        $can_manage = self::canUserManage($app, $id);
-        if ($can_manage === null) {
+        $can_view_sensitive = self::canUserViewSensitiveCrashData($app, $id);
+        if ($can_view_sensitive === null) {
             $app->abort(404);
         }
 
@@ -3718,18 +3774,53 @@ class Crash
         )->fetchColumn();
     }
 
+    /**
+     * @return array<string, mixed>|null
+     */
+    private static function loadGlobalAiAnalysis(Application $app, ?string $stackhash): ?array
+    {
+        if (!is_string($stackhash) || trim($stackhash) === '') {
+            return null;
+        }
+
+        $row = $app['db']->executeQuery(
+            'SELECT status, provider, model, response_text, response_html, usage_json, error_summary, updated_at
+             FROM crash_ai_global_analysis
+             WHERE stackhash = ?',
+            [trim($stackhash)]
+        )->fetch();
+        if ($row === false) {
+            return null;
+        }
+
+        $usage = json_decode((string) ($row['usage_json'] ?? ''), true);
+
+        return [
+            'status' => (string) ($row['status'] ?? 'unknown'),
+            'provider' => (string) ($row['provider'] ?? ''),
+            'provider_label' => \App\Runtime\CrashAiProviderCatalog::label((string) ($row['provider'] ?? '')),
+            'model' => (string) ($row['model'] ?? ''),
+            'response_text' => (string) ($row['response_text'] ?? ''),
+            'response_html' => (string) ($row['response_html'] ?? ''),
+            'usage' => is_array($usage) ? $usage : null,
+            'usage_summary' => \App\Runtime\CrashAiAnalysisManager::summarizeUsage(is_array($usage) ? $usage : null),
+            'error_summary' => ($row['error_summary'] ?? null) !== null ? (string) $row['error_summary'] : null,
+            'updated_at' => (string) ($row['updated_at'] ?? ''),
+        ];
+    }
+
     public function carburetor_data(Application $app, $id)
     {
         if ($app['user'] === null) {
             $app->abort(401);
         }
 
-        $can_manage = self::canUserManage($app, $id);
-        if ($can_manage === null) {
+        $can_view_sensitive = self::canUserViewSensitiveCrashData($app, $id);
+        if ($can_view_sensitive === null) {
             $app->abort(404);
         }
 
-        if (!$can_manage) {
+        if (!$can_view_sensitive) {
             $app->abort(403);
         }
 
@@ -3820,12 +3911,15 @@ class Crash
             $app->abort(403);
         }
 
-        $can_manage = self::canUserManage($app, $id);
-        if ($can_manage === null) {
+        $can_view_sensitive = self::canUserViewSensitiveCrashData($app, $id);
+        if ($can_view_sensitive === null) {
             $app->abort(404);
         }
+        if (!$can_view_sensitive) {
+            $app->abort(403);
+        }
 
-        $crash = $app['db']->executeQuery('SELECT crash.id, UNIX_TIMESTAMP(crash.timestamp) AS timestamp, crash.ip AS ip, crash.owner_id AS owner, crash.server_id, crash.metadata, crash.cmdline, crash.thread, crash.processed, crash.failed, crash.stackhash, UNIX_TIMESTAMP(crash.lastview) AS lastview, server_owner.name FROM crash LEFT JOIN server_owner ON server_owner.id = crash.owner_id WHERE crash.id = ?', [$id])->fetch();
+        $crash = $app['db']->executeQuery('SELECT crash.id, UNIX_TIMESTAMP(crash.timestamp) AS timestamp, crash.ip AS ip, crash.owner_id AS owner, crash.server_id, crash.metadata, crash.cmdline, crash.thread, crash.processed, crash.failed, crash.stackhash, UNIX_TIMESTAMP(crash.lastview) AS lastview, server_owner.name, server_owner.kind AS owner_kind FROM crash LEFT JOIN server_owner ON server_owner.id = crash.owner_id WHERE crash.id = ?', [$id])->fetch();
         $diagnostics = self::buildCrashDiagnosticContext($app, (string) $id, $crash);
         $rawResponse = $this->carburetor_data($app, $id);
         $rawPayload = json_decode((string) $rawResponse->getContent(), true);

@@ -3,6 +3,7 @@
 namespace Throttle\Command;
 
 use App\Legacy\LegacyBridgeFactory;
+use App\Runtime\CrashAiGlobalAnalysisManager;
 use App\Runtime\CrashDiscordWebhookDeliveryManager;
 use App\Runtime\StorageRetentionManager;
 use App\Util\HumanSize;
@@ -17,13 +18,15 @@ class CrashProcessCommand extends Command
     private LegacyBridgeFactory $legacyBridgeFactory;
     private StorageRetentionManager $storageRetentionManager;
     private CrashDiscordWebhookDeliveryManager $crashDiscordWebhookDeliveryManager;
+    private CrashAiGlobalAnalysisManager $crashAiGlobalAnalysisManager;
 
-    public function __construct(LegacyBridgeFactory $legacyBridgeFactory, StorageRetentionManager $storageRetentionManager, CrashDiscordWebhookDeliveryManager $crashDiscordWebhookDeliveryManager)
+    public function __construct(LegacyBridgeFactory $legacyBridgeFactory, StorageRetentionManager $storageRetentionManager, CrashDiscordWebhookDeliveryManager $crashDiscordWebhookDeliveryManager, CrashAiGlobalAnalysisManager $crashAiGlobalAnalysisManager)
     {
         parent::__construct();
         $this->legacyBridgeFactory = $legacyBridgeFactory;
         $this->storageRetentionManager = $storageRetentionManager;
         $this->crashDiscordWebhookDeliveryManager = $crashDiscordWebhookDeliveryManager;
+        $this->crashAiGlobalAnalysisManager = $crashAiGlobalAnalysisManager;
     }
 
     protected function configure(): void
@@ -485,6 +488,12 @@ class CrashProcessCommand extends Command
             });
 
             if (is_string($processedCrashId) && $processedCrashId !== '') {
+                try {
+                    $this->crashAiGlobalAnalysisManager->refreshForCrash($processedCrashId);
+                } catch (\Throwable $e) {
+                    $output->writeln('Global AI analysis failed for ' . $processedCrashId . ': ' . $e->getMessage());
+                }
+
                 try {
                     $this->crashDiscordWebhookDeliveryManager->notifyCrashProcessed($processedCrashId);
                 } catch (\Throwable $e) {

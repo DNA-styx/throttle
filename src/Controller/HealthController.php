@@ -6,6 +6,8 @@ use App\Entity\User;
 use App\Runtime\AdminUserManager;
 use App\Runtime\AuthEnvironment;
 use App\Runtime\CrashReprocessMarker;
+use App\Runtime\CrashAiGlobalAnalysisManager;
+use App\Runtime\SiteAiConfigManager;
 use App\Runtime\StorageRetentionManager;
 use App\Runtime\SymbolAdminManager;
 use App\Runtime\SymbolBinaryUpload;
@@ -32,7 +34,7 @@ class HealthController extends AbstractController
     private const SYMBOL_REQUEST_POLICY_PATH = '/var/symbol-request-policy.json';
 
     #[Route('/health', name: 'health', methods: ['GET', 'POST'])]
-    public function index(Request $request, Connection $connection, KernelInterface $kernel, SymbolAdminManager $symbolAdminManager, StorageRetentionManager $storageRetentionManager, AuthEnvironment $authEnvironment, AdminUserManager $adminUserManager, #[Autowire('%app.legacy%')] array $legacyConfig): Response
+    public function index(Request $request, Connection $connection, KernelInterface $kernel, SymbolAdminManager $symbolAdminManager, StorageRetentionManager $storageRetentionManager, AuthEnvironment $authEnvironment, AdminUserManager $adminUserManager, SiteAiConfigManager $siteAiConfigManager, #[Autowire('%app.legacy%')] array $legacyConfig): Response
     {
         $root = $kernel->getProjectDir();
         $checks = [];
@@ -177,8 +179,54 @@ class HealthController extends AbstractController
             'storageCleanupSummary' => $storageCleanupSummary,
             'storageCleanupUsage' => $storageCleanupUsage,
             'storageCleanupMegabytes' => $storageCleanupMegabytes,
+            'globalAiConfig' => $siteAiConfigManager->loadSummary(),
+            'globalAiProviderTemplates' => $siteAiConfigManager->providerTemplates(),
             'healthy' => !in_array(false, array_column($checks, 'ok'), true),
         ]);
+    }
+
+    #[Route('/health/global-ai/save', name: 'health_global_ai_save', methods: ['POST'])]
+    public function saveGlobalAi(Request $request, SiteAiConfigManager $siteAiConfigManager): Response
+    {
+        if (!$this->isCsrfTokenValid('health-global-ai', (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        try {
+            $siteAiConfigManager->save($request->request->all());
+            $this->addHealthFlash('global_ai', 'success', 'Global AI analysis settings saved.');
+        } catch (\Throwable $e) {
+            $this->addHealthFlash('global_ai', 'danger', $e->getMessage());
+        }
+
+        return $this->redirectToHealth([], 'global-ai-analysis');
+    }
+
+    #[Route('/health/global-ai/test', name: 'health_global_ai_test', methods: ['POST'])]
+    public function testGlobalAi(Request $request, CrashAiGlobalAnalysisManager $crashAiGlobalAnalysisManager): Response
+    {
+        if (!$this->isCsrfTokenValid('health-global-ai', (string) $request->request->get('_token'))) {
+            return new Response('Invalid CSRF token.', Response::HTTP_FORBIDDEN);
+        }
+
+        try {
+            $result = $crashAiGlobalAnalysisManager->testCurrentConfig();
+            $this->addHealthFlash(
+                'global_ai',
+                'success',
+                sprintf(
+                    'Global AI test succeeded via %s / %s in %d ms. Response: %s',
+                    $result['provider_label'],
+                    $result['model'],
+                    $result['duration_ms'],
+                    mb_substr($result['response_text'], 0, 300)
+                )
+            );
+        } catch (\Throwable $e) {
+            $this->addHealthFlash('global_ai', 'danger', 'Global AI test failed: ' . $e->getMessage());
+        }
+
+        return $this->redirectToHealth([], 'global-ai-analysis');
     }
 
     #[Route('/health/auth/test-email', name: 'health_auth_test_email', methods: ['POST'])]
