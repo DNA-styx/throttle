@@ -547,16 +547,18 @@ body.theme-dark .crash-ai-panel code {
 
 <div class="well" style="position: relative;">
     <dl class="dl-horizontal" style="margin: 0;">
-        <dt>Uploaded</dt>
-        <dd>{{ crash.timestamp|date }}</dd>
-{% if can_manage %}
+        <dt>Uploaded by</dt>
+{% if crash.owner_profile_id %}
+        <dd><a href="{{ path('user_show', {'id': crash.owner_profile_id}) }}">{{ crash.name ?? ('User #' ~ crash.owner_profile_id) }}</a> on {{ crash.timestamp|date('F j, Y') }}, at {{ crash.timestamp|date('H:i') }}</dd>
+{% elseif crash.owner %}
+        <dd>{{ crash.name ?? crash.owner }} on {{ crash.timestamp|date('F j, Y') }}, at {{ crash.timestamp|date('H:i') }}</dd>
+{% else %}
+        <dd>Anonymous on {{ crash.timestamp|date('F j, Y') }}, at {{ crash.timestamp|date('H:i') }}</dd>
+{% endif %}
+{% if can_view_sensitive %}
 {% if crash.ip %}
 	<dt>Upload IP</dt>
 	<dd>{{ crash.ip }}</dd>
-{% endif %}
-{% if can_manage and crash.owner and crash.owner != legacy_app.user.id %}
-    <dt>Owner</dt>
-    <dd><a href="{{ path('user_show', {'id': crash.owner}) }}">{{ crash.name ?? crash.owner }}</a></dd>
 {% endif %}
 {% if crash.cmdline %}
         <dt>Command Line</dt>
@@ -600,7 +602,7 @@ body.theme-dark .crash-ai-panel code {
 <div class="alert alert-block alert-info">This crash is not from the main thread.<br>The stack trace displayed below is of the thread that crashed.</div>
 {% endif %}
 
-{% if has_error_string and can_manage %}
+{% if has_error_string and can_view_sensitive %}
 <div id="error-details" class="alert alert-block alert-warning"><i class="icon-cog icon-spin"></i></div>
 {% endif %}
 
@@ -840,20 +842,20 @@ body.theme-dark .crash-ai-panel code {
 
 {% if can_manage %}
 <div class="well clearfix">
-{% if crash.dump_available %}
+{% if can_view_sensitive and crash.dump_available %}
     <a class="btn btn-primary" href="{{ path('download', {'id': crash.id}) }}"><i class="icon-download"></i> Download Minidump</a>
 {% endif %}
-{% if crash.has_console_log %}
+{% if can_view_sensitive and crash.has_console_log %}
     <a class="btn btn-default" href="{{ path('console', {'id': crash.id}) }}"><i class="icon-terminal"></i> View Console</a>
 {% endif %}
-{% if processing_log %}
+{% if can_view_sensitive and processing_log %}
     <a class="btn btn-default" href="{{ path('logs', {'id': crash.id}) }}"><i class="icon-cogs"></i> Processing Log</a>
 {% endif %}
     <div class="pull-right">
-{% if crash.dump_available %}
+{% if can_view_sensitive and crash.dump_available %}
         <a class="btn btn-default" href="{{ path('carburetor', {'id': crash.id}) }}"><i class="icon-eye-open"></i> View Raw</a>
 {% endif %}
-{% if legacy_app.user.admin and crash.processed == 1 %}
+{% if legacy_app.user.admin and crash.processed == 1 and not crash.signature_ignored %}
         <form action="{{ path('reprocess', {id: crash.id, return: legacy_app.request.pathInfo}) }}" method="post" class="button-form">
             <input type="hidden" name="_token" value="{{ csrf_token('reprocess-crash:' ~ crash.id) }}">
             <button type="submit" class="btn btn-default"><i class="icon-refresh"></i> Reprocess</button>
@@ -893,7 +895,7 @@ body.theme-dark .crash-ai-panel code {
 {% endif %}
 
 {% if crash.processed == 1 and crash.failed == 0 %}
-{% if can_manage and (sourcemod_snapshots.plugins or sourcemod_snapshots.extensions) %}
+{% if can_view_sensitive and (sourcemod_snapshots.plugins or sourcemod_snapshots.extensions) %}
 <h2>SourceMod Snapshot</h2>
 <div class="well">
     <button class="btn btn-default btn-sm" type="button" data-toggle="collapse" data-target="#sourcemod-snapshot">
@@ -917,8 +919,8 @@ body.theme-dark .crash-ai-panel code {
     <button type="button" class="btn btn-default btn-sm pull-right" id="copy-stacktrace" style="margin-top: 18px;" title="Copy stack trace" data-toggle="tooltip" data-container="body">
         <i class="icon-copy"></i>
     </button>
-  {% if ai_analysis_enabled and ((legacy_app.user and can_manage) or public_ai_history_count > 0) %}
-    <button type="button" class="btn btn-default btn-sm pull-right" id="ask-ai-details" style="margin-top: 18px; margin-right: 8px;" title="{{ legacy_app.user and can_manage ? 'Ask AI' : 'View AI history' }}" data-toggle="tooltip" data-container="body">
+  {% if ai_analysis_enabled and can_view_sensitive and not crash.signature_ignored %}
+    <button type="button" class="btn btn-default btn-sm pull-right" id="ask-ai-details" style="margin-top: 18px; margin-right: 8px;" title="{{ legacy_app.user and can_view_sensitive ? 'Ask AI' : 'View AI history' }}" data-toggle="tooltip" data-container="body">
         <i class="icon-magic"></i>
     </button>
   {% endif %}
@@ -979,7 +981,7 @@ body.theme-dark .crash-ai-panel code {
         <div class="raw-source-state"></div>
     </div>
 {% endif %}
-{% if ai_analysis_enabled and ((legacy_app.user and can_manage) or public_ai_history_count > 0) %}
+{% if ai_analysis_enabled and can_view_sensitive %}
     <div id="details-ai-analysis-data"
          class="hidden"
          data-url="{{ path('crash_ai_analyze', {'id': crash.id}) }}"
@@ -988,7 +990,7 @@ body.theme-dark .crash-ai-panel code {
          data-token="{{ csrf_token('crash-ai-analyze:' ~ crash.id) }}"
          data-configs="{{ legacy_app.user.ai_configs|default([])|json_encode|e('html_attr') }}"
          data-history-items="{{ ai_history_items|default([])|json_encode|e('html_attr') }}"
-         data-can-ask="{{ legacy_app.user and can_manage ? '1' : '0' }}">
+         data-can-ask="{{ legacy_app.user and can_view_sensitive ? '1' : '0' }}">
     </div>
     <div id="details-ai-analysis-panel" class="crash-ai-panel hidden" aria-hidden="true">
         <div class="raw-source-header">
@@ -999,14 +1001,14 @@ body.theme-dark .crash-ai-panel code {
             <div class="text-muted" style="margin-top: 4px;">Choose a saved AI config, adjust the prompt if needed, and select which crash data to send.</div>
         </div>
         <ul class="nav nav-tabs crash-ai-tabs">
-{% if legacy_app.user and can_manage %}
+{% if legacy_app.user and can_view_sensitive %}
             <li class="active"><a href="#" class="details-ai-tab-link" data-tab="ask">Ask</a></li>
             <li><a href="#" class="details-ai-tab-link" data-tab="history">History</a></li>
 {% else %}
             <li class="active"><a href="#" class="details-ai-tab-link" data-tab="history">History</a></li>
 {% endif %}
         </ul>
-{% if legacy_app.user and can_manage %}
+{% if legacy_app.user and can_view_sensitive %}
         <div class="details-ai-tab-panel details-ai-tab-ask">
             <div class="form-group">
                 <label>AI config</label>
@@ -1035,7 +1037,7 @@ body.theme-dark .crash-ai-panel code {
             <div class="crash-ai-result crash-ai-markdown-output hidden"></div>
         </div>
 {% endif %}
-        <div class="details-ai-tab-panel details-ai-tab-history{% if legacy_app.user and can_manage %} hidden{% endif %}">
+        <div class="details-ai-tab-panel details-ai-tab-history{% if legacy_app.user and can_view_sensitive %} hidden{% endif %}">
             <div class="details-ai-history-status"></div>
             <div class="details-ai-history-list"></div>
         </div>
@@ -1058,6 +1060,36 @@ body.theme-dark .crash-ai-panel code {
 </div>
 {% endif %}
 {% set primary = culprit_candidates[0] %}
+{% if global_ai_analysis %}
+<ul class="nav nav-tabs">
+{% if global_ai_analysis.status == 'ok' %}
+    <li class="active"><a href="#likely-cause-ai" data-toggle="tab">Ai Analysis</a></li>
+    <li><a href="#likely-cause-heuristic" data-toggle="tab">Heuristic Analysis</a></li>
+{% else %}
+    <li><a href="#likely-cause-ai" data-toggle="tab">Ai Analysis</a></li>
+    <li class="active"><a href="#likely-cause-heuristic" data-toggle="tab">Heuristic Analysis</a></li>
+{% endif %}
+</ul>
+<div class="tab-content">
+    <div class="tab-pane{% if global_ai_analysis.status == 'ok' %} active{% endif %}" id="likely-cause-ai">
+        <div class="well">
+{% if global_ai_analysis.status == 'ok' %}
+            <div class="clearfix" style="margin-bottom: 10px;">
+                <div class="pull-right text-muted">{{ global_ai_analysis.provider_label }} &middot; {{ global_ai_analysis.model }}{% if global_ai_analysis.updated_at %} &middot; {{ global_ai_analysis.updated_at|date }}{% endif %}</div>
+            </div>
+            <div class="crash-ai-markdown-output">{{ global_ai_analysis.response_html|raw }}</div>
+{% else %}
+            <div class="alert alert-block alert-warning" style="margin-bottom: 0;">
+                AI analysis is enabled globally, but the latest cached run failed.
+{% if global_ai_analysis.error_summary %}
+                <br>{{ global_ai_analysis.error_summary }}
+{% endif %}
+            </div>
+{% endif %}
+        </div>
+    </div>
+    <div class="tab-pane{% if global_ai_analysis.status != 'ok' %} active{% endif %}" id="likely-cause-heuristic">
+{% endif %}
 <div class="well">
     <div class="row">
         <div class="col-sm-5">
@@ -1123,6 +1155,10 @@ body.theme-dark .crash-ai-panel code {
 {% endfor %}
 </div>
 {% endif %}
+{% if global_ai_analysis %}
+    </div>
+</div>
+{% endif %}
 {% endif %}
 
 {% if can_manage %}
@@ -1176,7 +1212,7 @@ body.theme-dark .crash-ai-panel code {
         </tbody>
     </table>
     <div class="modules-empty text-center muted hidden">No modules match this filter.</div>
-{% if symbol_upload_log is defined and symbol_upload_log|length > 0 %}
+{% if can_view_sensitive and symbol_upload_log is defined and symbol_upload_log|length > 0 %}
     <div class="table-more module-log-toggle">
         <a href="#symbol-upload-log" data-toggle="collapse"><i class="icon-ellipsis-horizontal"></i> Symbol Upload Log</a>
     </div>
@@ -1651,7 +1687,7 @@ body.theme-dark .crash-ai-panel code {
     });
 {% endif %}
 
-{% if ai_analysis_enabled and ((legacy_app.user and can_manage) or public_ai_history_count > 0) %}
+{% if ai_analysis_enabled and can_view_sensitive %}
     var detailsAiDataNode = $('#details-ai-analysis-data');
     var detailsAiPanel = $('#details-ai-analysis-panel');
     if (detailsAiPanel.length) {

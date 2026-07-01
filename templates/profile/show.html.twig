@@ -220,6 +220,21 @@
                 </div>
                 <div class="form-text mb-3">When enabled, other users will only see your avatar and a privacy notice. Admins and you still see the full profile.</div>
 
+                <div class="form-check form-switch mb-3">
+                    <input
+                        id="allow-admin-sensitive-crash-access"
+                        class="form-check-input"
+                        type="checkbox"
+                        name="allow_admin_sensitive_crash_access"
+                        value="1"
+                        {% if user.allowAdminSensitiveCrashAccess %}checked{% endif %}
+                    >
+                    <label class="form-check-label" for="allow-admin-sensitive-crash-access">
+                        Allow admins to view sensitive data in my user-owned crash reports
+                    </label>
+                </div>
+                <div class="form-text mb-3">Disabled by default. This only affects crash reports owned directly by your user account.</div>
+
                 {% if profileVisibilityOptions %}
                     <div class="border rounded p-3 mb-3">
                         <h3 class="h6 mb-2">Identity fields</h3>

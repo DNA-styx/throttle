@@ -348,7 +348,7 @@
                 <div class="mb-3">
                     <label class="form-label" for="ignored-crash-signatures">Ignored crash signatures</label>
                     <textarea id="ignored-crash-signatures" name="ignored_crash_signatures" class="form-control font-monospace" rows="6" placeholder="libsteam_api.so!SteamGameServer_Shutdown + 0x0">{{ uploadSettings.ignored_crash_signatures|join("\n") }}</textarea>
-                    <div class="form-text">One displayed signature per line. Use the same text shown in Top Crashers or Latest Crash Reports. Matching crashes still reach stackwalk, then they are skipped from the remaining follow-up processing path.</div>
+                    <div class="form-text">One displayed signature per line. Use the same text shown in Top Crashers or Latest Crash Reports. Matching crashes still reach stackwalk so the primary details page can be built, then raw dump access, console history, processing logs, Discord webhooks, and other follow-up processing are skipped.</div>
                 </div>
                 <hr class="my-4">
                 <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
@@ -417,6 +417,79 @@
                 <div class="d-flex gap-2">
                     <button type="submit" class="btn btn-primary">Save</button>
                     <button type="submit" name="reset_upload_settings" value="1" class="btn btn-outline-secondary">Reset</button>
+                </div>
+            </form>
+
+            <hr class="my-4">
+
+            <div id="global-ai-analysis" class="d-flex align-items-center justify-content-between gap-3 mb-3">
+                <div>
+                    <h3 class="h6 mb-1">Global AI analysis</h3>
+                    <div class="text-muted">Site-wide AI summary used for the main `Ai Analysis` tab on crash pages and reused by crash signature (`stackhash`).</div>
+                </div>
+                <span class="badge text-bg-secondary">{{ globalAiConfig.enabled ? 'Enabled' : 'Disabled' }}</span>
+            </div>
+
+            {% for message in app.flashes('global_ai_danger') %}
+                <div class="alert alert-danger">{{ message }}</div>
+            {% endfor %}
+            {% for message in app.flashes('global_ai_warning') %}
+                <div class="alert alert-warning">{{ message }}</div>
+            {% endfor %}
+            {% for message in app.flashes('global_ai_success') %}
+                <div class="alert alert-success">{{ message }}</div>
+            {% endfor %}
+
+            <form method="post" action="{{ path('health_global_ai_save') }}">
+                <input type="hidden" name="_token" value="{{ csrf_token('health-global-ai') }}">
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <div class="form-check form-switch mt-4">
+                            <input class="form-check-input" type="checkbox" role="switch" id="global-ai-enabled" name="enabled" value="1"{% if globalAiConfig.enabled %} checked{% endif %}>
+                            <label class="form-check-label" for="global-ai-enabled">Enable global AI</label>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Provider</label>
+                        <select class="form-select" name="provider" required>
+                            {% for providerKey, provider in globalAiProviderTemplates %}
+                                <option value="{{ providerKey }}"{% if globalAiConfig.provider == providerKey %} selected{% endif %}>{{ provider.label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Model</label>
+                        <input class="form-control font-monospace" name="model" value="{{ globalAiConfig.model }}" maxlength="255" placeholder="gpt-5.2" required>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">API key</label>
+                        <input type="password" class="form-control font-monospace" name="api_key" value="" placeholder="{{ globalAiConfig.api_key_mask ?: 'Enter API key' }}">
+                        <div class="form-text">{{ globalAiConfig.api_key_mask ?: 'No saved key yet.' }}</div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Base URL</label>
+                        <input class="form-control font-monospace" name="base_url" value="{{ globalAiConfig.base_url ?: '' }}" maxlength="1024" placeholder="Optional unless using OpenRouter or Custom OpenAI-compatible">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Temperature</label>
+                        <input class="form-control" name="temperature" value="{{ globalAiConfig.temperature is not null ? globalAiConfig.temperature : '' }}" placeholder="0.2">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Max tokens</label>
+                        <input class="form-control" name="max_tokens" value="{{ globalAiConfig.max_tokens is not null ? globalAiConfig.max_tokens : '' }}" placeholder="2048">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Prompt</label>
+                        <textarea class="form-control" name="prompt" rows="8" required>{{ globalAiConfig.prompt }}</textarea>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Extra request JSON</label>
+                        <textarea class="form-control font-monospace" name="extra_options_json" rows="5" placeholder='{"reasoning": {"effort": "high"}}'>{{ globalAiConfig.extra_options_json }}</textarea>
+                    </div>
+                </div>
+                <div class="d-flex gap-2 mt-3">
+                    <button type="submit" class="btn btn-primary">Save global AI</button>
+                    <button type="submit" class="btn btn-outline-secondary" formaction="{{ path('health_global_ai_test') }}">Test current config</button>
                 </div>
             </form>
         </section>

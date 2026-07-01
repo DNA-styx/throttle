@@ -108,7 +108,7 @@ class LegacyCrashController extends AbstractController
     public function carburetor(Request $request, string $id, CrashAiAnalysisManager $crashAiAnalysisManager): Response
     {
         $app = $this->legacyBridgeFactory->createHttp($request);
-        $this->attachAiHistoryContext($app, $id, $crashAiAnalysisManager);
+        $this->attachAiHistoryContext($request, $app, $id, $crashAiAnalysisManager);
 
         return $this->legacyResponse((new \Throttle\Crash())->carburetor($app, $id));
     }
@@ -131,14 +131,16 @@ class LegacyCrashController extends AbstractController
             return $this->json(['status' => 'error', 'reason' => 'Authentication required.'], Response::HTTP_UNAUTHORIZED);
         }
 
-        $ownerId = $this->connection->fetchOne('SELECT owner_id FROM crash WHERE id = ?', [$id]);
-        if ($ownerId === false) {
+        $access = $this->resolveCrashAccess($request, $id);
+        if ($access === null) {
             return $this->json(['status' => 'error', 'reason' => 'Crash not found.'], Response::HTTP_NOT_FOUND);
         }
-
-        $canManage = $app['user']['admin'] || ($ownerId !== null && in_array((int) $ownerId, $app['user']['owner_ids'], true));
-        if (!$canManage) {
+        if (!$access['can_view_sensitive']) {
             return $this->json(['status' => 'error', 'reason' => 'Forbidden.'], Response::HTTP_FORBIDDEN);
+        }
+
+        if ((int) $this->connection->fetchOne('SELECT COALESCE(signature_ignored, 0) FROM crash WHERE id = ?', [$id]) === 1) {
+            return $this->json(['status' => 'error', 'reason' => 'This crash keeps only the primary summary page because its signature is configured as ignored.'], Response::HTTP_GONE);
         }
 
         $action = (string) $request->request->get('action', 'lookup');
@@ -196,14 +198,16 @@ class LegacyCrashController extends AbstractController
             return $this->jsonUtf8(['status' => 'error', 'reason' => 'Authentication required.'], Response::HTTP_UNAUTHORIZED);
         }
 
-        $ownerId = $this->connection->fetchOne('SELECT owner_id FROM crash WHERE id = ?', [$id]);
-        if ($ownerId === false) {
+        $access = $this->resolveCrashAccess($request, $id);
+        if ($access === null) {
             return $this->jsonUtf8(['status' => 'error', 'reason' => 'Crash not found.'], Response::HTTP_NOT_FOUND);
         }
-
-        $canManage = $app['user']['admin'] || ($ownerId !== null && in_array((int) $ownerId, $app['user']['owner_ids'], true));
-        if (!$canManage) {
+        if (!$access['can_view_sensitive']) {
             return $this->jsonUtf8(['status' => 'error', 'reason' => 'Forbidden.'], Response::HTTP_FORBIDDEN);
+        }
+
+        if ((int) $this->connection->fetchOne('SELECT COALESCE(signature_ignored, 0) FROM crash WHERE id = ?', [$id]) === 1) {
+            return $this->jsonUtf8(['status' => 'error', 'reason' => 'This crash keeps only the primary summary page because its signature is configured as ignored.'], Response::HTTP_GONE);
         }
 
         try {
@@ -224,10 +228,8 @@ class LegacyCrashController extends AbstractController
         $aiEnabled = (UploadSettings::load($this->projectDir)['crash_ai_analysis_enabled'] ?? false) === true;
         $app = $this->legacyBridgeFactory->createHttp($request);
         $user = $this->getUser();
-        $ownerId = $this->connection->fetchOne('SELECT owner_id FROM crash WHERE id = ?', [$id]);
-        $canManage = $ownerId !== false
-            && $app['user'] !== null
-            && ($app['user']['admin'] || ($ownerId !== null && in_array((int) $ownerId, $app['user']['owner_ids'], true)));
+        $access = $this->resolveCrashAccess($request, $id);
+        $canManage = $access !== null && $access['can_view_sensitive'];
 
         $referer = (string) $request->headers->get('referer', '');
         $context = str_contains($referer, '/'.$id.'/carburetor') ? 'raw' : 'details';
@@ -267,13 +269,13 @@ class LegacyCrashController extends AbstractController
         }
 
         $app = $this->legacyBridgeFactory->createHttp($request);
-        $ownerId = $this->connection->fetchOne('SELECT owner_id FROM crash WHERE id = ?', [$id]);
-        if ($ownerId === false) {
+        $access = $this->resolveCrashAccess($request, $id);
+        if ($access === null) {
             return $this->jsonUtf8(['status' => 'error', 'reason' => 'Crash not found.'], Response::HTTP_NOT_FOUND);
         }
 
         $user = $this->getUser();
-        $canManage = $app['user'] !== null && ($app['user']['admin'] || ($ownerId !== null && in_array((int) $ownerId, $app['user']['owner_ids'], true)));
+        $canManage = $access['can_view_sensitive'];
 
         try {
             return $this->jsonUtf8([
@@ -428,12 +430,12 @@ class LegacyCrashController extends AbstractController
     public function details(Request $request, string $id, CrashAiAnalysisManager $crashAiAnalysisManager): Response
     {
         $app = $this->legacyBridgeFactory->createHttp($request);
-        $this->attachAiHistoryContext($app, $id, $crashAiAnalysisManager);
+        $this->attachAiHistoryContext($request, $app, $id, $crashAiAnalysisManager);
 
         return $this->legacyResponse((new \Throttle\Crash())->details($app, $id));
     }
 
-    private function attachAiHistoryContext(\Silex\Application $app, string $id, CrashAiAnalysisManager $crashAiAnalysisManager): void
+    private function attachAiHistoryContext(Request $request, \Silex\Application $app, string $id, CrashAiAnalysisManager $crashAiAnalysisManager): void
     {
         $app['crash-ai-history-items'] = [];
 
@@ -441,13 +443,13 @@ class LegacyCrashController extends AbstractController
             return;
         }
 
-        $ownerId = $this->connection->fetchOne('SELECT owner_id FROM crash WHERE id = ?', [$id]);
-        if ($ownerId === false) {
+        $access = $this->resolveCrashAccess($request, $id);
+        if ($access === null) {
             return;
         }
 
         $user = $this->getUser();
-        $canManage = $app['user'] !== null && ($app['user']['admin'] || ($ownerId !== null && in_array((int) $ownerId, $app['user']['owner_ids'], true)));
+        $canManage = $access['can_view_sensitive'];
 
         try {
             $app['crash-ai-history-items'] = $crashAiAnalysisManager->listHistoryForCrash($id, $user instanceof \App\Entity\User ? $user : null, $canManage);
@@ -606,6 +608,49 @@ class LegacyCrashController extends AbstractController
         $value = $request->request->get($key);
 
         return is_string($value) && $value !== '' ? $value : null;
+    }
+
+    /**
+     * @return array{can_manage: bool, can_view_sensitive: bool}|null
+     */
+    private function resolveCrashAccess(Request $request, string $id): ?array
+    {
+        $row = $this->connection->fetchAssociative(
+            'SELECT crash.owner_id, server_owner.kind AS owner_kind, user.allow_admin_sensitive_crash_access
+             FROM crash
+             LEFT JOIN server_owner ON server_owner.id = crash.owner_id
+             LEFT JOIN user ON user.id = crash.owner_id
+             WHERE crash.id = ?',
+            [$id]
+        );
+        if ($row === false) {
+            return null;
+        }
+
+        $app = $this->legacyBridgeFactory->createHttp($request, false);
+        if ($app['user'] === null) {
+            return ['can_manage' => false, 'can_view_sensitive' => false];
+        }
+
+        $ownerId = ($row['owner_id'] ?? null) !== null ? (int) $row['owner_id'] : null;
+        $ownerKind = ($row['owner_kind'] ?? null) !== null ? (string) $row['owner_kind'] : null;
+        $allowAdminSensitive = !empty($row['allow_admin_sensitive_crash_access']);
+
+        if (($app['user']['admin'] ?? false) === true) {
+            $isOwner = $ownerId !== null && in_array($ownerId, $app['user']['owner_ids'], true);
+
+            return [
+                'can_manage' => true,
+                'can_view_sensitive' => $isOwner || $ownerKind !== 'user' || $ownerId === null || $allowAdminSensitive,
+            ];
+        }
+
+        $canManage = $ownerId !== null && in_array($ownerId, $app['user']['owner_ids'], true);
+
+        return [
+            'can_manage' => $canManage,
+            'can_view_sensitive' => $canManage,
+        ];
     }
 
     private function detectServerAddress(Request $request): ?string
