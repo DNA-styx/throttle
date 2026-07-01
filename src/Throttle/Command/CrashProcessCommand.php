@@ -3,6 +3,7 @@
 namespace Throttle\Command;
 
 use App\Legacy\LegacyBridgeFactory;
+use App\Runtime\CrashAiGlobalAnalysisManager;
 use App\Runtime\CrashDiscordWebhookDeliveryManager;
 use App\Runtime\StorageRetentionManager;
 use App\Util\HumanSize;
@@ -17,13 +18,15 @@ class CrashProcessCommand extends Command
     private LegacyBridgeFactory $legacyBridgeFactory;
     private StorageRetentionManager $storageRetentionManager;
     private CrashDiscordWebhookDeliveryManager $crashDiscordWebhookDeliveryManager;
+    private CrashAiGlobalAnalysisManager $crashAiGlobalAnalysisManager;
 
-    public function __construct(LegacyBridgeFactory $legacyBridgeFactory, StorageRetentionManager $storageRetentionManager, CrashDiscordWebhookDeliveryManager $crashDiscordWebhookDeliveryManager)
+    public function __construct(LegacyBridgeFactory $legacyBridgeFactory, StorageRetentionManager $storageRetentionManager, CrashDiscordWebhookDeliveryManager $crashDiscordWebhookDeliveryManager, CrashAiGlobalAnalysisManager $crashAiGlobalAnalysisManager)
     {
         parent::__construct();
         $this->legacyBridgeFactory = $legacyBridgeFactory;
         $this->storageRetentionManager = $storageRetentionManager;
         $this->crashDiscordWebhookDeliveryManager = $crashDiscordWebhookDeliveryManager;
+        $this->crashAiGlobalAnalysisManager = $crashAiGlobalAnalysisManager;
     }
 
     protected function configure(): void
@@ -457,7 +460,9 @@ class CrashProcessCommand extends Command
 
                 $stackhash = $app['db']->executeQuery('SELECT stackhash FROM crash WHERE id = ?', [$id])->fetchColumn(0);
                 $ignoredCandidates = self::buildIgnoredSignatureCandidates($app, $id, $crashThread, $stackhash);
-                if (array_intersect($ignoredCandidates, $ignoredSignatures) !== []) {
+                $matchedIgnoredSignature = self::matchIgnoredSignature($ignoredCandidates, $ignoredSignatures);
+                if ($matchedIgnoredSignature !== null) {
+                    self::markCrashAsIgnoredSignature($app, $id, $matchedIgnoredSignature, $minidump, $logs);
                     $app['redis']->hIncrBy('throttle:stats', 'crashes:ignored-signature', 1);
 
                     return;
@@ -485,6 +490,12 @@ class CrashProcessCommand extends Command
             });
 
             if (is_string($processedCrashId) && $processedCrashId !== '') {
+                try {
+                    $this->crashAiGlobalAnalysisManager->refreshForCrash($processedCrashId);
+                } catch (\Throwable $e) {
+                    $output->writeln('Global AI analysis failed for ' . $processedCrashId . ': ' . $e->getMessage());
+                }
+
                 try {
                     $this->crashDiscordWebhookDeliveryManager->notifyCrashProcessed($processedCrashId);
                 } catch (\Throwable $e) {
@@ -589,6 +600,55 @@ class CrashProcessCommand extends Command
         }
 
         return self::normalizeIgnoredSignatures($candidates);
+    }
+
+    private static function matchIgnoredSignature(array $candidates, array $ignoredSignatures): ?string
+    {
+        foreach ($candidates as $candidate) {
+            if (in_array($candidate, $ignoredSignatures, true)) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static function markCrashAsIgnoredSignature(\Silex\Application $app, string $id, string $matchedSignature, string $minidumpPath, string $stackwalkLogPath): void
+    {
+        $row = $app['db']->executeQuery('SELECT metadata FROM crash WHERE id = ?', [$id])->fetch();
+        $metadata = [];
+        if (is_array($row) && is_string($row['metadata'] ?? null)) {
+            $decoded = json_decode($row['metadata'], true);
+            if (is_array($decoded)) {
+                $metadata = $decoded;
+            }
+        }
+
+        unset($metadata['HasConsoleLog'], $metadata['SourceModPlugins'], $metadata['SourceModExtensions']);
+
+        $app['db']->executeUpdate(
+            'UPDATE crash SET metadata = ?, signature_ignored = 1, signature_ignored_reason = ? WHERE id = ?',
+            [
+                json_encode($metadata, JSON_FORCE_OBJECT | JSON_UNESCAPED_SLASHES),
+                self::truncateSummaryField($matchedSignature, 255),
+                $id,
+            ]
+        );
+
+        $app['db']->executeUpdate('DELETE FROM crash_processing_log WHERE crash = ?', [$id]);
+
+        $basePath = dirname($minidumpPath) . '/' . $id;
+        foreach ([
+            $minidumpPath,
+            $basePath . '.meta.txt',
+            $basePath . '.meta.txt.gz',
+            $stackwalkLogPath,
+            $stackwalkLogPath . '.gz',
+        ] as $path) {
+            if (\Filesystem::pathExists($path)) {
+                \Filesystem::remove($path);
+            }
+        }
     }
 }
 

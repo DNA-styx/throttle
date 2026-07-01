@@ -17,6 +17,17 @@ final class UploadSettings
             'upload_failure_backoff_ttl' => 3600,
             'crash_source_lookup_enabled' => false,
             'crash_ai_analysis_enabled' => false,
+            'global_ai_analysis' => [
+                'enabled' => false,
+                'provider' => '',
+                'model' => '',
+                'api_key_encrypted' => '',
+                'base_url' => null,
+                'temperature' => null,
+                'max_tokens' => null,
+                'prompt' => CrashAiProviderCatalog::DEFAULT_PROMPT,
+                'extra_options_json' => null,
+            ],
             'auth_enable_steam' => true,
             'auth_enable_discord' => true,
             'auth_enable_email_login_link' => true,
@@ -99,6 +110,7 @@ final class UploadSettings
         }
 
         $ignoredCrashSignatures = self::normalizeStringList($settings['ignored_crash_signatures'] ?? []);
+        $globalAi = is_array($settings['global_ai_analysis'] ?? null) ? $settings['global_ai_analysis'] : [];
 
         return [
             'streaming_symbols_enabled' => array_key_exists('streaming_symbols_enabled', $settings)
@@ -119,6 +131,35 @@ final class UploadSettings
             'crash_ai_analysis_enabled' => array_key_exists('crash_ai_analysis_enabled', $settings)
                 ? filter_var($settings['crash_ai_analysis_enabled'], FILTER_VALIDATE_BOOL)
                 : $defaults['crash_ai_analysis_enabled'],
+            'global_ai_analysis' => [
+                'enabled' => array_key_exists('enabled', $globalAi)
+                    ? filter_var($globalAi['enabled'], FILTER_VALIDATE_BOOL)
+                    : $defaults['global_ai_analysis']['enabled'],
+                'provider' => isset($globalAi['provider']) && is_scalar($globalAi['provider'])
+                    ? trim((string) $globalAi['provider'])
+                    : $defaults['global_ai_analysis']['provider'],
+                'model' => isset($globalAi['model']) && is_scalar($globalAi['model'])
+                    ? trim((string) $globalAi['model'])
+                    : $defaults['global_ai_analysis']['model'],
+                'api_key_encrypted' => isset($globalAi['api_key_encrypted']) && is_scalar($globalAi['api_key_encrypted'])
+                    ? (string) $globalAi['api_key_encrypted']
+                    : $defaults['global_ai_analysis']['api_key_encrypted'],
+                'base_url' => isset($globalAi['base_url']) && is_scalar($globalAi['base_url']) && trim((string) $globalAi['base_url']) !== ''
+                    ? mb_substr(trim((string) $globalAi['base_url']), 0, 1024)
+                    : null,
+                'temperature' => isset($globalAi['temperature']) && is_scalar($globalAi['temperature']) && $globalAi['temperature'] !== ''
+                    ? (float) $globalAi['temperature']
+                    : null,
+                'max_tokens' => isset($globalAi['max_tokens']) && is_scalar($globalAi['max_tokens']) && $globalAi['max_tokens'] !== ''
+                    ? (int) $globalAi['max_tokens']
+                    : null,
+                'prompt' => isset($globalAi['prompt']) && is_scalar($globalAi['prompt']) && trim((string) $globalAi['prompt']) !== ''
+                    ? (string) $globalAi['prompt']
+                    : $defaults['global_ai_analysis']['prompt'],
+                'extra_options_json' => isset($globalAi['extra_options_json']) && is_scalar($globalAi['extra_options_json']) && trim((string) $globalAi['extra_options_json']) !== ''
+                    ? (string) $globalAi['extra_options_json']
+                    : null,
+            ],
             'auth_enable_steam' => array_key_exists('auth_enable_steam', $settings)
                 ? filter_var($settings['auth_enable_steam'], FILTER_VALIDATE_BOOL)
                 : $defaults['auth_enable_steam'],

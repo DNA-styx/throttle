@@ -55,22 +55,14 @@ final class CrashAiAnalysisManager
         $packet = (new \Throttle\Crash())->buildAiAnalysisPacket($app, $crashId, $context, $sections);
         $finalPrompt = rtrim($prompt) . "\n\n---\n\nCrash data:\n" . $packet['text'];
 
-        $startedAt = microtime(true);
         try {
-            $result = match ($config['provider']) {
-                CrashAiProviderCatalog::PROVIDER_OPENAI => $this->requestOpenAi($config, $finalPrompt),
-                CrashAiProviderCatalog::PROVIDER_ANTHROPIC => $this->requestAnthropic($config, $finalPrompt),
-                CrashAiProviderCatalog::PROVIDER_GEMINI => $this->requestGemini($config, $finalPrompt),
-                CrashAiProviderCatalog::PROVIDER_OPENROUTER,
-                CrashAiProviderCatalog::PROVIDER_OPENAI_COMPATIBLE => $this->requestOpenAiCompatible($config, $finalPrompt),
-                default => throw new \RuntimeException('Unsupported AI provider.'),
-            };
+            $result = $this->executePrompt($config, $finalPrompt);
         } catch (\Throwable $e) {
-            $this->recordAudit($user->getId(), $crashId, $config, 'failed', (int) round((microtime(true) - $startedAt) * 1000), strlen($finalPrompt), $e->getMessage(), $context);
+            $this->recordAudit($user->getId(), $crashId, $config, 'failed', 0, strlen($finalPrompt), $e->getMessage(), $context);
             throw $e;
         }
 
-        $durationMs = (int) round((microtime(true) - $startedAt) * 1000);
+        $durationMs = (int) ($result['duration_ms'] ?? 0);
         $this->recordAudit($user->getId(), $crashId, $config, 'ok', $durationMs, strlen($finalPrompt), null, $context);
         $historyId = $this->recordHistory($user->getId(), $crashId, $config, $context, $prompt, $sections, $result['text'], $result['usage']);
 
@@ -86,6 +78,26 @@ final class CrashAiAnalysisManager
             'request_sections' => $sections,
             'history_id' => $historyId,
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     * @return array{text: string, usage: array<string, mixed>|null, duration_ms: int}
+     */
+    public function executePrompt(array $config, string $finalPrompt): array
+    {
+        $startedAt = microtime(true);
+        $result = match ($config['provider']) {
+            CrashAiProviderCatalog::PROVIDER_OPENAI => $this->requestOpenAi($config, $finalPrompt),
+            CrashAiProviderCatalog::PROVIDER_ANTHROPIC => $this->requestAnthropic($config, $finalPrompt),
+            CrashAiProviderCatalog::PROVIDER_GEMINI => $this->requestGemini($config, $finalPrompt),
+            CrashAiProviderCatalog::PROVIDER_OPENROUTER,
+            CrashAiProviderCatalog::PROVIDER_OPENAI_COMPATIBLE => $this->requestOpenAiCompatible($config, $finalPrompt),
+            default => throw new \RuntimeException('Unsupported AI provider.'),
+        };
+        $result['duration_ms'] = (int) round((microtime(true) - $startedAt) * 1000);
+
+        return $result;
     }
 
     /**
@@ -462,7 +474,7 @@ final class CrashAiAnalysisManager
      * @param array<string, mixed>|null $usage
      * @return array<string, int>|null
      */
-    private static function summarizeUsage(?array $usage): ?array
+    public static function summarizeUsage(?array $usage): ?array
     {
         if ($usage === null) {
             return null;
