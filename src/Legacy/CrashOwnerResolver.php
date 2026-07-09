@@ -33,9 +33,15 @@ class CrashOwnerResolver
             return [];
         }
 
-        return $user->getServerOwners()
+        $ownerIds = $user->getServerOwners()
             ->map(static fn (ServerOwner $owner): int => $owner->getId())
             ->getValues();
+
+        foreach ($this->loadAcceptedSharedOwners($user->getId()) as $owner) {
+            $ownerIds[] = $owner['id'];
+        }
+
+        return array_values(array_unique($ownerIds));
     }
 
     /**
@@ -47,13 +53,61 @@ class CrashOwnerResolver
             return [];
         }
 
-        return array_map(function (ServerOwner $owner): array {
+        $owners = array_map(function (ServerOwner $owner): array {
             return [
                 'id' => $owner->getId(),
                 'name' => $owner->getName(),
                 'avatar' => $owner instanceof User ? $this->getAvatarForUser($owner) : null,
             ];
         }, $user->getServerOwners()->getValues());
+
+        $seen = [];
+        foreach ($owners as $owner) {
+            $seen[$owner['id']] = true;
+        }
+
+        foreach ($this->loadAcceptedSharedOwners($user->getId()) as $owner) {
+            if (isset($seen[$owner['id']])) {
+                continue;
+            }
+
+            $owners[] = [
+                'id' => $owner['id'],
+                'name' => $owner['name'],
+                'avatar' => $owner['kind'] === 'user'
+                    ? $this->buildAvatarFromSeed($owner['contact_email'] ?? sprintf('user-%d', $owner['id']))
+                    : null,
+            ];
+            $seen[$owner['id']] = true;
+        }
+
+        return $owners;
+    }
+
+    /**
+     * @return array<int, array{id:int,name:string,kind:string|null,contact_email:string|null}>
+     */
+    private function loadAcceptedSharedOwners(int $userId): array
+    {
+        $rows = $this->connection->fetchAllAssociative(
+            'SELECT so.id, so.name, so.kind, email.identifier AS contact_email
+             FROM share sh
+             INNER JOIN server_owner so ON so.id = sh.owner
+             LEFT JOIN user u ON u.id = so.id
+             LEFT JOIN external_account email ON email.id = u.contact_email_id
+             WHERE sh.user = ? AND sh.accepted IS NOT NULL
+             ORDER BY sh.accepted DESC',
+            [$userId]
+        );
+
+        return array_map(static function (array $row): array {
+            return [
+                'id' => (int) $row['id'],
+                'name' => (string) $row['name'],
+                'kind' => isset($row['kind']) ? (string) $row['kind'] : null,
+                'contact_email' => isset($row['contact_email']) && $row['contact_email'] !== null ? (string) $row['contact_email'] : null,
+            ];
+        }, $rows);
     }
 
     public function resolveOwnerIdFromLegacyIdentifier(string $legacyIdentifier): ?int
@@ -73,6 +127,11 @@ class CrashOwnerResolver
             $seed = sprintf('user-%d', $user->getId());
         }
 
+        return $this->buildAvatarFromSeed($seed);
+    }
+
+    private function buildAvatarFromSeed(string $seed): string
+    {
         return sprintf(
             'https://secure.gravatar.com/avatar/%s?s=80&r=any&default=identicon&forcedefault=1',
             md5($seed)

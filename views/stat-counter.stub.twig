@@ -3,12 +3,14 @@ function bindLiveCounter(counter, url, interval) {
   var current = 0;
   var target = 0;
   var animating = false;
+  var initialized = false;
 
   function animateCounter() {
-    if (current === target) {
+    if (current === target && initialized) {
         animating = false;
         return;
     }
+    initialized = true;
 
     var velocity = target - current;
     velocity = velocity / 50;
