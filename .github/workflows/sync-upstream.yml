@@ -53,13 +53,12 @@ jobs:
         if: steps.check.outputs.new_commits == 'true'
         id: merge
         run: |
-          git checkout -B 2026-mysql origin/2026-mysql
-          if git merge origin/2026 --no-commit --no-ff; then
-            echo "conflict=false" >> $GITHUB_OUTPUT
-          else
-            echo "conflict=true" >> $GITHUB_OUTPUT
-            git merge --abort
-          fi
+            git checkout -B 2026-mysql origin/2026-mysql
+            if git merge origin/2026 --no-commit --no-ff; then
+              echo "conflict=false" >> $GITHUB_OUTPUT
+            else
+              echo "conflict=true" >> $GITHUB_OUTPUT
+            fi
 
       - name: Push clean merge
         if: steps.check.outputs.new_commits == 'true' && steps.merge.outputs.conflict == 'false'
@@ -77,7 +76,9 @@ jobs:
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
           BRANCH="mysql-conflict-$(date +%Y%m%d)"
-          git checkout -b $BRANCH origin/2026-mysql
+          git checkout -b $BRANCH
+          git add -A
+          git commit -m "Merge conflict: upstream $(git rev-parse --short upstream/2026) vs 2026-mysql patches"
           git push origin $BRANCH
           HTTP_CODE=$(curl -s -o /tmp/pr_response.json -w "%{http_code}" -X POST \
             -H "Authorization: token $GH_TOKEN" \
