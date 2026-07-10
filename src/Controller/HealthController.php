@@ -321,6 +321,7 @@ class HealthController extends AbstractController
         $projectDir = $kernel->getProjectDir();
         $successfulUploads = 0;
         foreach ($files as $file) {
+            $bytes = (int) ($file->getSize() ?? 0);
             try {
                 $result = SymbolBinaryUpload::storeUploadedBinary($projectDir, $file);
                 UploadFailureBackoff::registerSuccess($projectDir, $result['module'], $result['identifier']);
@@ -365,7 +366,7 @@ class HealthController extends AbstractController
                     'binary',
                     null,
                     null,
-                    (int) ($file->getSize() ?? 0),
+                    $bytes,
                     500,
                     'rejected-manual',
                     $context['summary'] ?? $e->getMessage()
