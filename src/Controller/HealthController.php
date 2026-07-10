@@ -321,7 +321,7 @@ class HealthController extends AbstractController
         $projectDir = $kernel->getProjectDir();
         $successfulUploads = 0;
         foreach ($files as $file) {
-            $originalFileSize = (int) ($file->getSize() ?? 0);
+            $bytes = (int) ($file->getSize() ?? 0);
             try {
                 $result = SymbolBinaryUpload::storeUploadedBinary($projectDir, $file);
                 UploadFailureBackoff::registerSuccess($projectDir, $result['module'], $result['identifier']);
@@ -357,22 +357,22 @@ class HealthController extends AbstractController
                     $result['degraded'] ? 'warning' : 'success',
                     $message
                 );
-    } catch (\Throwable $e) {
-        $context = $e instanceof SymbolToolException ? $e->getContext() : [];
-        $name = $file->getClientOriginalName() ?: $file->getFilename();
-        $this->recordManualUploadAudit(
-            $connection,
-            $request,
-            'binary',
-            null,
-            null,
-            $originalFileSize,
-            500,
-            'rejected-manual',
-            $context['summary'] ?? $e->getMessage()
-        );
-        $this->addHealthFlash('symbols', 'danger', sprintf('Binary upload failed for %s: %s', $name, $context['summary'] ?? $e->getMessage()));
-    }
+            } catch (\Throwable $e) {
+                $context = $e instanceof SymbolToolException ? $e->getContext() : [];
+                $name = $file->getClientOriginalName() ?: $file->getFilename();
+                $this->recordManualUploadAudit(
+                    $connection,
+                    $request,
+                    'binary',
+                    null,
+                    null,
+                    $bytes,
+                    500,
+                    'rejected-manual',
+                    $context['summary'] ?? $e->getMessage()
+                );
+                $this->addHealthFlash('symbols', 'danger', sprintf('Binary upload failed for %s: %s', $name, $context['summary'] ?? $e->getMessage()));
+            }
         }
 
         if ($successfulUploads > 0) {
