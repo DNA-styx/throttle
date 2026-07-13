@@ -1,7 +1,8 @@
 {% extends 'layout.html.twig' %}
 
 {% set logout_to_index = true %}
-{% set dashboard_query = {user: userid, hide_ignored: hide_ignored ? 1 : 0} %}
+{% set hide_ignored = hide_ignored is defined ? hide_ignored : true %}
+{% set dashboard_query = hide_ignored ? {user: userid} : {user: userid, hide_ignored: 0} %}
  
 {% block content %}
 <div class="dashboard-toolbar clearfix">
@@ -22,7 +23,7 @@
     </ul>
 {% endif %}
     <label class="dashboard-filter-toggle pull-right" for="hide-ignored-crashes" data-toggle="tooltip" data-container="body" data-placement="top" title="Hide crashes that match an ignored signature. These reports keep only their primary details page and are usually not actionable.">
-        <input id="hide-ignored-crashes" type="checkbox"{% if hide_ignored %} checked{% endif %}>
+        <input id="hide-ignored-crashes" type="checkbox" autocomplete="off"{% if hide_ignored %} checked{% endif %}>
         <span class="dashboard-filter-switch" aria-hidden="true"></span>
         <span>Hide ignored crashes</span>
     </label>
@@ -113,27 +114,42 @@
 (function () {
     var toggle = document.getElementById('hide-ignored-crashes');
     if (!toggle) return;
+    var url = new URL(window.location.href);
+    var hasExplicitPreference = url.searchParams.has('hide_ignored');
+    var storedPreference = null;
 
-    var saved = null;
     try {
-        saved = window.localStorage.getItem('throttleHideIgnoredCrashes');
+        storedPreference = window.localStorage.getItem('throttleHideIgnoredCrashes');
     } catch (e) {}
 
-    function updatePage(replace) {
-        var url = new URL(window.location.href);
-        url.searchParams.set('hide_ignored', toggle.checked ? '1' : '0');
-        window.location[replace ? 'replace' : 'assign'](url.toString());
-    }
-
-    if (saved !== null && (saved === 'true') !== toggle.checked) {
-        updatePage(true);
-        return;
-    }
-
-    toggle.addEventListener('change', function () {
+    if (hasExplicitPreference) {
+        toggle.checked = url.searchParams.get('hide_ignored') !== '0';
         try {
             window.localStorage.setItem('throttleHideIgnoredCrashes', toggle.checked ? 'true' : 'false');
         } catch (e) {}
+    } else if (storedPreference === 'false') {
+        toggle.checked = false;
+        url.searchParams.set('hide_ignored', '0');
+        window.location.replace(url.toString());
+        return;
+    } else {
+        toggle.checked = true;
+    }
+
+    function updatePage() {
+        var url = new URL(window.location.href);
+        try {
+            window.localStorage.setItem('throttleHideIgnoredCrashes', toggle.checked ? 'true' : 'false');
+        } catch (e) {}
+        if (toggle.checked) {
+            url.searchParams.delete('hide_ignored');
+        } else {
+            url.searchParams.set('hide_ignored', '0');
+        }
+        window.location.assign(url.toString());
+    }
+
+    toggle.addEventListener('change', function () {
         updatePage();
     });
 }());
