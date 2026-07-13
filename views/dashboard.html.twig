@@ -1,26 +1,32 @@
 {% extends 'layout.html.twig' %}
 
 {% set logout_to_index = true %}
+{% set dashboard_query = {user: userid, hide_ignored: hide_ignored ? 1 : 0} %}
  
 {% block content %}
+<div class="dashboard-toolbar clearfix">
 {% if shared|length > 1 or legacy_app.user.admin %}
-<div class="clearfix">
     <ul class="pull-left nav nav-tabs nav-tabs-avatars">
         <li class="{{ userid == null ? 'active' }}" data-toggle="tooltip" data-container="body" data-placement="top" title="All">
-            <a href="{{ path('dashboard') }}" style="text-align: center; padding: 5px 8px; color: #333;">
+            <a href="{{ path('dashboard', dashboard_query) }}" style="text-align: center; padding: 5px 8px; color: #333;">
                 <i class="icon-fixed-width icon-group"></i>
             </a>
         </li>
 {% for user in shared %}
         <li class="{{ userid == user.id ? 'active' }}" data-toggle="tooltip" data-container="body" data-placement="top" title="{{ user.name ?? user.id }}">
-            <a href="{{ path('dashboard', { user: user.id }) }}">
+            <a href="{{ path('dashboard', dashboard_query|merge({ user: user.id })) }}">
                 <img class="column-identicon" alt="{{ user.name ?? user.id }}'s crashes" src="{{ user.avatar ?? 'https://steamcdn-a.akamaihd.net/steamcommunity/public/images/avatars/fe/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_full.jpg' }}" width="20" height="20">
             </a>
         </li>
 {% endfor %}
     </ul>
-</div>
 {% endif %}
+    <label class="dashboard-filter-toggle pull-right" for="hide-ignored-crashes" data-toggle="tooltip" data-container="body" data-placement="top" title="Hide crashes that match an ignored signature. These reports keep only their primary details page and are usually not actionable.">
+        <input id="hide-ignored-crashes" type="checkbox"{% if hide_ignored %} checked{% endif %}>
+        <span class="dashboard-filter-switch" aria-hidden="true"></span>
+        <span>Hide ignored crashes</span>
+    </label>
+</div>
 <div class="well well-tight">
     <table class="table table-striped">
         <thead>
@@ -37,7 +43,7 @@
 {% set last = null %}
 {% for crash in crashes %}
 {% set last = crash.timestamp %}
-            <tr {% if crash.processed == 0 %}class="warning"{% elseif crash.failed == 1 %}class="danger"{% endif %}>
+            <tr{% if crash.processed == 0 %} class="warning"{% elseif crash.failed == 1 %} class="danger"{% endif %}>
                 <td>
 {% if crash.cmdline %}
                     <img class="column-identicon" src="{{ crash.cmdline|identicon }}" width="20" height="20">
@@ -88,10 +94,10 @@
                 <td colspan="6">
                     <ul class="pager">
                         <li class="previous {% if not offset %}disabled{% endif %}">
-                            <a {% if offset %}href="{{ path('dashboard', {user: userid}) }}"{% endif %}><i class="icon-double-angle-left"></i> Newest</a>
+                            <a {% if offset %}href="{{ previous ? path('dashboard', dashboard_query|merge({offset: previous})) : path('dashboard', dashboard_query) }}"{% endif %}><i class="icon-double-angle-left"></i> Newer</a>
                         </li>
                         <li class="next {% if not last %}disabled{% endif %}">
-                            <a {% if last %}href="{{ path('dashboard', {offset: last, user: userid}) }}"{% endif %}>Older <i class="icon-angle-right"></i></a>
+                            <a {% if last %}href="{{ path('dashboard', dashboard_query|merge({offset: last, previous: offset})) }}"{% endif %}>Older <i class="icon-angle-right"></i></a>
                         </li>
                     </ul>
                 </td>
@@ -99,5 +105,38 @@
         </tfoot>
     </table>
 </div>
+{% endblock %}
+
+{% block scripts %}
+{{ parent() }}
+<script>
+(function () {
+    var toggle = document.getElementById('hide-ignored-crashes');
+    if (!toggle) return;
+
+    var saved = null;
+    try {
+        saved = window.localStorage.getItem('throttleHideIgnoredCrashes');
+    } catch (e) {}
+
+    function updatePage(replace) {
+        var url = new URL(window.location.href);
+        url.searchParams.set('hide_ignored', toggle.checked ? '1' : '0');
+        window.location[replace ? 'replace' : 'assign'](url.toString());
+    }
+
+    if (saved !== null && (saved === 'true') !== toggle.checked) {
+        updatePage(true);
+        return;
+    }
+
+    toggle.addEventListener('change', function () {
+        try {
+            window.localStorage.setItem('throttleHideIgnoredCrashes', toggle.checked ? 'true' : 'false');
+        } catch (e) {}
+        updatePage();
+    });
+}());
+</script>
 {% endblock %}
 
