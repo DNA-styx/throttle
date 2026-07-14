@@ -148,6 +148,30 @@ body {
     }
 }
 
+@media (max-width: 767px) {
+    .navbar-shell .navbar-nav .open .dropdown-menu {
+        position: absolute;
+        top: 100%;
+        right: 0;
+        left: auto;
+        float: left;
+        min-width: 160px;
+        margin-top: 2px;
+        background-color: #fff;
+        border: 1px solid rgba(0, 0, 0, .15);
+        border-radius: 4px;
+        box-shadow: 0 6px 12px rgba(0, 0, 0, .175);
+        z-index: 1000;
+    }
+
+    body.theme-dark .navbar-shell .navbar-nav .open .dropdown-menu,
+    body.theme-system .navbar-shell .navbar-nav .open .dropdown-menu {
+        background-color: #202630;
+        border-color: #303948;
+        color: #d7dde6;
+    }
+}
+
 .navbar .nav>li>a>img {
     height: 30px;
     margin-top: -7px;
@@ -1386,5 +1410,82 @@ body.theme-system ::-webkit-scrollbar-thumb:hover {
 body.theme-dark *,
 body.theme-system * {
     scrollbar-color: #526174 #111820;
+}
+
+.dashboard-toolbar {
+    margin: 0;
+}
+
+.dashboard-filter-toggle {
+    align-items: center;
+    background: #f5f5f5;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    color: #555;
+    cursor: pointer;
+    display: inline-flex;
+    font-size: 12px;
+    font-weight: normal;
+    gap: 7px;
+    margin: 0;
+    padding: 6px 9px;
+}
+
+.dashboard-filter-toggle input {
+    height: 1px;
+    margin: -1px;
+    opacity: 0;
+    position: absolute;
+    width: 1px;
+}
+
+.dashboard-filter-switch {
+    background: #aaa;
+    border-radius: 10px;
+    height: 14px;
+    position: relative;
+    transition: background .15s ease;
+    width: 25px;
+}
+
+.dashboard-filter-switch:after {
+    background: #fff;
+    border-radius: 50%;
+    content: '';
+    height: 10px;
+    left: 2px;
+    position: absolute;
+    top: 2px;
+    transition: left .15s ease;
+    width: 10px;
+}
+
+.dashboard-filter-toggle input:checked + .dashboard-filter-switch {
+    background: #337ab7;
+}
+
+.dashboard-filter-toggle input:checked + .dashboard-filter-switch:after {
+    left: 13px;
+}
+
+.dashboard-filter-toggle:hover,
+.dashboard-filter-toggle:focus-within {
+    border-color: #337ab7;
+    color: #286090;
+}
+
+body.theme-dark .dashboard-filter-toggle,
+body.theme-system .dashboard-filter-toggle {
+    background: #202630;
+    border-color: #303948;
+    color: #d7dde6;
+}
+
+body.theme-dark .dashboard-filter-toggle:hover,
+body.theme-dark .dashboard-filter-toggle:focus-within,
+body.theme-system .dashboard-filter-toggle:hover,
+body.theme-system .dashboard-filter-toggle:focus-within {
+    border-color: #4d90c7;
+    color: #f4f8fb;
 }
 
